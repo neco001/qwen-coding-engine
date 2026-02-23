@@ -18,6 +18,11 @@ By offloading heavy architectural planning and raw coding to specialized Qwen mo
 
 ---
 
+## Why the hell Qwen, not Sonnet nor Gemini?
+Simply put: the SRE/Coding capabilities of the customized Qwen models (like Qwen 3.5 Plus and Qwen 2.5 Coder 32B) combined with Alibaba DashScope pricing give you an unmatched ROI. You're getting near-frontier reasoning at a fraction of the cost. This makes it viable to run entire "Expert Squads" (The Lachman Protocol) working on your code simultaneously. No more stressing about hitting a usage limit or spending $50/day.
+
+---
+
 ## The Problem: The "Lazy AI" Ceiling
 Current flagship assistants are great, but they have major flaws when tasked with building real software:
 1. **Context Amnesia:** They forget your core requirements 10 messages into a debug session.
@@ -91,6 +96,24 @@ The engine automatically selects the best model for each task via **Qwen-Turbo M
 
 ---
 
+## Transparent ROI & Financial Shield
+We don't guess if the models are efficient. We track it locally using DuckDB. If a session enters a hallucination loop, the **Financial Circuit Breaker** terminates the process before it drains your wallet.
+
+Here is a real example of an entire afternoon spent orchestrating the 5-role squad to refactor this very engine:
+
+| Model | Prompts | Completions | Total Tokens |
+|---|---|---|---|
+| **qwen-flash** (Scout) | 3,946 | 1,853 | **5,799** |
+| **qwen3-coder-next** (Specialist) | 920 | 2,638 | **3,558** |
+| **qwen3-coder-plus** (Coder)| 1,150 | 1,223 | **2,373** |
+| **qwen3.5-plus** (Strategist) | 952 | 1,254 | **2,206** |
+| **qwq-plus** (Analyst) | 721 | 3,313 | **4,034** |
+| **SUMA Z DZISIAJ** | **7,689** | **10,281** | **~17,970 tokens** |
+
+*Cost for a full SRE squad rewriting your codebase? Fractions of a cent on DashScope. You can pull this exact report anytime via the `qwen_usage_report` tool.*
+
+---
+
 ## Critical: AI Assistant Configuration
 
 To get the most out of the Qwen Engineering Engine, you **MUST** provide your primary assistant (Claude/Antigravity/Cursor) with the operational logic.
@@ -105,7 +128,19 @@ Without this step, your primary assistant will not know when to call the special
 
 ## Installation & Setup
 
-### 1. Local Development Setup (Quick Start)
+### 0. Required Tools
+- **Antigravity, Claude Desktop, Cursor**, etc.
+- **QWEN API KEY** (via Alibaba DashScope).
+- **Brain** - even this tool requires PI (Protein Intelligence). It is as intelligent as your interaction with it... Do not expect wonders after typing "write an email for me".
+
+### 1. Get a DashScope API Key
+*What is DashScope?* It's Alibaba Cloud's native platform for serving Qwen models. By pulling directly from Alibaba, you get the absolute lowest prices and maximum rate limits.
+1. Create an account on Alibaba Cloud / DashScope.
+2. Claim your free tier/trial tokens.
+3. Generate your `DASHSCOPE_API_KEY`.
+*(Alternatively, you can use OpenRouter, but be prepared to pay their markup fees).*
+
+### 2. Local Development Setup (Quick Start)
 Since the package is in development, install it in editable mode:
 
 ```bash
@@ -147,3 +182,13 @@ Add this to your MCP configuration (set `directory` to the project path):
 ---
 **License: MIT**  
 **Build apps, not just conversations.**
+
+---
+### Post Scriptum
+> I'm not gonna pretend this was all hand-written. Actually, the best part about this repo is that from the MVP stage it basically built itself using its own protocol. It’s living proof that the engine actually works.
+> 
+> The real work wasn't the 2 days the AI spent creating the files. It was the months of thinking, failing, and figuring out how to stop these models from hallucinating in the first place.
+> 
+> Honestly, the only files I manually tweaked were the README and the SYSTEM_PROMPT. The Qwen engine + Antigravity wrote the rest, QwQ audited it, and it runs flawlessly out of the box.
+> 
+> Couldn't ask for a better Proof of Concept tbh.
