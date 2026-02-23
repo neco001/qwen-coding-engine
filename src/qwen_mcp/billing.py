@@ -12,9 +12,9 @@ class BillingTracker:
     def __init__(self):
         local_app_data = os.getenv("LOCALAPPDATA")
         if local_app_data:
-            self.cache_dir = Path(local_app_data) / "qwen-mcp"
+            self.cache_dir = Path(local_app_data) / "qwen-coding"
         else:
-            self.cache_dir = Path.home() / ".cache" / "qwen-mcp"
+            self.cache_dir = Path.home() / ".cache" / "qwen-coding"
             
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.cache_dir / "usage_analytics.duckdb"

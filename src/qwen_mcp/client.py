@@ -57,9 +57,9 @@ class ModelRegistry:
         # Force a clean path without nested "Cache" and "qwen-mcp" subfolders
         local_app_data = os.getenv("LOCALAPPDATA")
         if local_app_data:
-            self.cache_dir = Path(local_app_data) / "qwen-mcp"
+            self.cache_dir = Path(local_app_data) / "qwen-coding"
         else:
-            self.cache_dir = Path.home() / ".cache" / "qwen-mcp"
+            self.cache_dir = Path.home() / ".cache" / "qwen-coding"
             
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_file = self.cache_dir / "models_cache.json"

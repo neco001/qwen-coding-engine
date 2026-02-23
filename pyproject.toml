@@ -1,7 +1,7 @@
 [project]
-name = "qwen-mcp"
+name = "qwen-coding-engine"
 version = "0.1.0"
-description = "MCP server for Qwen models via Alibaba DashScope"
+description = "The Lachman Protocol: Qwen Coding Engine - MCP Server"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-qwen-mcp = "qwen_mcp.server:main"
+qwen-coding-engine = "qwen_mcp.server:main"
 
 [build-system]
 requires = ["hatchling"]
