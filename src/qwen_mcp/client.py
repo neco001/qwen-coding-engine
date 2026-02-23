@@ -54,11 +54,14 @@ class ModelRegistry:
     """Dynamic registry for ROI-optimized model selection (JSON Cached)."""
     
     def __init__(self):
-        # Force a clean path without nested "Cache" and "qwen-mcp" subfolders
-        local_app_data = os.getenv("LOCALAPPDATA")
-        if local_app_data:
-            self.cache_dir = Path(local_app_data) / "qwen-coding"
-        else:
+        # Gold Standard Cross-Platform Cache Pathing
+        import sys
+        if sys.platform == "win32":
+            local_app_data = os.getenv("LOCALAPPDATA")
+            self.cache_dir = Path(local_app_data) / "qwen-coding" if local_app_data else Path.home() / "AppData" / "Local" / "qwen-coding"
+        elif sys.platform == "darwin": # macOS
+            self.cache_dir = Path.home() / "Library" / "Caches" / "qwen-coding"
+        else: # Linux and others
             self.cache_dir = Path.home() / ".cache" / "qwen-coding"
             
         self.cache_dir.mkdir(parents=True, exist_ok=True)

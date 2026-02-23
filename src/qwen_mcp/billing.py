@@ -10,10 +10,13 @@ logger = logging.getLogger(__name__)
 
 class BillingTracker:
     def __init__(self):
-        local_app_data = os.getenv("LOCALAPPDATA")
-        if local_app_data:
-            self.cache_dir = Path(local_app_data) / "qwen-coding"
-        else:
+        import sys
+        if sys.platform == "win32":
+            local_app_data = os.getenv("LOCALAPPDATA")
+            self.cache_dir = Path(local_app_data) / "qwen-coding" if local_app_data else Path.home() / "AppData" / "Local" / "qwen-coding"
+        elif sys.platform == "darwin": # macOS
+            self.cache_dir = Path.home() / "Library" / "Caches" / "qwen-coding"
+        else: # Linux
             self.cache_dir = Path.home() / ".cache" / "qwen-coding"
             
         self.cache_dir.mkdir(parents=True, exist_ok=True)
