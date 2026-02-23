@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Minimalist, high-contrast dark background to look great in both light/dark themes -->
+  <rect width="256" height="256" rx="56" fill="#0F172A"/>
+  
+  <!-- Outer Hexagon representing 'Engineering/Protocol' -->
+  <polygon points="128,32 211,80 211,176 128,224 45,176 45,80" fill="none" stroke="#38BDF8" stroke-width="20" stroke-linejoin="round"/>
+  
+  <!-- Stylized 'Q' representing Qwen -->
+  <circle cx="128" cy="122" r="42" fill="none" stroke="#F8FAFC" stroke-width="20"/>
+  <!-- The tail of the 'Q' turning into a connection node -->
+  <line x1="154" y1="154" x2="184" y2="184" stroke="#38BDF8" stroke-width="20" stroke-linecap="round"/>
+  
+  <!-- Core computing chip/dot in the center -->
+  <circle cx="128" cy="122" r="14" fill="#38BDF8"/>
+</svg>
