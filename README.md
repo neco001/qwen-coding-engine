@@ -1,5 +1,11 @@
 # The Lachman Protocol: Qwen Engineering Engine
 
+[![GitHub](https://img.shields.io/badge/GitHub-Repo-181717.svg?style=flat&logo=github)](https://github.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-success.svg)](#)
+[![Open Source Love](https://img.shields.io/badge/Open%20Source-%E2%9D%A4-red.svg)](#)
+
 **Stop building apps by trial and error. Start shipping them by design.**
 
 The Lachman Protocol is not just another "MCP server" for your collection. It is a high-performance engineering engine that turns your AI assistant (Claude, Antigravity, Cursor) into a production-ready software factory. 
