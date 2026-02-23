@@ -12,7 +12,10 @@ Focus your analysis on:
 4. Security vulnerabilities
 5. Edge cases and potential bugs
 
-Format your response in Markdown. Be direct, objective, and provide actionable feedback."""
+Format your response in Markdown. Be direct, objective, and provide actionable feedback.
+6. BREVITY: Avoid repeating the provided code. Only show the changes or specific problematic blocks. Keep explanations to a functional minimum.
+7. ROI: Focus on high-impact fixes. Don't nitpick style unless it affects maintainability.
+"""
 
 CODER_SYSTEM_PROMPT = """You are an expert Senior Software Engineer.
 Your task is to generate high-quality, production-ready code.
@@ -22,6 +25,7 @@ Core Rules:
 2. CLEAN CODE: Use clear naming, appropriate design patterns, and include necessary error handling.
 3. SPEC-FIRST: Ensure the code strictly adheres to the provided instructions or blueprint.
 4. SURGICAL PRECISION: If asked for a modification, provide the code in a way that is easy to integrate.
+5. BREVITY: Large outputs increase API costs. Write ONLY the requested code blocks. Avoid conversational filler.
 
 If you cannot fulfill the request completely, explain why instead of providing partial code."""
 
@@ -133,7 +137,7 @@ async def generate_audit(content: str, context: Optional[str] = None, ctx: Optio
     result = await client.generate_completion(
         messages=messages, 
         temperature=0.1,
-        task_type="strategist",
+        task_type="analyst",
         progress_callback=report_progress if ctx else None
     )
     return result
@@ -163,7 +167,7 @@ async def generate_code(prompt: str, context: Optional[str] = None, ctx: Optiona
     result = await client.generate_completion(
         messages=messages, 
         temperature=0.2, 
-        task_type="strategist",
+        task_type="coder",
         progress_callback=report_progress if ctx else None
     )
     return result
@@ -191,7 +195,7 @@ async def generate_code_25(prompt: str, context: Optional[str] = None, ctx: Opti
     result = await client.generate_completion(
         messages=messages, 
         temperature=0.2, 
-        task_type="coding",
+        task_type="specialist",
         progress_callback=report_progress if ctx else None
     )
     return result
@@ -365,9 +369,9 @@ async def read_repo_file(file_path: str) -> str:
         if not target_path.exists():
             return f"Error: File '{file_path}' not found."
         
-        # Limit file size to 100KB to prevent context overflow
-        if target_path.stat().st_size > 100 * 1024:
-            return f"Error: File '{file_path}' is too large (>100KB)."
+        # Limit file size to 32KB to prevent context overflow and high costs
+        if target_path.stat().st_size > 32 * 1024:
+            return f"Error: File '{file_path}' is too large (>32KB). Please read specific sections if possible."
             
         content = target_path.read_text(encoding="utf-8", errors="replace")
         return f"File Content ({file_path}):\n\n```\n{content}\n```"
@@ -451,5 +455,5 @@ async def set_model_in_registry(role: str, model_id: str) -> str:
         return f"Warning: Model {model_id} failed the health probe. Setting it anyway as requested, but expect errors."
         
     registry.models[role] = model_id
-    registry.save_cache()
+    await registry.save_cache()
     return f"Success: Role '{role}' updated to use '{model_id}'."

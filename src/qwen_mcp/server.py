@@ -36,7 +36,7 @@ async def qwen_coder_25(prompt: str, context: Optional[str] = None, ctx: Context
     return await generate_code_25(prompt, context, ctx)
     
 @mcp.tool()
-async def lp_architect(goal: str, context: Optional[str] = None, ctx: Context = None) -> str:
+async def qwen_architect(goal: str, context: Optional[str] = None, ctx: Context = None) -> str:
     """
     Initiates 'The Lachman Protocol' (LP). 
     The server hires a dynamic expert squad to audit your goal and generate a high-precision Blueprint.

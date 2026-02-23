@@ -6,19 +6,19 @@ The Lachman Protocol is not just another "MCP server" for your collection. It is
 
 By offloading heavy architectural planning and raw coding to specialized Qwen models, you stop the "two steps forward, one step back" dance and start delivering finished applications.
 
-### 🛑 This is NOT for you if:
+### This is NOT for you if:
 - You just want an AI to chat with or write your emails.
 - You enjoy manually copy-pasting code because you don't trust agents.
 - You have an unlimited budget to blow $50/day on "lazy" models that truncate your code with `// ... implementation here`.
 
-### 💚 This IS for you if:
+### This IS for you if:
 - You are a **"Vibecoder"** (building complex apps primarily via AI chat) and you're sick of the "Fix one feature, break two others" cycle.
 - You're a **Senior Developer** who wants to delegate the "dirty work"—auditing logs, writing boilerplate, and complex refactoring—to an agent that won't get tired or impatient.
 - You want the power of **Qwen 3.5 Plus** and **Qwen 2.5 Coder 32B** at a **fraction of the cost** of GPT-4o or Claude 3.5 Opus.
 
 ---
 
-## ❓ The Problem: The "Lazy AI" Ceiling
+## The Problem: The "Lazy AI" Ceiling
 Current flagship assistants are great, but they have major flaws when tasked with building real software:
 1. **Context Amnesia:** They forget your core requirements 10 messages into a debug session.
 2. **The Placeholder Trap:** They get lazy and give you snippets instead of functional files.
@@ -28,7 +28,7 @@ Current flagship assistants are great, but they have major flaws when tasked wit
 
 ---
 
-## 🏛️ The Core: The Lachman Protocol (LP)
+## The Core: The Lachman Protocol (LP)
 When you initiate a project, the engine doesn't just "guess." It enters a multi-stage **Self-Healing Loop**:
 
 1. **Discovery:** Qwen hires a virtual "Expert Squad" tailored to your specific goal (e.g., Security Auditor, Backend Engineer, UX Strategist).
@@ -40,11 +40,11 @@ You get a surgical Technical Roadmap. Your primary assistant (Claude/Antigravity
 
 ---
 
-## 🔥 Scenario: From Idea to Reality
+## Scenario: From Idea to Reality
 
 ### Phase 1: Planning without Hallucination
 Instead of saying: *"Build me a CRM"*, you tell your assistant:
-> "Plan a CRM with FastAPI and Postgres. **Call `lp_architect`** to generate the blueprint."
+> "Plan a CRM with FastAPI and Postgres. **Call `qwen_architect`** to generate the blueprint."
 
 **Result:** You get a structured Roadmap + Security Audit + Risk Assessment.
 
@@ -63,36 +63,54 @@ Don't let your main assistant guess the syntax or "hallucinate" the logic.
 
 ---
 
-## 🛠️ Performance & Strategy
+## Performance & Strategy
 
-### 🧠 We don't need Ralph
+### We don't need Ralph
 There is a popular method called **The Ralph Loop** (fresh context for every iteration). While interesting for naive agents, the Qwen Engineering Engine is designed differently. 
 
 Because we use **The Lachman Protocol** (Spec -> Code -> Audit), we rely on **State & Blueprint Persistence** rather than a fresh start. We can tell Ralph to stay in Springfield—we have an Architect in the basement.
 
 ---
 
-## 🛠️ The Arsenal (Included Tools)
+## The Arsenal (Dynamic 5-Role Registry)
 
-| Tool | Role |
-| :--- | :--- |
-| `lp_architect` | **The Architect**: Multi-expert planner with a self-healing loop for blueprints. |
-| `qwen_coder` | **The Senior Dev**: Writes long-form, functional code (Qwen 3.5 Plus). |
-| `qwen_coder_25` | **The Specialist**: Tackles complex logic using Qwen 2.5 Coder 32B. |
-| `qwen_audit` | **The SRE**: Audits logs and code to find and fix critical bugs. |
-| `qwen_read_file` | **The Context Loader**: Securely reads files from your workspace for context. |
-| `qwen_list_files` | **The Explorer**: Scans your project structure. |
+The engine automatically selects the best model for each task via **Qwen-Turbo Meta-Analysis** to ensure maximum ROI and capability.
+
+| Category | Tool | Role/Role | Default Model (SOTA) |
+| :--- | :--- | :--- | :--- |
+| **Logic** | `qwen_architect` | **Strategist**: Expert planner & JSON architect. | `qwen3.5-plus` |
+| **Code** | `qwen_coder` | **Coder**: Writing production-grade complete files. | `qwen3-coder-plus` |
+| **Code** | `qwen_coder_25` | **Specialist**: Expert in complex logic & Refactoring. | `qwen3-coder-next` |
+| **SRE** | `qwen_audit` | **Analyst**: Reason-heavy SRE/Debugging (QwQ). | `qwq-plus` |
+| **Data** | `qwen_read_file` | **Scout**: Context discovery and fast summaries. | `qwen-flash` |
+| **Data** | `qwen_list_files` | **Explorer**: Map project structure. | `qwen-flash` |
+| **Admin** | `qwen_usage_report`| **Billing**: Token/Cost report from DuckDB. | N/A |
+| **Logic** | `qwen_refresh_models`| **Intelligence**: Trigger meta-analysis update. | `qwen-turbo` |
+| **Logic** | `qwen_set_model` | **Manual**: Override a role assignment. | User Defined |
+| **Logic** | `qwen_list_available_models`| **Discovery**: List all models from your API key. | N/A |
 
 ---
 
-## 📦 Installation & Setup
+## Critical: AI Assistant Configuration
+
+To get the most out of the Qwen Engineering Engine, you **MUST** provide your primary assistant (Claude/Antigravity/Cursor) with the operational logic.
+
+1.  Open the file `LP_SYSTEM_PROMPT.md` in this repository.
+2.  Copy its entire content.
+3.  Paste it into your **Custom Instructions**, **.cursorrules**, or **Project Rules**.
+
+Without this step, your primary assistant will not know when to call the specialized Qwen experts, and you'll lose out on the orchestrated ROI.
+
+---
+
+## Installation & Setup
 
 ### 1. Local Development Setup (Quick Start)
 Since the package is in development, install it in editable mode:
 
 ```bash
 git clone <this-repo-url>
-cd qwen-mcp
+cd qwen-coding-engine
 uv pip install -e .
 ```
 
@@ -105,13 +123,18 @@ export DASHSCOPE_API_KEY=your_key_here
 ```
 
 ### 3. Google Antigravity / Claude Desktop
-Add this to your MCP configuration (set `cwd` to the project directory):
+Add this to your MCP configuration (set `directory` to the project path):
 ```json
 {
   "mcpServers": {
-    "qwen-mcp": {
+    "qwen-coding": {
       "command": "uv",
-      "args": ["run", "qwen-mcp"],
+      "args": [
+        "--directory",
+        "C:\\path\\to\\qwen-coding-engine",
+        "run",
+        "qwen-coding-engine"
+      ],
       "env": {
         "DASHSCOPE_API_KEY": "your_api_key_here",
         "LP_MAX_RETRIES": "3"
@@ -122,5 +145,5 @@ Add this to your MCP configuration (set `cwd` to the project directory):
 ```
 
 ---
-**License: MIT**
+**License: MIT**  
 **Build apps, not just conversations.**
