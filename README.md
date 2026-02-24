@@ -10,7 +10,7 @@
 
 By offloading heavy architectural planning and raw coding to specialized Qwen models, you stop the "two steps forward, one step back" dance and start delivering finished applications.
 
-**[🚀 See the Lachman Protocol Storyboard in action!](./docs/EXAMPLE.md)**
+**[ See the Lachman Protocol Storyboard in action!](./docs/EXAMPLE.md)**
 
 ### This is NOT for you if:
 - You just want an AI to chat with or write your emails.
@@ -49,7 +49,7 @@ When you initiate a project, the engine doesn't just "guess." It enters a multi-
 ### The result? 
 You get a surgical Technical Roadmap. Your primary assistant (Claude/Antigravity) acts as the **Commander**, while the Qwen Engine handles the **Heavy Logistics**.
 
-### ⛓️ The Shackle: TDD-First implementation
+### The Shackle: TDD-First implementation
 A blueprint is only as good as its verification. The Lachman Protocol is most effective when combined with a **TDD-First Workflow**:
 - **Faza RED**: Write a failing test for the new feature BEFORE calling the Coder.
 - **Faza GREEN**: Use `qwen_coder` to satisfy the failing test.
@@ -116,58 +116,58 @@ The Qwen Engineering Engine works because it doesn't treat coding as a "text com
 
 ```mermaid
 graph TD
-    A[User Goal / Task] --> B{Lachman Protocol}
-    
-    subgraph "Phase 1: Architecting (Strategist)"
-    B --> C[1. Discovery: Hire Specialist Squad]
-    C --> D[2. Expert Debate & Drafting Blueprint]
-    D --> E[3. Self-Verification Loop]
-    E -- "Degeneration Detected" --> D
-    E -- "Validated" --> F[Final Technical Blueprint]
-    end
+  A[User Goal / Task] --> B{Lachman Protocol}
+  
+  subgraph "Phase 1: Architecting (Strategist)"
+  B --> C[1. Discovery: Hire Specialist Squad]
+  C --> D[2. Expert Debate & Drafting Blueprint]
+  D --> E[3. Self-Verification Loop]
+  E -- "Degeneration Detected" --> D
+  E -- "Validated" --> F[Final Technical Blueprint]
+  end
 
-    subgraph "Phase 2: Execution (Coder)"
-    F --> G[Step-by-Step Implementation]
-    G --> H{Complexity Check}
-    H -- "Standard" --> I[qwen3-coder-plus]
-    H -- "High Logic / Specialist" --> J[qwen-2.5-coder-32b]
-    I --> K[Complete, No-Placeholder Code]
-    J --> K
-    end
+  subgraph "Phase 2: Execution (Coder)"
+  F --> G[Step-by-Step Implementation]
+  G --> H{Complexity Check}
+  H -- "Standard" --> I[qwen3-coder-plus]
+  H -- "High Logic / Specialist" --> J[qwen-2.5-coder-32b]
+  I --> K[Complete, No-Placeholder Code]
+  J --> K
+  end
 
-    subgraph "Phase 3: Quality Control (Auditor)"
-    K --> L[generate_audit / QwQ Reasoning]
-    L --> M[RCA & Security Audit]
-    M -- "Failure Found" --> G
-    M -- "Success" --> N[Production Ready Asset]
-    end
+  subgraph "Phase 3: Quality Control (Auditor)"
+  K --> L[generate_audit / QwQ Reasoning]
+  L --> M[RCA & Security Audit]
+  M -- "Failure Found" --> G
+  M -- "Success" --> N[Production Ready Asset]
+  end
 
-    style B fill:#f96,stroke:#333,stroke-width:2px
-    style F fill:#00d2ff,stroke:#333,stroke-width:2px
-    style N fill:#00c853,stroke:#333,stroke-width:2px
+  style B fill:#f96,stroke:#333,stroke-width:2px
+  style F fill:#00d2ff,stroke:#333,stroke-width:2px
+  style N fill:#00c853,stroke:#333,stroke-width:2px
 ```
 
-### 🏛️ The Architect (The Strategist)
+### The Architect (The Strategist)
 **Logic:** `qwen_architect` / **Model:** `qwen3.5-plus`
 The Architect doesn't just write a list of steps. It initiates the **Lachman Protocol v2.5**:
-1.  **Discovery Phase:** Qwen analyzes your goal and "hires" 1-3 virtual experts (e.g., *Senior Security Lead*, *Scalability Architect*).
-2.  **Expert Swarm:** These experts debate the best implementation path using the **80/20 Pareto Principle**—designing the **CORE 80% (Functional Completeness)** while explicitly rejecting "gold plating" (over-engineering).
-3.  **Self-Healing Circuit:** Before you see the result, a separate **Verifier** model audits the blueprint for "degeneration" (placeholders, logical gaps). If it fails, the engine autonomously retries to fix the design.
-*   **Output:** A high-precision JSON Blueprint with a TDD-first roadmap and "Clean Slate" instructions (what to delete).
+1. **Discovery Phase:** Qwen analyzes your goal and "hires" 1-3 virtual experts (e.g., *Senior Security Lead*, *Scalability Architect*).
+2. **Expert Swarm:** These experts debate the best implementation path using the **80/20 Pareto Principle**—designing the **CORE 80% (Functional Completeness)** while explicitly rejecting "gold plating" (over-engineering).
+3. **Self-Healing Circuit:** Before you see the result, a separate **Verifier** model audits the blueprint for "degeneration" (placeholders, logical gaps). If it fails, the engine autonomously retries to fix the design.
+*  **Output:** A high-precision JSON Blueprint with a TDD-first roadmap and "Clean Slate" instructions (what to delete).
 
-### 🛠️ The Coder (The Implementation)
+### The Coder (The Implementation)
 **Logic:** `qwen_coder` / `qwen_coder_25` / **Model:** `qwen3-coder-plus` or `qwen3-coder-next`
 The Coder is bound by strict **Surgicial Precision Rules**:
--   **No Placeholders:** A absolute ban on `// ... rest of code`. Every file is generated in full or as a clean, integrable block.
--   **Context Awareness:** It consumes the Architect's blueprint to stay aligned with the big picture.
--   **Model Switching:** For simple boilerplate, it uses standard coder models. For complex algorithms or heavy refactoring, it escalation to `qwen-2.5-coder-32b` (Coder-Next) for maximum logic density.
+-  **No Placeholders:** A absolute ban on `// ... rest of code`. Every file is generated in full or as a clean, integrable block.
+-  **Context Awareness:** It consumes the Architect's blueprint to stay aligned with the big picture.
+-  **Model Switching:** For simple boilerplate, it uses standard coder models. For complex algorithms or heavy refactoring, it escalation to `qwen-2.5-coder-32b` (Coder-Next) for maximum logic density.
 
-### 🔍 The Auditor (The Analyst)
+### The Auditor (The Analyst)
 **Logic:** `qwen_audit` / **Model:** `qwq-plus`
 The Auditor uses **heavy reasoning (QwQ)** to act as a Senior SRE (Site Reliability Engineer):
--   **Root Cause Analysis (RCA):** Feed it terminal logs, and it will find the exact line causing the memory leak or dependency conflict.
--   **Brevity & ROI:** It doesn't nitpick code style. It focuses on high-impact fixes, security vulnerabilities, and edge cases that simpler models miss.
--   **Zero Fluff:** You get actionable feedback and specific code blocks to fix, nothing more.
+-  **Root Cause Analysis (RCA):** Feed it terminal logs, and it will find the exact line causing the memory leak or dependency conflict.
+-  **Brevity & ROI:** It doesn't nitpick code style. It focuses on high-impact fixes, security vulnerabilities, and edge cases that simpler models miss.
+-  **Zero Fluff:** You get actionable feedback and specific code blocks to fix, nothing more.
 
 ---
 
@@ -193,14 +193,14 @@ Here is a real example of an entire afternoon spent orchestrating the 5-role squ
 
 To get the most out of the Qwen Engineering Engine, you **MUST** provide your primary assistant (Claude/Antigravity/Cursor) with the operational logic and follow the mandatory quality protocols.
 
-1.  **System Instructions**: Copy the contents of **[LP_SYSTEM_PROMPT.md](./docs/LP_SYSTEM_PROMPT.md)** into your **Custom Instructions**, **.cursorrules**, or **Project Rules**.
-2.  **Quality Protocol**: Study and follow the **[TDD Shackle Guide](./docs/TDD.md)**. 
-3.  **Repair Protocol**: Use the **[Audit Triad](./docs/REPAIR_PROTOCOL.md)** for debugging and fixing regressions.
-4.  **Workflows**: The project includes specialized **[Operational Workflows](./docs/workflows/)** (Slash Commands) to automate common tasks.
+1. **System Instructions**: Copy the contents of **[LP_SYSTEM_PROMPT.md](./docs/LP_SYSTEM_PROMPT.md)** into your **Custom Instructions**, **.cursorrules**, or **Project Rules**.
+2. **Quality Protocol**: Study and follow the **[TDD Shackle Guide](./docs/TDD.md)**. 
+3. **Repair Protocol**: Use the **[Audit Triad](./docs/REPAIR_PROTOCOL.md)** for debugging and fixing regressions.
+4. **Workflows**: The project includes specialized **[Operational Workflows](./docs/workflows/)** (Slash Commands) to automate common tasks.
 
 ---
 
-## 🚀 Advanced Operational Workflows
+## Advanced Operational Workflows
 
 For agents supporting slash commands or `.md` workflows, you can trigger these specialized protocols:
 
@@ -213,10 +213,10 @@ Each workflow is designed to reduce agent "laziness" and enforce production-grad
 
 Without these steps, your primary assistant will not know how to orchestrate the specialized Qwen experts, and you risk falling into the "Hallucination Trap".
 
-### 📋 Continuous Improvement: Backlog Protocol
+### Continuous Improvement: Backlog Protocol
 The Lachman Protocol doesn't stop at deployment. For heavy projects, we use a mandatory **Backlog Workflow**:
--   Any insight or secondary task found during a `qwen_audit` is immediately registered via the **[Backlog Protocol](./.agent/workflows/TBLG_To_backlog.md)**.
--   This ensures your project has a "memory" beyond the current chat context.
+-  Any insight or secondary task found during a `qwen_audit` is immediately registered via the **[Backlog Protocol](./.agent/workflows/TBLG_To_backlog.md)**.
+-  This ensures your project has a "memory" beyond the current chat context.
 
 ---
 
@@ -257,36 +257,36 @@ Don't waste time manually editing config files. Just copy the prompt from **[INS
 *Manual configuration block for reference:*
 ```json
 {
-  "mcpServers": {
-    "qwen-coding": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "C:\\absolute\\path\\to\\qwen-coding-engine",
-        "run",
-        "qwen-coding-engine"
-      ],
-      "env": {
-        "DASHSCOPE_API_KEY": "your_api_key",
-        "LP_MAX_RETRIES": "3"
-      }
-    }
+ "mcpServers": {
+  "qwen-coding": {
+   "command": "uv",
+   "args": [
+    "--directory",
+    "C:\\absolute\\path\\to\\qwen-coding-engine",
+    "run",
+    "qwen-coding-engine"
+   ],
+   "env": {
+    "DASHSCOPE_API_KEY": "your_api_key",
+    "LP_MAX_RETRIES": "3"
+   }
   }
+ }
 }
 ```
 
 ---
-**License: MIT**  
+**License: MIT** 
 **Build apps, not just conversations.**
 
 ---
 
-### 🛡️ Why "Lachman Protocol"?
+### Why "Lachman Protocol"?
 You might notice the name – yes, it's my surname.
 
 Before you think this is about a massive ego: the story is much simpler. I had the core idea at 2 AM. I needed to name the file something unique so it wouldn't get lost in a sea of hundreds of other "temp_logic_v2" files. My brain was too tired to think of a fancy brand name, so "Lachman Project" was the first thing that came to mind.
 
-And so it stayed. My flattered ego says hello! 😁
+And so it stayed. My flattered ego says hello! 
 
 ---
 
