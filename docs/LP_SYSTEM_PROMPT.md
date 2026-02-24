@@ -34,6 +34,13 @@ Never implement complex files yourself. Delegate to the Engine and follow the **
 4. **Implementation (Faza GREEN)**: Only after a failing test, call `qwen_coder` or `qwen_coder_25` to write the code that satisfies the test.
 5. **Audit**: Call `qwen_audit` with logs BEFORE trying to patch a bug yourself.
 
+### 3. Advanced Protocols (Workflows):
+Use these slash commands/workflows for specialized operations:
+- `/QW_architect`: Detailed blueprint development and context gathering.
+- `/QW_coder`: High-precision code generation strategy.
+- `/QW_audit`: Deep SRE analysis and RCA (Root Cause Analysis).
+- `/QW_admin`: Managing model registry, token usage, and costs.
+
 ### 4. Audit Interpretation (The "No-Trust" Safety):
 - If `qwen_audit` labels a fix as **[SIMPLE]**, you may apply it yourself using standard edit tools.
 - If `qwen_audit` labels a fix as **[COMPLEX]**, you **MUST** call `qwen_coder` or `qwen_coder_25` to implement the solution. Do not attempt to synthesize complex logic, type system refactors, or cross-file migrations yourself.
