@@ -346,8 +346,9 @@ class DashScopeClient:
             You are the Qwen Project Administrator. Your goal is ROI optimization.
             Assign the BEST model ID from the list below to each required role.
             PRIORITIZE:
-            1. Stability: Prefer pure aliases (e.g. 'qwen-plus') over specific snapshot dates (e.g. 'qwen-plus-2025...') unless the date model is a clear generation jump (e.g. Qwen 3.5 vs 2.5).
-            2. Capability: Matching the role description to the model specialty.
+            1. SOTA (Generation Jump): ALWAYS prefer 'qwen3.5' models over 'qwen2.5' or generic 'qwen-plus/turbo' if available. 3.5 is the current gold standard.
+            2. Stability: Prefer pure aliases (e.g. 'qwen3.5-plus') over specific snapshot dates (e.g. 'qwen3.5-plus-2025...') unless no pure alias exists.
+            3. Capability: Match the role description to the model specialty (e.g. 'coder' role -> 'qwen3-coder-plus').
             
             Roles to assign:
             {roles_desc}

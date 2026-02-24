@@ -14,11 +14,11 @@ class ModelRegistry:
     """Dynamic registry for ROI-optimized model selection (JSON Cached)."""
 
     ROLE_PROMPTS = {
-        "strategist": "Expert in high-level planning and JSON architecture. (Priority: qwen3.5-plus, qwen-plus)",
-        "coder": "Production-grade code generation, long outputs. (Priority: qwen3-coder-plus, qwen-coder-plus)",
-        "specialist": "Complex logic, algorithms, and refactoring specialist. (Priority: qwen3-coder-next, qwen2.5-coder-32b)",
-        "analyst": "Deep reasoning, SRE audit, finding hidden bugs. (Priority: qwq-plus, qwq-32b)",
-        "scout": "Fast, cheap, discovery, and summarization. (Priority: qwen-turbo, qwen-flash)",
+        "strategist": "Expert in high-level planning. MANDATORY PRIORITY: qwen3.5-plus. Use qwen-plus ONLY if 3.5 is missing.",
+        "coder": "Production-grade code generation. MANDATORY PRIORITY: qwen3-coder-plus.",
+        "specialist": "Complex logic & refactoring. MANDATORY PRIORITY: qwen3-coder-next. Fallback: qwen2.5-coder-32b.",
+        "analyst": "Deep reasoning, SRE audit. MANDATORY PRIORITY: qwq-plus. Fallback: qwq-32b.",
+        "scout": "Fast, cheap discovery. Priority: qwen-flash, qwen-turbo.",
     }
 
     def __init__(self):
@@ -34,11 +34,11 @@ class ModelRegistry:
         self._lock = asyncio.Lock()
 
         self.models = {
-            "strategist": "qwen-plus",
-            "coder": "qwen2.5-coder-32b-instruct",
-            "specialist": "qwen2.5-coder-32b-instruct",
-            "analyst": "qwen-plus",
-            "scout": "qwen-turbo",
+            "strategist": "qwen3.5-plus",
+            "coder": "qwen3-coder-plus",
+            "specialist": "qwen3-coder-next",
+            "analyst": "qwq-plus",
+            "scout": "qwen-flash",
         }
         self.last_updated = datetime.min
         self.load_cache()

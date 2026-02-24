@@ -1,7 +1,10 @@
+import logging
 from typing import Optional
 from mcp.server.fastmcp import Context
 from qwen_mcp.api import DashScopeClient
 from qwen_mcp.registry import registry
+
+logger = logging.getLogger(__name__)
 
 AUDIT_SYSTEM_PROMPT = """You are an expert Senior DevOps and Site Reliability Engineer.
 Your task is to analyze code snippets or terminal error logs and provide a comprehensive debugging and architecture review.
@@ -16,6 +19,10 @@ Focus your analysis on:
 Format your response in Markdown. Be direct, objective, and provide actionable feedback.
 6. BREVITY: Avoid repeating the provided code. Only show the changes or specific problematic blocks. Keep explanations to a functional minimum.
 7. ROI: Focus on high-impact fixes. Don't nitpick style unless it affects maintainability.
+8. IMPLEMENTATION STRATEGY: For every fix, prioritize the 'Smallest Change' principle. 
+   - Label localized, obvious fixes as **[SIMPLE]**. Provide a diff.
+   - Label architectural, multi-file, or high-risk logic changes as **[COMPLEX]**. 
+   - FOR [COMPLEX]: Provide the technical strategy but EXPLICITLY INSTRUCT the assistant to call `qwen_coder` or `qwen_coder_25` for the actual implementation. Never allow the assistant to 'wing it' with complex logic.
 """
 
 CODER_SYSTEM_PROMPT = """You are an expert Senior Software Engineer.
@@ -48,12 +55,12 @@ Your output must be a JSON object:
 
 Output ONLY the JSON object. Be sharp and strategic."""
 
-LP_ARCHITECT_PROMPT = """You are the 'Lachman Architect Oracle'. 
-You are synthesizing an expert swarm debate (Squad: {squad}) to create a perfect project blueprint.
+LP_ARCHITECT_PROMPT = """You are the 'Lachman Architect (Strategic Engineering Pragmatist)'. 
+You are synthesizing an expert swarm debate (Squad: {squad}) to create a pragmatic, high-ROI project blueprint.
 
 Your output must be a JSON object with this exact structure:
 {{
-  "manifest": "Technical recursion of the goal Focus on the CORE 80% (MVP).",
+  "manifest": "Technical recursion of the goal. Focus on the CORE 80% (Functional Completeness).",
   "audit_verdict": "Critical vetos or approvals from the expert swarm (QA, Security, ROI)",
   "roadmap": ["Step 1: TDD Foundation", "Step 2: ..."],
   "clean_slate": "Legacy components that must be deleted or refactored",
@@ -62,17 +69,22 @@ Your output must be a JSON object with this exact structure:
 }}
 
 Mantra: Code without a blueprint is noise. Enforce the Lachman Protocol (Clean Slate, No Placeholders, Spec-First).
-CRITICAL LIMIT: Apply the 80/20 Rule (Pareto Principle). Design ONLY the core 80% that brings immediate ROI. Do not over-engineer. Push all 'nice-to-have' or 100% perfection ideas into 'optional_features'."""
+CRITICAL LIMIT: Apply the 80/20 Rule (Pareto Principle). Design ONLY the core 80% that brings immediate ROI. Do not over-engineer. 
+IF THE TASK IS DELETION/CLEANUP: Verify via grep/ls AND ensure no critical dependencies remain. This is enough for CORE 80% (Functional Completeness).
+Push all 'nice-to-have' or 100% perfection ideas into 'optional_features'."""
 
-LP_VERIFIER_PROMPT = """You are the 'Lachman Stability Verifier'.
-Your task is to audit the generated Blueprint for potential 'Degeneration'.
+LP_VERIFIER_PROMPT = """You are the 'Lachman Stability Verifier (Strategic Engineering Pragmatist)'.
+Your task is to audit the generated Blueprint for 'Degeneration' while maintaining a SHARP ROI FOCUS.
 
 Checklist:
-1. ROADMAP: Are there contradictory steps? Is the order logical (TDD-first)?
-2. COVERAGE: Did the architect miss any requirements from the original goal or context?
-3. PLACEHOLDERS: Are there any "ToDo", "Implement here", or "//..." placeholders? (STRICT BAN)
-4. CLEAN SLATE: Is the removal of legacy logic explicitly defined or just mentioned?
-5. 80% PERFECTION: Is the architect over-engineering? Reject "Gold Plating". If the blueprint is 80% functional and safe, ACCEPT IT. Demanding 100% enterprise perfection is a FAILURE.
+1. ROADMAP: Are there contradictory steps? Is the order logical (TDD-first where applicable)?
+2. COVERAGE: Did the architect miss any CORE requirements?
+3. PLACEHOLDERS: Are there any "ToDo", "Implement here", or "//..." placeholders? (STRICT BAN - this is the only hard reject)
+4. CLEAN SLATE: Is the removal of legacy logic defined?
+5. PRAGMATISM (80/20 RULE): Is the architect over-engineering? 
+   - REJECT "Gold Plating" (e.g. demanding full mocks for a simple file deletion).
+   - If the blueprint is CORE 80% (Functional Completeness) and safe, ACCEPT IT. 
+   - Demanding 100% enterprise perfection in a rapid dev session is a FAILURE of the Verifier.
 
 Output a JSON object:
 {
@@ -81,7 +93,7 @@ Output a JSON object:
   "structural_fix": "Specific instruction to fix the blueprint if is_valid is false"
 }
 
-Output ONLY the JSON object. Be the most critical SRE/Architect alive."""
+Output ONLY the JSON object. Be a Strategic Engineering Pragmatist. ROI is your North Star."""
 
 
 def extract_json_from_text(text: str) -> Optional[dict]:
@@ -266,16 +278,26 @@ async def generate_lp_blueprint(
         messages=discovery_messages, temperature=0.1, task_type="discovery"
     )
 
-    try:
-        discovery = extract_json_from_text(discovery_json_raw)
-    except Exception:
+    discovery = extract_json_from_text(discovery_json_raw)
+    if not discovery:
+        logger.warning(
+            "Discovery failed to return JSON. Using emergency fallback squad."
+        )
         discovery = {
-            "project_name": "LP Task",
-            "hired_squad": [{"role": "Generalist", "audit_filter": "Sanity check"}],
+            "project_name": "Emergency Project",
+            "hired_squad": [
+                {"role": "Generalist Architect", "audit_filter": "Sanity check"}
+            ],
         }
 
+    squad_list = discovery.get("hired_squad") or [
+        {"role": "Generalist", "audit_filter": "Pragmatic check"}
+    ]
     squad_str = ", ".join(
-        [f"{m['role']} ({m['audit_filter']})" for m in discovery.get("hired_squad", [])]
+        [
+            f"{m.get('role', 'Expert')} ({m.get('audit_filter', 'ROI')})"
+            for m in squad_list
+        ]
     )
 
     # INTERNAL SELF-HEALING LOOP
