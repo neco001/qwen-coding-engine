@@ -196,7 +196,20 @@ To get the most out of the Qwen Engineering Engine, you **MUST** provide your pr
 1.  **System Instructions**: Copy the contents of **[LP_SYSTEM_PROMPT.md](./docs/LP_SYSTEM_PROMPT.md)** into your **Custom Instructions**, **.cursorrules**, or **Project Rules**.
 2.  **Quality Protocol**: Study and follow the **[TDD Shackle Guide](./docs/TDD.md)**. 
 3.  **Repair Protocol**: Use the **[Audit Triad](./docs/REPAIR_PROTOCOL.md)** for debugging and fixing regressions.
-4.  **Real-World Example**: See how it all works together in the **[Lachman Protocol Simulation](./docs/EXAMPLE.md)** (Architecting -> TDD -> Code -> Audit -> Backlog).
+4.  **Workflows**: The project includes specialized **[Operational Workflows](./docs/workflows/)** (Slash Commands) to automate common tasks.
+
+---
+
+## 🚀 Advanced Operational Workflows
+
+For agents supporting slash commands or `.md` workflows, you can trigger these specialized protocols:
+
+- **`/QW_architect`**: Initiates a high-precision planning phase.
+- **`/QW_coder`**: Orchestrates surgical code generation.
+- **`/QW_audit`**: Automates Root Cause Analysis (RCA).
+- **`/QW_admin`**: Automates financial monitoring and model registry management.
+
+Each workflow is designed to reduce agent "laziness" and enforce production-grade engineering standards.
 
 Without these steps, your primary assistant will not know how to orchestrate the specialized Qwen experts, and you risk falling into the "Hallucination Trap".
 
