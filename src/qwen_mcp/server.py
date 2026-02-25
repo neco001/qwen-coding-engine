@@ -1,4 +1,3 @@
-import asyncio
 from typing import Optional
 from mcp.server.fastmcp import FastMCP, Context
 from qwen_mcp.tools import (
@@ -11,6 +10,7 @@ from qwen_mcp.tools import (
     generate_usage_report,
     list_available_models,
     set_model_in_registry,
+    generate_sparring,
 )
 
 # Initialize FastMCP Server
@@ -71,15 +71,34 @@ async def qwen_architect(
 
 
 @mcp.tool()
+async def qwen_sparring(
+    topic: str, context: str = "", mode: str = "flash", ctx: Context = None
+) -> str:
+    """
+    Initiates the 5D Sparring Engine (Multi-Agent Strategic Debate).
+    Moves the MCP from a coding assistant to a 'Cognitive Board of Directors'.
+
+    Args:
+        topic: The strategic dilemma or move to evaluate.
+        context: Optional situational background (e.g., power structure, history).
+        mode: 'flash' (Reasoning-only deep dive) or 'pro' (Adversarial Multi-Agent Debate).
+    """
+    return await generate_sparring(topic, context, mode, ctx)
+
+
+@mcp.tool()
 async def qwen_refresh_models() -> str:
     """
     Checks for the latest SOTA models from Alibaba DashScope and identifies candidates.
-    Note: This is now a passive check. Use qwen_list_available_models to see everything.
+    Also synchronizes metadata from Hugging Face.
     """
     from qwen_mcp.api import DashScopeClient
+    from qwen_mcp.registry import registry
 
     client = DashScopeClient()
-    return await client.refresh_registry()
+    ds_res = await client.refresh_registry()
+    hf_res = await registry.sync_with_hf()
+    return f"DashScope: {ds_res}\nHugging Face: {hf_res}"
 
 
 @mcp.tool()

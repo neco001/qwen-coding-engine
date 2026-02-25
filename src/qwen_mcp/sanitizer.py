@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -32,3 +33,53 @@ class SecuritySanitizer:
                 )
                 sanitized = re.sub(pattern, "[REDACTED]", sanitized)
         return sanitized
+
+
+class ContentValidator:
+    """Sanitization and validation of LLM inputs and outputs."""
+
+    MAX_INPUT_LENGTH = 10000
+    MIN_RESPONSE_LENGTH = 10
+
+    @classmethod
+    def sanitize_input(cls, text: str) -> str:
+        """Truncate, strip control chars, and normalize whitespace."""
+        if not text:
+            return ""
+
+        # Truncate to safe max
+        text = text[: cls.MAX_INPUT_LENGTH]
+
+        # Remove control characters
+        text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+
+        # Normalize whitespace
+        return re.sub(r"\s+", " ", text).strip()
+
+    @classmethod
+    def validate_response(cls, response: Optional[str]) -> str:
+        """Ensure response is valid and non-generic."""
+        if not response or not isinstance(response, str):
+            raise ValueError(
+                f"Response is empty or invalid type. Got: {type(response)} -> {str(response)[:100]}"
+            )
+
+        response = response.strip()
+
+        if len(response) < cls.MIN_RESPONSE_LENGTH:
+            raise ValueError(
+                f"Response too short (min {cls.MIN_RESPONSE_LENGTH} chars)."
+            )
+
+        # Block generic AI boilerplate
+        generic_patterns = [
+            r"^[Ii] can(?:'t| not)?",
+            r"^[Aa]s an AI",
+            r"^[Ii] am unable",
+            r"^[Ss]orry",
+        ]
+        for pattern in generic_patterns:
+            if re.match(pattern, response):
+                raise ValueError("Response rejected as generic AI boilerplate.")
+
+        return response

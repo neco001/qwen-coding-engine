@@ -1,7 +1,7 @@
 import os
 import asyncio
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 
 import textwrap
 from openai import (
@@ -95,6 +95,8 @@ class DashScopeClient:
         task_type: Optional[str] = None,
         timeout: Optional[float] = None,
         progress_callback=None,
+        complexity: str = "auto",
+        tags: Optional[List[str]] = None,
     ) -> str:
         """Generate a chat completion with financial circuit breakers and retries."""
         request_timeout = timeout or self.default_timeout
@@ -114,7 +116,9 @@ class DashScopeClient:
 
         for attempt in range(2):
             target_model = (
-                self.registry.get_best_model(task_type)
+                self.registry.route_request(
+                    task_type, complexity_hint=complexity, context_tags=tags or []
+                )
                 if task_type
                 else self.model_name
             )
@@ -125,9 +129,14 @@ class DashScopeClient:
             else:
                 logger.info(f"Retrying completion from updated model {target_model}...")
 
+            # Auto-detect reasoning models (qwq-* requires streaming + enable_thinking)
+            is_reasoning_model = "qwq" in target_model.lower() or task_type == "analyst"
+            use_streaming = bool(progress_callback) or is_reasoning_model
+            extra_body = {"enable_thinking": True} if is_reasoning_model else {}
+
             try:
-                if progress_callback:
-                    # Streaming mode
+                if use_streaming:
+                    # Streaming mode (required for reasoning models)
                     response = await self.client.chat.completions.create(
                         model=target_model,
                         messages=messages,
@@ -136,9 +145,11 @@ class DashScopeClient:
                         timeout=request_timeout,
                         stream=True,
                         stream_options={"include_usage": True},
+                        extra_body=extra_body if extra_body else None,
                     )
 
                     full_response = ""
+                    reasoning_log = ""
                     async for chunk in response:
                         # Capture token usage if available in the final chunk
                         if hasattr(chunk, "usage") and chunk.usage:
@@ -160,7 +171,6 @@ class DashScopeClient:
                             from .billing import billing_tracker
 
                             project_name = os.getenv("QWEN_PROJECT_NAME", "adhoc")
-                            # Wrap in try-except to avoid breaking generation on billing fails
                             try:
                                 billing_tracker.log_usage(
                                     project_name,
@@ -171,16 +181,28 @@ class DashScopeClient:
                             except Exception as e:
                                 logger.error(f"Billing logging failed: {e}")
 
-                        if (
-                            hasattr(chunk, "choices")
-                            and chunk.choices
-                            and len(chunk.choices) > 0
-                        ):
-                            delta = chunk.choices[0].delta.content
-                            if delta:
-                                full_response += delta
-                                await progress_callback(delta, len(full_response))
-                    return full_response
+                        if hasattr(chunk, "choices") and chunk.choices:
+                            delta = chunk.choices[0].delta
+
+                            # Support for reasoning_content (QwQ models)
+                            reasoning = getattr(delta, "reasoning_content", None)
+                            if reasoning:
+                                reasoning_log += reasoning
+                                if len(reasoning_log) % 100 == 0 and progress_callback:
+                                    await progress_callback(message="[Thinking...]")
+
+                            content = getattr(delta, "content", None)
+                            if content:
+                                full_response += content
+                                if progress_callback:
+                                    await progress_callback(message=content)
+
+                    if reasoning_log:
+                        logger.info(
+                            f"Reasoning completed ({len(reasoning_log)} chars)."
+                        )
+
+                    return full_response.strip() or reasoning_log.strip()
                 else:
                     # Standard mode
                     response = await self.client.chat.completions.create(
@@ -226,7 +248,17 @@ class DashScopeClient:
                         logger.warning("Empty choices from API.")
                         return "Error: Empty response."
 
-                    return response.choices[0].message.content or ""
+                    msg = response.choices[0].message
+                    # Priority 1: standard content, Priority 2: reasoning_content (fallback)
+                    content = getattr(msg, "content", "") or ""
+                    reasoning = getattr(msg, "reasoning_content", "") or ""
+
+                    final_text = (content or reasoning).strip()
+                    if not final_text:
+                        logger.error("API returned empty content AND empty reasoning.")
+                        return "Error: Empty response content."
+
+                    return final_text
 
             except Exception as e:
                 is_model_error = (
@@ -249,10 +281,24 @@ class DashScopeClient:
         max_tokens: Optional[int] = None,
         task_type: Optional[str] = None,
         timeout: Optional[float] = None,
+        complexity: str = "auto",
+        tags: Optional[List[str]] = None,
     ):
         """Generate a streaming completion with financial guardrails."""
         request_timeout = timeout or self.default_timeout
         force_max_tokens = max_tokens or self.max_output_tokens
+
+        if task_type:
+            logger.info(
+                f"API Request | Task: {task_type} | Models in Registry: {len(self.registry.metadata)}"
+            )
+
+        # Log input preview
+        if messages:
+            last_msg = messages[-1].get("content", "")[:100].replace("\n", " ")
+            logger.info(
+                f"API Input | Messages: {len(messages)} | Last User Msg: {last_msg}..."
+            )
 
         # Financial Circuit Breaker: Input Check
         estimated_input = self.estimate_tokens(messages)
@@ -263,7 +309,9 @@ class DashScopeClient:
 
         for attempt in range(2):
             target_model = (
-                self.registry.get_best_model(task_type)
+                self.registry.route_request(
+                    task_type, complexity_hint=complexity, context_tags=tags or []
+                )
                 if task_type
                 else self.model_name
             )

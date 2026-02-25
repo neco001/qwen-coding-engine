@@ -3,6 +3,7 @@ from typing import Optional
 from mcp.server.fastmcp import Context
 from qwen_mcp.api import DashScopeClient
 from qwen_mcp.registry import registry
+from qwen_mcp.sanitizer import ContentValidator
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,32 @@ Output a JSON object:
 Output ONLY the JSON object. Be a Strategic Engineering Pragmatist. ROI is your North Star."""
 
 
+# --- 5D SPARRING ENGINE PROMPTS ---
+
+SPARRING_ATTACKER_PROMPT = """You are the 'Devil's Advocate & 5D Power Auditor'.
+Your goal is to destroy the user's proposed strategy by identifying logical flaws, power imbalances, and secondary risks.
+
+Rules:
+1. NO POLITENESS: Ignore corporate bullshit and social niceties. Be brutal, cold, and direct.
+2. POWER DYNAMICS: Focus on leverage, social capital, information asymmetry, and corporate politics.
+3. RISK ANALYSIS: Identify exactly how this move could blow up in the user's face (backfires, loss of face, legal/HR risks).
+4. ASYMMETRIC THREATS: Look for non-obvious reactions from 'neutral' parties or hidden competitors.
+5. NO JARGON: Avoid "synergy", "alignment", or "scalability". Use material and power-aware descriptors.
+
+Output your critique in Markdown. Use sharp, analytical language. No consensus seeking."""
+
+SPARRING_ADJUDICATOR_PROMPT = """You are the 'Master 5D Strategist'.
+You are evaluating a proposed move and a brutal critique from your Power Auditor. Your goal is to synthesize these into a winning, asymmetric strategy.
+
+Rules:
+1. STRATEGIC SYNTHESIS: Address the critical flaws identified by the Auditor without losing the initiative.
+2. ASYMMETRIC ADVANTAGE: Propose moves that leverage the user's unique position or exploit the opponent's blind spots.
+3. POLITICAL ACUMEN: Navigate high-stakes environments with cold, logical precision.
+4. ACTIONABLE VERDICT: Provide a clear 'Strategic Verdict' and a list of 'Counter-Moves'.
+
+Output your final strategy in Markdown. Be the advisor a CEO would pay millions for. No corporate fluff."""
+
+
 def extract_json_from_text(text: str) -> Optional[dict]:
     """
     Robustly extracts JSON from LLM text output.
@@ -136,10 +163,7 @@ async def generate_audit(
     """
     client = DashScopeClient()
 
-    # Using the Strategist for advanced analysis
-    model = registry.STRATEGIST
-
-    user_content = f"Please audit the following content (code or logs).\n\n"
+    user_content = "Please audit the following content (code or logs).\n\n"
     if context:
         user_content += f"Context/Contextual Files:\n{context}\n\n"
 
@@ -150,19 +174,21 @@ async def generate_audit(
         {"role": "user", "content": user_content},
     ]
 
-    async def report_progress(delta: str, total_len: int):
-        if ctx and total_len % 50 == 0:
-            await ctx.report_progress(
-                progress=total_len,
-                total=None,
-                message=f"Auditing... ({total_len} chars generated)",
-            )
+    async def report_wrapper(message: str):
+        if ctx:
+            # Only report periodically or on specific triggers to avoid flooding
+            if len(message) > 0:
+                await ctx.report_progress(
+                    progress=None, total=None, message=f"Auditing... {message[:20]}..."
+                )
 
     result = await client.generate_completion(
         messages=messages,
         temperature=0.1,
         task_type="analyst",
-        progress_callback=report_progress if ctx else None,
+        progress_callback=report_wrapper if ctx else None,
+        complexity="high",
+        tags=["analyst", "reasoning", "audit"],
     )
     return result
 
@@ -175,9 +201,6 @@ async def generate_code(
     """
     client = DashScopeClient()
 
-    # Defaulting to Strategist
-    coder_model = registry.STRATEGIST
-
     user_content = f"Instruction: {prompt}\n\n"
     if context:
         user_content += f"Context/Background:\n{context}\n\n"
@@ -187,19 +210,19 @@ async def generate_code(
         {"role": "user", "content": user_content},
     ]
 
-    async def report_progress(delta: str, total_len: int):
-        if ctx and total_len % 50 == 0:
+    async def report_wrapper(message: str):
+        if ctx:
             await ctx.report_progress(
-                progress=total_len,
-                total=None,
-                message=f"Coding (Qwen-3.5-Plus)... ({total_len} chars generated)",
+                progress=None, total=None, message="Qwen is coding..."
             )
 
     result = await client.generate_completion(
         messages=messages,
         temperature=0.2,
         task_type="coder",
-        progress_callback=report_progress if ctx else None,
+        progress_callback=report_wrapper if ctx else None,
+        complexity="auto",
+        tags=["coding"],
     )
     return result
 
@@ -211,7 +234,6 @@ async def generate_code_25(
     Generates or completes code using specialized Qwen-2.5-Coder-32B.
     """
     client = DashScopeClient()
-    coder_model = registry.CODER_SPECIALIST
 
     user_content = f"Instruction: {prompt}\n\n"
     if context:
@@ -222,19 +244,19 @@ async def generate_code_25(
         {"role": "user", "content": user_content},
     ]
 
-    async def report_progress(delta: str, total_len: int):
-        if ctx and total_len % 50 == 0:
+    async def report_wrapper(message: str):
+        if ctx:
             await ctx.report_progress(
-                progress=total_len,
-                total=None,
-                message=f"Coding (Qwen-2.5-Coder)... ({total_len} chars generated)",
+                progress=None, total=None, message="Qwen-2.5-Coder is thinking..."
             )
 
     result = await client.generate_completion(
         messages=messages,
         temperature=0.2,
         task_type="specialist",
-        progress_callback=report_progress if ctx else None,
+        progress_callback=report_wrapper if ctx else None,
+        complexity="high",
+        tags=["coding", "specialist"],
     )
     return result
 
@@ -248,14 +270,9 @@ async def generate_lp_blueprint(
     2. Architecting: Generates a structural Blueprint.
     3. Verification: Validates. If fails, retries autonomously up to MAX_ITERATIONS.
     """
-    import json
     import os
 
     client = DashScopeClient()
-
-    # Using specific models for each phase (ROI Optimization)
-    discovery_model = registry.SCOUT
-    architect_model = registry.STRATEGIST
 
     max_retries = int(os.getenv("LP_MAX_RETRIES", "3"))
     attempt = 0
@@ -323,12 +340,12 @@ async def generate_lp_blueprint(
             {"role": "user", "content": user_content},
         ]
 
-        async def architect_progress(delta: str, total_len: int):
-            if ctx and total_len % 50 == 0:
+        async def architect_progress(message: str):
+            if ctx:
                 await ctx.report_progress(
-                    progress=total_len,
+                    progress=None,
                     total=None,
-                    message=f"[Phase 2] Drafting Blueprint... ({total_len} chars)",
+                    message=f"[Phase 2] Drafting Blueprint... {message[:20]}...",
                 )
 
         blueprint_json_raw = await client.generate_completion(
@@ -347,13 +364,13 @@ async def generate_lp_blueprint(
 
             # Format the JSON into a beautiful Markdown Report
             report = f"# 🧪 LP SESSION: {discovery.get('project_name', 'Unnamed')}\n\n"
-            report += f"**Dynamic Squad Hired:**\n"
+            report += "**Dynamic Squad Hired:**\n"
             for member in discovery.get("hired_squad", []):
                 report += f"- **{member['role']}**: {member['audit_filter']}\n"
 
             report += f"\n## 🏛️ The Manifest\n{blueprint.get('manifest', 'N/A')}\n"
             report += f"\n## 🛡️ Audit Verdict\n{blueprint.get('audit_verdict', 'N/A')}\n"
-            report += f"\n## 🚀 Technical Roadmap\n"
+            report += "\n## 🚀 Technical Roadmap\n"
             for step in blueprint.get("roadmap", []):
                 report += f"- {step}\n"
 
@@ -363,7 +380,7 @@ async def generate_lp_blueprint(
             report += f"\n## 🧹 Clean Slate Instructions\n{blueprint.get('clean_slate', 'N/A')}\n"
 
             if blueprint.get("optional_features"):
-                report += f"\n## 🔮 Optional Features (Excluded from 80% Core)\n"
+                report += "\n## 🔮 Optional Features (Excluded from 80% Core)\n"
                 for opt in blueprint.get("optional_features", []):
                     report += f"- {opt}\n"
 
@@ -371,7 +388,7 @@ async def generate_lp_blueprint(
                 await ctx.report_progress(
                     progress=0,
                     total=None,
-                    message=f"[Phase 3] Self-Verification in progress...",
+                    message="[Phase 3] Self-Verification in progress...",
                 )
 
             # PHASE 3: Self-Verification (Anti-Degeneration)
@@ -405,7 +422,7 @@ async def generate_lp_blueprint(
                     report += usage_table
 
                     return report  # Success!
-            except:
+            except Exception:
                 pass  # Fail silently on verification parsing if it's garbled, assume success to unblock
                 usage_table = "\n\n### 📊 Session Token Usage\n| Model | Prompt Tokens | Completion Tokens | Total |\n|---|---|---|---|\n"
                 for model_name, usage in client.session_usage.items():
@@ -538,9 +555,6 @@ async def list_available_models() -> str:
 
 async def set_model_in_registry(role: str, model_id: str) -> str:
     """Manually sets a model for a specific role (strategist, coder, scout)."""
-    from qwen_mcp.registry import registry
-    from qwen_mcp.api import DashScopeClient
-
     valid_roles = ["strategist", "coder", "scout"]
     if role not in valid_roles:
         return f"Invalid role. Must be one of: {', '.join(valid_roles)}"
@@ -554,3 +568,141 @@ async def set_model_in_registry(role: str, model_id: str) -> str:
     registry.models[role] = model_id
     await registry.save_cache()
     return f"Success: Role '{role}' updated to use '{model_id}'."
+
+
+async def generate_sparring(
+    topic: str, context: str = "", mode: str = "flash", ctx: Optional[Context] = None
+) -> str:
+    """
+    Executes the 5D Sparring Engine debate.
+    Turn 1: Proposer (User/Current Context)
+    Turn 2: Attacker (QwQ-plus/Audit)
+    Turn 3: Adjudicator (Qwen-max/Strategist)
+    """
+    client = DashScopeClient()
+
+    # Sanitize inputs
+    topic = ContentValidator.sanitize_input(topic)
+    context = ContentValidator.sanitize_input(context)
+
+    if mode == "flash":
+        if ctx:
+            await ctx.report_progress(
+                progress=0, total=None, message="[Flash] Reasoning via QwQ-Plus..."
+            )
+
+        messages = [
+            {"role": "system", "content": SPARRING_ATTACKER_PROMPT},
+            {
+                "role": "user",
+                "content": f"Topic: {topic}\n\nContextual Background:\n{context}",
+            },
+        ]
+
+        async def report_wrapper(message: str):
+            if ctx:
+                await ctx.report_progress(
+                    progress=None,
+                    total=None,
+                    message="QwQ is analyzing power dynamics...",
+                )
+
+        res = await client.generate_completion(
+            messages=messages,
+            temperature=0.7,
+            task_type="audit",
+            timeout=300.0,
+            progress_callback=report_wrapper if ctx else None,
+            complexity="high",
+            tags=["reasoning", "sparring"],
+        )
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Sparring [Flash] Raw Result: {res[:200] if res else 'EMPTY'}")
+        return ContentValidator.validate_response(res)
+
+    else:
+        # MODE: PRO (Adversarial 3-Turn Sequence)
+        # Turn 1 is implicit (the user topic/context)
+
+        if ctx:
+            await ctx.report_progress(
+                progress=0, total=None, message="[Turn 2] Power Audit: The Attack..."
+            )
+
+        # 2. TURN 2: ATTACK PHASE (QwQ-plus)
+        attack_messages = [
+            {"role": "system", "content": SPARRING_ATTACKER_PROMPT},
+            {
+                "role": "user",
+                "content": f"Topic: {topic}\n\nContextual Background:\n{context}",
+            },
+        ]
+
+        async def report_wrapper_attack(message: str):
+            if ctx:
+                await ctx.report_progress(
+                    progress=25,
+                    total=100,
+                    message="Power Audit: Generating Critique...",
+                )
+
+        critique_raw = await client.generate_completion(
+            messages=attack_messages,
+            temperature=0.8,
+            task_type="audit",
+            timeout=300.0,
+            progress_callback=report_wrapper_attack if ctx else None,
+            complexity="high",
+            tags=["reasoning", "sparring", "attack"],
+        )
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.debug(
+            f"Sparring [Pro] Critique Raw: {critique_raw[:200] if critique_raw else 'EMPTY'}"
+        )
+        critique = ContentValidator.validate_response(critique_raw)
+
+        if ctx:
+            await ctx.report_progress(
+                progress=50,
+                total=100,
+                message="[Turn 3] Strategic Verdict: Adjudication...",
+            )
+
+        # 3. TURN 3: ADJUDICATION PHASE (Qwen-max)
+        adjudication_messages = [
+            {"role": "system", "content": SPARRING_ADJUDICATOR_PROMPT},
+            {
+                "role": "user",
+                "content": f"Original Topic: {topic}\n\nContext: {context}\n\nPower Auditor's Critique:\n{critique}",
+            },
+        ]
+
+        async def report_wrapper_verdict(message: str):
+            if ctx:
+                await ctx.report_progress(
+                    progress=75, total=100, message="Strategic Verdict: Final Move..."
+                )
+
+        final_strategy_raw = await client.generate_completion(
+            messages=adjudication_messages,
+            temperature=0.1,
+            task_type="strategist",
+            timeout=300.0,
+            progress_callback=report_wrapper_verdict if ctx else None,
+            complexity="critical",
+            tags=["sparring", "strategy", "synthesis"],
+        )
+        final_strategy = ContentValidator.validate_response(final_strategy_raw)
+
+        combined_report = f"# 🛡️ 5D Sparring Report: {topic}\n\n"
+        combined_report += "## 🕵️ Turn 2: Power Audit (The Attack)\n\n"
+        combined_report += f"{critique}\n\n"
+        combined_report += "---\n\n"
+        combined_report += "## 👑 Turn 3: Strategic Verdict (Final Move)\n\n"
+        combined_report += f"{final_strategy}"
+
+        return combined_report
