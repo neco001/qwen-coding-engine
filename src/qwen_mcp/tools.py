@@ -4,6 +4,7 @@ from mcp.server.fastmcp import Context
 from qwen_mcp.api import DashScopeClient
 from qwen_mcp.registry import registry
 from qwen_mcp.sanitizer import ContentValidator
+from qwen_mcp.specter.telemetry import get_broadcaster
 
 logger = logging.getLogger(__name__)
 
@@ -325,6 +326,8 @@ async def generate_lp_blueprint(
                 total=None,
                 message=f"[Phase 2] Architecting (Attempt {attempt + 1}/{max_retries})...",
             )
+            # Update HUD
+            await get_broadcaster().broadcast_state({"loop_iteration": attempt + 1})
 
         # PHASE 2: Architecting
         user_content = (

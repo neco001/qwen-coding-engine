@@ -1,0 +1,33 @@
+/* Layout Utilities (Vanilla) */
+.flex { display: flex !important; }
+.flex-col { display: flex !important; flex-direction: column !important; }
+.flex-1 { flex: 1 !important; }
+.justify-between { justify-content: space-between !important; }
+.items-center { align-items: center !important; }
+.w-full { width: 100% !important; }
+
+/* Spacing */
+.gap-2 { gap: 0.5rem !important; }
+.gap-3 { gap: 0.75rem !important; }
+.gap-4 { gap: 1rem !important; }
+
+.mb-6 { margin-bottom: 1.5rem !important; }
+.mr-1 { margin-right: 0.25rem !important; }
+.mr-2 { margin-right: 0.5rem !important; }
+
+/* Misc */
+.opacity-20 { opacity: 0.2 !important; }
+.overflow-hidden { overflow: hidden !important; }
+.overflow-auto { overflow: auto !important; }
+.overflow-y-auto { overflow-y: auto !important; }
+
+.command-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tools-group {
+  display: flex;
+  align-items: center;
+}

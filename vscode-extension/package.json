@@ -1,0 +1,41 @@
+{
+    "name": "specter-qwen-hud",
+    "displayName": "SPECTER QWEN HUD",
+    "description": "Real-time tactical monitoring for Qwen-MCP",
+    "version": "1.0.3",
+    "publisher": "specter",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/blueinfiniti/qwen-mcp"
+    },
+    "engines": {
+        "vscode": "^1.75.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [
+        "onView:specter-qwen-hud-view"
+    ],
+    "main": "./extension.js",
+    "contributes": {
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "specter-qwen-hud-explorer",
+                    "title": "Specter Qwen HUD",
+                    "icon": "assets/icon.svg"
+                }
+            ]
+        },
+        "views": {
+            "specter-qwen-hud-explorer": [
+                {
+                    "type": "webview",
+                    "id": "specter-qwen-hud-view",
+                    "name": "Cockpit"
+                }
+            ]
+        }
+    }
+}

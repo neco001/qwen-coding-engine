@@ -22,6 +22,7 @@ from tenacity import (
 
 from .sanitizer import SecuritySanitizer
 from .registry import ModelRegistry, registry as global_registry
+from .specter.telemetry import get_broadcaster
 
 logger = logging.getLogger(__name__)
 
@@ -178,8 +179,12 @@ class DashScopeClient:
                                     prompt_tokens,
                                     completion_tokens,
                                 )
+                                # Broadcast to HUD
+                                await get_broadcaster().report_usage(
+                                    target_model, prompt_tokens, completion_tokens
+                                )
                             except Exception as e:
-                                logger.error(f"Billing logging failed: {e}")
+                                logger.error(f"Telemetry/Billing logging failed: {e}")
 
                         if hasattr(chunk, "choices") and chunk.choices:
                             delta = chunk.choices[0].delta
@@ -241,8 +246,12 @@ class DashScopeClient:
                                 prompt_tokens,
                                 completion_tokens,
                             )
+                            # Broadcast to HUD
+                            await get_broadcaster().report_usage(
+                                target_model, prompt_tokens, completion_tokens
+                            )
                         except Exception as e:
-                            logger.error(f"Billing logging failed: {e}")
+                            logger.error(f"Telemetry/Billing logging failed: {e}")
 
                     if not response.choices or len(response.choices) == 0:
                         logger.warning("Empty choices from API.")

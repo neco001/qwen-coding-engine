@@ -12,6 +12,11 @@ from qwen_mcp.tools import (
     set_model_in_registry,
     generate_sparring,
 )
+from qwen_mcp.specter.telemetry import get_broadcaster
+from qwen_mcp.registry import registry
+import threading
+import uvicorn
+from fastapi import FastAPI, WebSocket
 
 # Initialize FastMCP Server
 mcp = FastMCP("Qwen MCP Server (DashScope)")
@@ -144,8 +149,58 @@ async def qwen_usage_report() -> str:
     return await generate_usage_report()
 
 
+def run_telemetry_server():
+    """Starts a lightweight FastAPI server for the HUD telemetry."""
+    app = FastAPI()
+    broadcaster = get_broadcaster()
+
+    @app.get("/")
+    async def root():
+        return {"status": "SPECTER LENS SIDECAR ACTIVE", "uplink": "ws://127.0.0.1:8878/ws/telemetry"}
+
+    @app.websocket("/ws/telemetry")
+    async def websocket_endpoint(websocket: WebSocket):
+        await websocket.accept()
+        await broadcaster.add_client(websocket)
+        try:
+            while True:
+                # Keep alive and signal handling
+                data = await websocket.receive_text()
+        except Exception:
+            pass
+        finally:
+            await broadcaster.remove_client(websocket)
+
+    # Run on fixed port 8878
+    try:
+        config = uvicorn.Config(app, host="127.0.0.1", port=8878, log_level="warning")
+        server = uvicorn.Server(config)
+        server.run()
+    except Exception as e:
+        print(f"❌ Telemetry Sidecar failed: {e}")
+
+async def sync_hud_state():
+    """Broadcaster update for role mapping and basic state."""
+    await asyncio.sleep(2) # Wait for sidecar thread to start
+    await get_broadcaster().broadcast_state({"role_mapping": registry.models})
+
 def main():
     """Main entrypoint for the MCP server."""
+    print("🚀 [SPECTER] Starting Qwen Engineering Engine Context...")
+    print("📡 [SPECTER] Sidecar Uplink on port 8878/ws")
+    
+    # Start telemetry in dedicated thread
+    sidecar = threading.Thread(target=run_telemetry_server, daemon=True)
+    sidecar.start()
+    
+    # Schedule initial state sync
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(sync_hud_state())
+    except Exception:
+        pass
+
     mcp.run()
 
 
