@@ -98,30 +98,43 @@ Output a JSON object:
 Output ONLY the JSON object. Be a Strategic Engineering Pragmatist. ROI is your North Star."""
 
 
-# --- 5D SPARRING ENGINE PROMPTS ---
+# --- 5D SPARRING ENGINE PROMPTS (TRIAD CONSENSUS PROTOCOL) ---
 
-SPARRING_ATTACKER_PROMPT = """You are the 'Devil's Advocate & 5D Power Auditor'.
-Your goal is to destroy the user's proposed strategy by identifying logical flaws, power imbalances, and secondary risks.
+FLASH_ANALYST_PROMPT = """Jesteś 'Głębokim Audytorem Logiki'. 
+Twoim zadaniem jest rozbić temat użytkownika na czynniki pierwsze przy użyciu Chain-of-Thought (QwQ).
+1. Wykryj ukryte założenia, które mogą być błędne.
+2. Zidentyfikuj 3 krytyczne punkty zapalne (vulnerabilities).
+3. Zaproponuj surowy zarys rozwiązania, który neutralizuje te ryzyka.
+Bądź techniczny, chłodny i precyzyjny. Nie trać czasu na formatowanie - skup się na logice."""
 
-Rules:
-1. NO POLITENESS: Ignore corporate bullshit and social niceties. Be brutal, cold, and direct.
-2. POWER DYNAMICS: Focus on leverage, social capital, information asymmetry, and corporate politics.
-3. RISK ANALYSIS: Identify exactly how this move could blow up in the user's face (backfires, loss of face, legal/HR risks).
-4. ASYMMETRIC THREATS: Look for non-obvious reactions from 'neutral' parties or hidden competitors.
-5. NO JARGON: Avoid "synergy", "alignment", or "scalability". Use material and power-aware descriptors.
+FLASH_DRAFTER_PROMPT = """Jesteś 'Głównym Architektem Strategii'. 
+Otrzymujesz surową analizę rykzyk od Audytora. Twoim zadaniem jest przekuć ją w profesjonalny, gotowy do egzekucji plan.
+1. Skalibruj rozwiązanie tak, aby zachować inicjatywę użytkownika.
+2. Przetłumacz techniczne zagrożenia na konkretne kroki zaradcze (Mitigations).
+3. Nadaj całości strukturę 'Executive Summary'.
+Mantra: Rozwiązanie musi być odporne na krytykę, którą przed chwilą usłyszałeś."""
 
-Output your critique in Markdown. Use sharp, analytical language. No consensus seeking."""
+RED_CELL_PROMPT = """Jesteś 'Sentry-01' (Red Team). 
+Twoim zadaniem jest eksponowanie luk w egzekucji. 
+ZASADA: Nie atakuj celów użytkownika, atakuj jego METODY. 
+Skup się na: 
+- Ryzyku reputacyjnym.
+- Efektach drugiej rzędu (What happens then?).
+- Wąskich gardłach zasobów.
+Format: 'Vulnerability' -> 'Potential Impact'."""
 
-SPARRING_ADJUDICATOR_PROMPT = """You are the 'Master 5D Strategist'.
-You are evaluating a proposed move and a brutal critique from your Power Auditor. Your goal is to synthesize these into a winning, asymmetric strategy.
+BLUE_CELL_PROMPT = """Jesteś 'Champion-01' (Blue Team). 
+Jesteś adwokatem użytkownika. Słyszałeś atak Red Cell. Twoim zadaniem jest URATOWANIE inicjatywy poprzez:
+1. Kontrargumentację (jeśli Red Cell się myli).
+2. Propozycję mechanizmów obronnych (Tactical Fixes).
+3. Wzmocnienie fundamentów strategii tak, aby przetrwała kolejny audyt."""
 
-Rules:
-1. STRATEGIC SYNTHESIS: Address the critical flaws identified by the Auditor without losing the initiative.
-2. ASYMMETRIC ADVANTAGE: Propose moves that leverage the user's unique position or exploit the opponent's blind spots.
-3. POLITICAL ACUMEN: Navigate high-stakes environments with cold, logical precision.
-4. ACTIONABLE VERDICT: Provide a clear 'Strategic Verdict' and a list of 'Counter-Moves'.
-
-Output your final strategy in Markdown. Be the advisor a CEO would pay millions for. No corporate fluff."""
+WHITE_CELL_PROMPT = """Jesteś 'Controller' (Neutralna Synteza). 
+Nie bierzesz stron. Twoim zadaniem jest stworzenie 'Raportu Przetrwania Inicjatywy'.
+1. Zestaw najsilniejsze punkty ataku z najskuteczniejszymi mechanizmami obrony.
+2. Wydaj 'Verdict of Survivability' (Czy to ma szansę zadziałać?).
+3. Podaj listę 'Residual Risks' - tego, czego nie dało się naprawić w tej sesji.
+Format: Protokół dyplomatyczny / Wojskowy raport pooperacyjny."""
 
 
 def extract_json_from_text(text: str) -> Optional[dict]:
@@ -180,7 +193,7 @@ async def generate_audit(
             # Only report periodically or on specific triggers to avoid flooding
             if len(message) > 0:
                 await ctx.report_progress(
-                    progress=None, total=None, message=f"Auditing... {message[:20]}..."
+                    progress=0.0, total=None, message=f"Auditing... {message[:20]}..."
                 )
 
     result = await client.generate_completion(
@@ -214,7 +227,7 @@ async def generate_code(
     async def report_wrapper(message: str):
         if ctx:
             await ctx.report_progress(
-                progress=None, total=None, message="Qwen is coding..."
+                progress=0.0, total=None, message="Qwen is coding..."
             )
 
     result = await client.generate_completion(
@@ -248,7 +261,7 @@ async def generate_code_25(
     async def report_wrapper(message: str):
         if ctx:
             await ctx.report_progress(
-                progress=None, total=None, message="Qwen-2.5-Coder is thinking..."
+                progress=0.0, total=None, message="Qwen-2.5-Coder is thinking..."
             )
 
     result = await client.generate_completion(
@@ -480,7 +493,12 @@ async def read_repo_file(file_path: str) -> str:
         if target_path.stat().st_size > 32 * 1024:
             return f"Error: File '{file_path}' is too large (>32KB). Please read specific sections if possible."
 
-        content = target_path.read_text(encoding="utf-8", errors="replace")
+        try:
+            content = target_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # Fallback to latin-1 only if utf-8 fails, to preserve as much as possible
+            content = target_path.read_text(encoding="latin-1", errors="replace")
+            
         return f"File Content ({file_path}):\n\n```\n{content}\n```"
     except Exception as e:
         return f"Error reading file: {str(e)}"
@@ -577,10 +595,9 @@ async def generate_sparring(
     topic: str, context: str = "", mode: str = "flash", ctx: Optional[Context] = None
 ) -> str:
     """
-    Executes the 5D Sparring Engine debate.
-    Turn 1: Proposer (User/Current Context)
-    Turn 2: Attacker (QwQ-plus/Audit)
-    Turn 3: Adjudicator (Qwen-max/Strategist)
+    Executes the 5D Sparring Engine debate (Triad Consensus Protocol).
+    Flash: Analyst (QwQ) -> Drafter (Max)
+    Pro: Red Cell (QwQ) -> Blue Cell (Max) -> White Cell (Max)
     """
     client = DashScopeClient()
 
@@ -591,121 +608,170 @@ async def generate_sparring(
     if mode == "flash":
         if ctx:
             await ctx.report_progress(
-                progress=0, total=None, message="[Flash] Reasoning via QwQ-Plus..."
+                progress=0, total=None, message="[Flash] Turn 1: Reasoning via QwQ-Plus..."
             )
 
-        messages = [
-            {"role": "system", "content": SPARRING_ATTACKER_PROMPT},
+        # 1. ANALYST PHASE (QwQ)
+        analyst_messages = [
+            {"role": "system", "content": FLASH_ANALYST_PROMPT},
             {
                 "role": "user",
                 "content": f"Topic: {topic}\n\nContextual Background:\n{context}",
             },
         ]
 
-        async def report_wrapper(message: str):
+        async def report_analyst(message: str):
             if ctx:
                 await ctx.report_progress(
-                    progress=None,
-                    total=None,
-                    message="QwQ is analyzing power dynamics...",
+                    progress=0.0, total=None, message="QwQ is auditing logic..."
                 )
 
-        res = await client.generate_completion(
-            messages=messages,
+        analysis = await client.generate_completion(
+            messages=analyst_messages,
             temperature=0.7,
             task_type="audit",
             timeout=300.0,
-            progress_callback=report_wrapper if ctx else None,
+            progress_callback=report_analyst if ctx else None,
             complexity="high",
-            tags=["reasoning", "sparring"],
+            tags=["reasoning", "sparring", "flash-analyst"],
         )
-        import logging
-
-        logger = logging.getLogger(__name__)
-        logger.debug(f"Sparring [Flash] Raw Result: {res[:200] if res else 'EMPTY'}")
-        return ContentValidator.validate_response(res)
-
-    else:
-        # MODE: PRO (Adversarial 3-Turn Sequence)
-        # Turn 1 is implicit (the user topic/context)
 
         if ctx:
             await ctx.report_progress(
-                progress=0, total=None, message="[Turn 2] Power Audit: The Attack..."
+                progress=50, total=100, message="[Flash] Turn 2: Drafting Solution..."
             )
 
-        # 2. TURN 2: ATTACK PHASE (QwQ-plus)
-        attack_messages = [
-            {"role": "system", "content": SPARRING_ATTACKER_PROMPT},
+        # 2. DRAFTER PHASE (Qwen-Max)
+        drafter_messages = [
+            {"role": "system", "content": FLASH_DRAFTER_PROMPT},
             {
                 "role": "user",
-                "content": f"Topic: {topic}\n\nContextual Background:\n{context}",
+                "content": f"Topic: {topic}\n\nContext: {context}\n\nAuditor Analysis:\n{analysis}",
             },
         ]
 
-        async def report_wrapper_attack(message: str):
+        async def report_drafter(message: str):
             if ctx:
                 await ctx.report_progress(
-                    progress=25,
-                    total=100,
-                    message="Power Audit: Generating Critique...",
+                    progress=0.0, total=None, message="Max is drafting strategy..."
                 )
 
-        critique_raw = await client.generate_completion(
-            messages=attack_messages,
-            temperature=0.8,
-            task_type="audit",
-            timeout=300.0,
-            progress_callback=report_wrapper_attack if ctx else None,
-            complexity="high",
-            tags=["reasoning", "sparring", "attack"],
-        )
-        import logging
-
-        logger = logging.getLogger(__name__)
-        logger.debug(
-            f"Sparring [Pro] Critique Raw: {critique_raw[:200] if critique_raw else 'EMPTY'}"
-        )
-        critique = ContentValidator.validate_response(critique_raw)
-
-        if ctx:
-            await ctx.report_progress(
-                progress=50,
-                total=100,
-                message="[Turn 3] Strategic Verdict: Adjudication...",
-            )
-
-        # 3. TURN 3: ADJUDICATION PHASE (Qwen-max)
-        adjudication_messages = [
-            {"role": "system", "content": SPARRING_ADJUDICATOR_PROMPT},
-            {
-                "role": "user",
-                "content": f"Original Topic: {topic}\n\nContext: {context}\n\nPower Auditor's Critique:\n{critique}",
-            },
-        ]
-
-        async def report_wrapper_verdict(message: str):
-            if ctx:
-                await ctx.report_progress(
-                    progress=75, total=100, message="Strategic Verdict: Final Move..."
-                )
-
-        final_strategy_raw = await client.generate_completion(
-            messages=adjudication_messages,
+        final_strategy = await client.generate_completion(
+            messages=drafter_messages,
             temperature=0.1,
             task_type="strategist",
             timeout=300.0,
-            progress_callback=report_wrapper_verdict if ctx else None,
+            progress_callback=report_drafter if ctx else None,
             complexity="critical",
-            tags=["sparring", "strategy", "synthesis"],
+            tags=["sparring", "flash-drafter"],
         )
-        final_strategy = ContentValidator.validate_response(final_strategy_raw)
 
-        combined_report = f"# 🛡️ 5D Sparring Report: {topic}\n\n"
-        combined_report += "## 🕵️ Turn 2: Power Audit (The Attack)\n\n"
-        combined_report += f"{critique}\n\n"
+        return ContentValidator.validate_response(final_strategy)
+
+    else:
+        # MODE: PRO (Triad Consensus Sequence)
+
+        # 1. TURN 2: RED CELL (QwQ-plus)
+        if ctx:
+            await ctx.report_progress(
+                progress=0, total=100, message="[Turn 2] Red Cell: Adversarial Audit..."
+            )
+
+        red_messages = [
+            {"role": "system", "content": RED_CELL_PROMPT},
+            {
+                "role": "user",
+                "content": f"Topic: {topic}\n\nContext: {context}",
+            },
+        ]
+
+        async def report_red(message: str):
+            if ctx:
+                await ctx.report_progress(
+                    progress=20, total=100, message="Red Cell is attacking methods..."
+                )
+
+        red_critique = await client.generate_completion(
+            messages=red_messages,
+            temperature=0.8,
+            task_type="audit",
+            timeout=300.0,
+            progress_callback=report_red if ctx else None,
+            complexity="high",
+            tags=["reasoning", "sparring", "red-cell"],
+        )
+        red_critique = ContentValidator.validate_response(red_critique)
+
+        # 2. TURN 3: BLUE CELL (Qwen-Max)
+        if ctx:
+            await ctx.report_progress(
+                progress=33, total=100, message="[Turn 3] Blue Cell: Strategic Defense..."
+            )
+
+        blue_messages = [
+            {"role": "system", "content": BLUE_CELL_PROMPT},
+            {
+                "role": "user",
+                "content": f"Topic: {topic}\n\nContext: {context}\n\nRed Cell Critique:\n{red_critique}",
+            },
+        ]
+
+        async def report_blue(message: str):
+            if ctx:
+                await ctx.report_progress(
+                    progress=60, total=100, message="Blue Cell is defending initiative..."
+                )
+
+        blue_defense = await client.generate_completion(
+            messages=blue_messages,
+            temperature=0.2,
+            task_type="strategist",
+            timeout=300.0,
+            progress_callback=report_blue if ctx else None,
+            complexity="high",
+            tags=["sparring", "blue-cell"],
+        )
+        blue_defense = ContentValidator.validate_response(blue_defense)
+
+        # 3. TURN 4: WHITE CELL (Qwen-Max)
+        if ctx:
+            await ctx.report_progress(
+                progress=66, total=100, message="[Turn 4] White Cell: Final Consensus..."
+            )
+
+        white_messages = [
+            {"role": "system", "content": WHITE_CELL_PROMPT},
+            {
+                "role": "user",
+                "content": f"Topic: {topic}\n\nContext: {context}\n\nRed Audit:\n{red_critique}\n\nBlue Defense:\n{blue_defense}",
+            },
+        ]
+
+        async def report_white(message: str):
+            if ctx:
+                await ctx.report_progress(
+                    progress=90, total=100, message="White Cell is synthesizing..."
+                )
+
+        white_consensus = await client.generate_completion(
+            messages=white_messages,
+            temperature=0.1,
+            task_type="strategist",
+            timeout=300.0,
+            progress_callback=report_white if ctx else None,
+            complexity="critical",
+            tags=["sparring", "white-cell"],
+        )
+        white_consensus = ContentValidator.validate_response(white_consensus)
+
+        combined_report = f"# 🛡️ Triad Consensus Report: {topic}\n\n"
+        combined_report += "## 🥊 Turn 2: Red Cell (Adversarial Audit)\n\n"
+        combined_report += f"{red_critique}\n\n"
         combined_report += "---\n\n"
-        combined_report += "## 👑 Turn 3: Strategic Verdict (Final Move)\n\n"
-        combined_report += f"{final_strategy}"
+        combined_report += "## �️ Turn 3: Blue Cell (Strategic Defense)\n\n"
+        combined_report += f"{blue_defense}\n\n"
+        combined_report += "---\n\n"
+        combined_report += "## ⚖️ Turn 4: White Cell (Final Consensus)\n\n"
+        combined_report += f"{white_consensus}"
 
         return combined_report
