@@ -11,12 +11,23 @@ from qwen_mcp.tools import (
     list_available_models,
     set_model_in_registry,
     generate_sparring,
+    heal_registry,
 )
 from qwen_mcp.specter.telemetry import get_broadcaster
 from qwen_mcp.registry import registry
+import asyncio
+import sys
 import threading
 import uvicorn
 from fastapi import FastAPI, WebSocket
+
+# Force UTF-8 encoding for stdout/stderr on Windows to prevent 'krzaki'
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except (AttributeError, Exception):
+        pass
 
 # Initialize FastMCP Server
 mcp = FastMCP("Qwen MCP Server (DashScope)")
@@ -28,11 +39,11 @@ async def qwen_audit(
 ) -> str:
     """
     Audits the provided code or terminal logs using Qwen models.
-
-    Args:
-        content: The code snippet or terminal log content to analyze.
-        context: Optional background context (e.g., project goals, related files).
     """
+    broadcaster = get_broadcaster()
+    await broadcaster.broadcast_state({
+        "active_model": registry.get_best_model("strategist")
+    })
     return await generate_audit(content, context, ctx)
 
 
@@ -43,6 +54,10 @@ async def qwen_coder(
     """
     Generates or completes code using Qwen 3.5 Plus.
     """
+    broadcaster = get_broadcaster()
+    await broadcaster.broadcast_state({
+        "active_model": registry.get_best_model("coding")
+    })
     return await generate_code(prompt, context, ctx)
 
 
@@ -53,6 +68,10 @@ async def qwen_coder_25(
     """
     Generates or completes code using specialized Qwen-2.5-Coder-32B.
     """
+    broadcaster = get_broadcaster()
+    await broadcaster.broadcast_state({
+        "active_model": registry.get_best_model("coding")
+    })
     return await generate_code_25(prompt, context, ctx)
 
 
@@ -63,11 +82,11 @@ async def qwen_architect(
     """
     Initiates 'The Lachman Protocol' (LP).
     The server hires a dynamic expert squad to audit your goal and generate a high-precision Blueprint.
-
-    Args:
-        goal: What do you want to achieve?
-        context: Optional legacy code or background information.
     """
+    broadcaster = get_broadcaster()
+    await broadcaster.broadcast_state({
+        "active_model": registry.get_best_model("strategist")
+    })
     if ctx:
         await ctx.report_progress(
             progress=0, total=None, message="Initiating Lachman Protocol..."
@@ -76,19 +95,25 @@ async def qwen_architect(
 
 
 @mcp.tool()
-async def qwen_sparring(
-    topic: str, context: str = "", mode: str = "flash", ctx: Context = None
+async def qwen_sparring_flash(
+    topic: str, context: str = "", ctx: Context = None
 ) -> str:
     """
-    Initiates the 5D Sparring Engine (Multi-Agent Strategic Debate).
-    Moves the MCP from a coding assistant to a 'Cognitive Board of Directors'.
-
-    Args:
-        topic: The strategic dilemma or move to evaluate.
-        context: Optional situational background (e.g., power structure, history).
-        mode: 'flash' (Reasoning-only deep dive) or 'pro' (Adversarial Multi-Agent Debate).
+    ⚡ FLASH MODE: High-speed strategic analysis and reasoning-only deep dive.
+    Best for: Quick tactical decisions, content refinement, and logic checks.
     """
-    return await generate_sparring(topic, context, mode, ctx)
+    return await generate_sparring(topic, context, "flash", ctx)
+
+
+@mcp.tool()
+async def qwen_sparring_pro(
+    topic: str, context: str = "", ctx: Context = None
+) -> str:
+    """
+    🔥 PRO MODE: Full adversarial multi-agent debate (Lachman Protocol for Strategy).
+    Best for: High-stakes dilemmas, critical audit of plans, and stress-testing moves.
+    """
+    return await generate_sparring(topic, context, "pro", ctx)
 
 
 @mcp.tool()
@@ -165,7 +190,11 @@ def run_telemetry_server():
         try:
             while True:
                 # Keep alive and signal handling
-                data = await websocket.receive_text()
+                try:
+                    # Non-blocking check for messages + heartbeat
+                    await asyncio.wait_for(websocket.receive_text(), timeout=10)
+                except asyncio.TimeoutError:
+                    await websocket.send_json({"type": "heartbeat"})
         except Exception:
             pass
         finally:
@@ -202,6 +231,29 @@ def main():
         pass
 
     mcp.run()
+
+
+@mcp.tool()
+async def qwen_init_request() -> str:
+    """
+    ⚡ INITIALIZE NEW REQUEST: Resets 'This Prompt' token counter and buffers in the HUD.
+    MANDATORY: Call this as your FIRST tool at the start of EVERY new user prompt/task.
+    Failure to call this results in incorrect token accumulation in telemetry.
+    """
+    broadcaster = get_broadcaster()
+    await broadcaster.start_request()
+    return "✅ Specter HUD: 'This Prompt' counters reset. Ready for new engagement."
+
+
+@mcp.tool()
+async def qwen_heal_registry() -> str:
+    """
+    ⚡ SELF-HEALING: Analyzes available models and maps them to roles based on ROI and SOTA status.
+    Use this if tools report 'Model not found' or if you want to upgrade to the latest versions.
+    """
+    from qwen_mcp.api import DashScopeClient
+    client = DashScopeClient()
+    return await client.heal_registry()
 
 
 if __name__ == "__main__":

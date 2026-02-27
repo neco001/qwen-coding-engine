@@ -1,7 +1,8 @@
 import os
 import asyncio
 import logging
-from typing import List, Dict, Optional
+import codecs
+from typing import List, Dict, Any, Optional
 
 import textwrap
 from openai import (
@@ -98,6 +99,8 @@ class DashScopeClient:
         progress_callback=None,
         complexity: str = "auto",
         tags: Optional[List[str]] = None,
+        include_reasoning: bool = False,
+        model_override: Optional[str] = None,
     ) -> str:
         """Generate a chat completion with financial circuit breakers and retries."""
         request_timeout = timeout or self.default_timeout
@@ -116,7 +119,7 @@ class DashScopeClient:
                 msg["content"] = self.sanitizer_cls.redact(msg["content"])
 
         for attempt in range(2):
-            target_model = (
+            target_model = model_override or (
                 self.registry.route_request(
                     task_type, complexity_hint=complexity, context_tags=tags or []
                 )
@@ -124,8 +127,8 @@ class DashScopeClient:
                 else self.model_name
             )
             if attempt == 0:
-                logger.info(
-                    f"Requesting completion from {target_model} (timeout: {request_timeout}s)"
+                logger.warning(
+                    f"DEBUG: Requesting completion from model ID: '{target_model}' (override: {model_override})"
                 )
             else:
                 logger.info(f"Retrying completion from updated model {target_model}...")
@@ -151,8 +154,10 @@ class DashScopeClient:
 
                     full_response = ""
                     reasoning_log = ""
+                    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+                    
                     async for chunk in response:
-                        # Capture token usage if available in the final chunk
+                        # ... (usage tracking remains same)
                         if hasattr(chunk, "usage") and chunk.usage:
                             prompt_tokens = getattr(chunk.usage, "prompt_tokens", 0)
                             completion_tokens = getattr(
@@ -190,24 +195,33 @@ class DashScopeClient:
                             delta = chunk.choices[0].delta
 
                             # Support for reasoning_content (QwQ models)
+                            # Note: DashScope's 'reasoning_content' often comes in chunks.
+                            # We treat both content and reasoning_content as potential sources.
+                            
                             reasoning = getattr(delta, "reasoning_content", None)
                             if reasoning:
                                 reasoning_log += reasoning
-                                if len(reasoning_log) % 100 == 0 and progress_callback:
-                                    await progress_callback(message="[Thinking...]")
+                                # Broadast to HUD directly (safe, bypassed Pydantic/MCP validation)
+                                await get_broadcaster().update_stream(thinking=reasoning)
 
                             content = getattr(delta, "content", None)
                             if content:
                                 full_response += content
-                                if progress_callback:
-                                    await progress_callback(message=content)
+                                # Broadcast content to HUD
+                                await get_broadcaster().update_stream(content=content)
+                                
+                                # MCP Context progress is too sensitive for high-frequency chunks
+                                # we keep it disabled here to avoid Validation Errors.
 
                     if reasoning_log:
                         logger.info(
                             f"Reasoning completed ({len(reasoning_log)} chars)."
                         )
 
-                    return full_response.strip() or reasoning_log.strip()
+                    if include_reasoning and reasoning_log:
+                        return f"<thought>\n{reasoning_log.strip()}\n</thought>\n\n{full_response.strip()}".strip()
+                    
+                    return (full_response or reasoning_log).strip()
                 else:
                     # Standard mode
                     response = await self.client.chat.completions.create(
@@ -261,6 +275,9 @@ class DashScopeClient:
                     # Priority 1: standard content, Priority 2: reasoning_content (fallback)
                     content = getattr(msg, "content", "") or ""
                     reasoning = getattr(msg, "reasoning_content", "") or ""
+
+                    if include_reasoning and reasoning:
+                        return f"<thought>\n{reasoning.strip()}\n</thought>\n\n{content.strip()}".strip()
 
                     final_text = (content or reasoning).strip()
                     if not final_text:
@@ -462,7 +479,7 @@ class DashScopeClient:
     async def _handle_error(self, e: Exception, timeout: float) -> str:
         """Centralized error handling logic."""
         if "model_not_found" in str(e).lower() or "not found" in str(e).lower():
-            return "Error: Model not found even after auto-refresh attempt. Please check your account permissions or configuration."
+            return f"Error: Model not found. Exception: {str(e)}"
 
         if isinstance(e, AuthenticationError):
             logger.error("Authentication failed.")
