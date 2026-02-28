@@ -169,7 +169,7 @@ function App() {
                     >
                         <div className="prose prose-invert prose-sm max-w-none">
                             {telemetry.thinking && (
-                                <div className="text-[#c084fc] italic mb-4 opacity-80 border-l-2 border-[#c084fc]/30 pl-3 py-1 font-medium text-[12px]">
+                                <div className="text-[#529b0d] italic mb-4 opacity-80 border-l-2 border-[#529b0d]/30 pl-3 py-1 font-medium text-[12px]">
                                     <ReactMarkdown>{telemetry.thinking}</ReactMarkdown>
                                 </div>
                             )}
