@@ -15,11 +15,11 @@ class ModelRegistry:
     """Dynamic registry for ROI-optimized model selection (JSON Cached)."""
 
     ROLE_PROMPTS = {
-        "strategist": "Expert in high-level planning. MANDATORY PRIORITY: qwen3.5-plus. Use qwen-plus ONLY if 3.5 is missing.",
-        "coder": "Production-grade code generation. MANDATORY PRIORITY: qwen3-coder-plus.",
-        "specialist": "Complex logic & refactoring. MANDATORY PRIORITY: qwen3-coder-next. Fallback: qwen2.5-coder-32b.",
-        "analyst": "Deep reasoning, SRE audit. MANDATORY PRIORITY: qwq-plus. Fallback: qwq-32b.",
-        "scout": "Fast, cheap discovery. Priority: qwen-flash, qwen-turbo.",
+        "strategist": "Advanced reasoning, strategic planning, and adversary simulation. Focused on ROI.",
+        "coding": "High-fidelity code generation and refactoring following production standards. Default model: qwen3-coder-plus.",
+        "scout": "Exploration and identification of codebase patterns and structures.",
+        "analyst": "Deep dive into logs, performance metrics, and debugging complex runtime issues.",
+        "artist": "Creative image generation and visual design refinement."
     }
 
     COGNITIVE_LEVEL_MAP = {
@@ -45,20 +45,20 @@ class ModelRegistry:
 
         self.models = {
             "strategist": "qwen3.5-plus",
-            "coder": "qwen3.5-plus",
+            "coder": "qwen3-coder-plus",
             "specialist": "qwen2.5-coder-32b-instruct",
             "analyst": "qwq-plus",
             "scout": "qwen-turbo",
+            "artist": "qwen-image-edit",
         }
         self.metadata = {}  # Store HF metadata: {model_id: {tags, params, levels}}
         self.last_updated = datetime.min
         self.load_cache()
 
     async def sync_with_hf(self) -> str:
-        """Fetches latest Qwen model metadata from HF and updates levels/tags."""
+        """Fetches latest Qwen model metadata from HF and updates levels/tags with scoring priority."""
         url = "https://huggingface.co/api/models?search=qwen&sort=downloads&direction=-1&limit=100"
         try:
-            # Use run_in_executor for blocking urlopen
             loop = asyncio.get_event_loop()
 
             def fetch():
@@ -66,37 +66,32 @@ class ModelRegistry:
                     return json.loads(response.read().decode())
 
             models = await loop.run_in_executor(None, fetch)
-
+            
+            # Phase 1: Filter and Score
+            processed_models = self._filter_and_score_models(models)
+            
+            # Phase 2: Metadata Extraction & Level Mapping
             updates = 0
-            for m in models:
+            for m in processed_models:
                 mid = m.get("id")
                 if not mid:
                     continue
 
-                # Basic metadata extraction
                 pipeline = m.get("pipeline_tag", "text-generation")
                 tags = m.get("tags", [])
                 downloads = m.get("downloads", 0)
+                priority_score = m.get("priority_score", 0)
 
                 # Determine levels (heuristic)
                 levels = [2]  # default
                 m_lower = mid.lower()
 
-                # Tier 4: Heavyweights
-                if any(
-                    x in m_lower for x in ["qwq", "max", "plus", "72b", "110b", "math"]
-                ):
+                if any(x in m_lower for x in ["qwq", "max", "plus", "72b", "110b", "math"]):
                     levels.extend([3, 4])
-
-                # Tier 3: Specialists
                 if "coder" in m_lower or "next" in m_lower:
                     levels.extend([3, 4])
-
-                # Tier 1-2: Efficiency
                 if any(x in m_lower for x in ["turbo", "flash", "7b", "1.5b", "0.5b"]):
                     levels.extend([1, 2])
-
-                # SOTA override
                 if "3.5" in m_lower:
                     levels.append(4)
 
@@ -106,56 +101,56 @@ class ModelRegistry:
                     "tags": tags,
                     "downloads": downloads,
                     "levels": list(set(levels)),
+                    "priority_score": priority_score,
                 }
                 updates += 1
 
             await self.save_cache()
-            return f"Successfully synced {updates} models from HF."
+            return f"Successfully synced {updates} models from HF (ROI-Filtered)."
         except Exception as e:
             logger.error(f"HF Sync failed: {e}")
             return f"HF Sync failed: {str(e)}"
 
-    def score_model(self, model_id: str, criteria: dict) -> int:
-        score = 0
-        mid = model_id.lower()
+    def _filter_and_score_models(self, raw_metadata: list) -> list:
+        """Filters noisy pipelines and calculates priority based on name length and year."""
+        filtered = []
+        garbage = ["audio", "tts", "video", "omni", "asr", "vc", "realtime", "mt"]
+        
+        for model in raw_metadata:
+            mid = model.get("id", "").lower()
+            name = model.get("name", mid).lower()
+            
+            # Filter noise
+            if any(kw in mid for kw in garbage):
+                continue
+            
+            # Calculate priority: (Shorter name = Higher Priority) + (Later year = Higher Priority)
+            year = self._extract_year_from_name(mid)
+            # Use a large multiplier for length to ensure shorter name ALWAYS wins over year tie-breakers.
+            priority_score = ((100 - len(mid)) * 10000) + year
+            
+            model["priority_score"] = priority_score
+            filtered.append(model)
+            
+        return filtered
 
-        garbage = ["vl", "audio", "image", "tts", "asr", "vc", "omni", "mt", "realtime"]
-        if any(g in mid for g in garbage) and not any(
-            m in mid for m in criteria["must_have"]
-        ):
-            return -500
+    def _extract_year_from_name(self, name: str) -> int:
+        """Extracts 4-digit years (2024-2027) from name as priority tie-breaker."""
+        match = re.search(r"(202[4-7])", name)
+        return int(match.group(1)) if match else 0
 
-        for word in criteria["must_have"]:
-            if word in mid:
-                score += 100
 
-        for word in criteria["avoid"]:
-            if word in mid:
-                score -= 50
-
-        numbers = re.findall(r"(\d+(?:\.\d+)?)", mid)
-        for num_str in numbers:
-            num = float(num_str)
-            if 1.0 <= num <= 10.0:
-                score += int(num * 10)
-            elif num > 2000:
-                score += 1
-
-        if mid == criteria["fallback"]:
-            score += 20
-
-        if "-" in mid and any(char.isdigit() for char in mid.split("-")[-1]):
-            score -= 5
-
-        return score
-
-    def load_cache(self):
-        if self.cache_file.exists():
+    def load_cache(self, path: Path = None):
+        """Loads repository state from JSON cache. Handles schema migrations."""
+        target_file = path or self.cache_file
+        if target_file.exists():
             try:
-                data = json.loads(self.cache_file.read_text())
-                if data.get("schema_version", 1) != 2:
+                data = json.loads(target_file.read_text())
+                schema_v = data.get("schema_version", 1)
+                
+                if schema_v != 3:
                     logger.warning(
-                        "Cache schema version mismatch or old version. Regenerating..."
+                        f"ModelRegistry: Cache schema mismatch (v{schema_v} vs v3). Starting fresh."
                     )
                     return
 
@@ -170,26 +165,46 @@ class ModelRegistry:
                     f"ModelRegistry: Cache corrupted. Backing up and starting fresh: {e}"
                 )
                 try:
-                    self.cache_file.rename(self.cache_file.with_suffix(".json.bak"))
+                    target_file.rename(target_file.with_suffix(".json.bak"))
                 except Exception:
                     pass
 
-    async def save_cache(self):
+    def load_cache_from_path(self, path: str):
+        """API wrapper for testing."""
+        self.load_cache(Path(path))
+
+    async def save_cache(self, path: Path = None):
+        """Atomic write of the model registry to cache file (schema v3)."""
         async with self._lock:
             try:
+                target_file = path or self.cache_file
                 self.last_updated = datetime.now()
                 data = {
-                    "schema_version": 2,
+                    "schema_version": 3,
                     "updated_at": self.last_updated.isoformat(),
                     "models": self.models,
                     "metadata": self.metadata,
                 }
 
-                temp_file = self.cache_file.with_suffix(".json.tmp")
+                temp_file = target_file.with_suffix(".json.tmp")
                 temp_file.write_text(json.dumps(data, indent=2))
-                os.replace(temp_file, self.cache_file)
+                os.replace(temp_file, target_file)
             except Exception as e:
                 logger.error(f"ModelRegistry: Failed to save cache: {e}")
+
+    def save_cache_to_path(self, path: str):
+        """API wrapper for testing (blocking)."""
+        target_file = Path(path)
+        self.last_updated = datetime.now()
+        data = {
+            "schema_version": 3,
+            "updated_at": self.last_updated.isoformat(),
+            "models": self.models,
+            "metadata": self.metadata,
+        }
+        temp_file = target_file.with_suffix(".json.tmp")
+        temp_file.write_text(json.dumps(data, indent=2))
+        os.replace(temp_file, target_file)
 
     def route_request(
         self, task_type: str, complexity_hint: str = "auto", context_tags: list = []
@@ -199,21 +214,25 @@ class ModelRegistry:
         # print(f"DEBUG: Routing request for {task_type} (complexity: {complexity_hint})")
 
         complexity_map = {"low": 1, "auto": 2, "high": 3, "critical": 4}
+        # 0. Priority: Manual overrides/pinned roles
+        mapping = {
+            "discovery": "scout",
+            "scout": "scout",
+            "coding": "coder",
+            "coder": "coder",
+            "refactoring": "specialist",
+            "specialist": "specialist",
+            "audit": "analyst",
+            "analyst": "analyst",
+            "planning": "strategist",
+            "strategist": "strategist",
+        }
+        role = mapping.get(task_type)
+        if role and role in self.models:
+            return self.models[role]
+
         # 1. Ensure metadata is not empty
         if not self.metadata:
-            # Local mapping fallback if sync hasn't happened
-            mapping = {
-                "discovery": "scout",
-                "scout": "scout",
-                "coding": "coder",
-                "coder": "coder",
-                "refactoring": "specialist",
-                "specialist": "specialist",
-                "audit": "analyst",
-                "analyst": "analyst",
-                "planning": "strategist",
-                "strategist": "strategist",
-            }
             role = mapping.get(task_type, "strategist")
             return self.models.get(role, "qwen-plus")
 
@@ -245,14 +264,8 @@ class ModelRegistry:
                     if "instruct" in mid_lower or "chat" in mid_lower:
                         score += 1000
 
-                    # Heuristic B: SOTA preference
-                    if "3.5" in mid_lower:
-                        score += 500
-                    elif "2.5" in mid_lower:
-                        score += 100
-
-                    # Heuristic C: Parameter tie-breaker (prefer larger for higher tiers)
-                    score += int(meta.get("params", 0) / 1e9)
+                    # Heuristic B: SOTA preference (from metadata priority)
+                    score += meta.get("priority_score", 0)
 
                     scored_candidates.append((mid, score))
 

@@ -26,8 +26,11 @@ class TelemetryBroadcaster:
             "session_tokens": {"prompt": 0, "completion": 0},
             "loop_iteration": 0,
             "role_mapping": {},
+            "role_mapping": {},
             "thinking": "",
             "streaming_content": "",
+            "session_images": 0,
+            "request_images": 0,
         }
         # Accumulation state - Session
         self._session_prompt_total: int = 0
@@ -39,6 +42,8 @@ class TelemetryBroadcaster:
         self._thinking_buffer: str = ""
         self._content_buffer: str = ""
         self._last_interaction_time: float = 0
+        self._session_images_total: int = 0
+        self._request_images_total: int = 0
 
     async def add_client(self, websocket: WebSocket) -> None:
         async with self._lock:
@@ -91,8 +96,10 @@ class TelemetryBroadcaster:
             "request_tokens": {"prompt": 0, "completion": 0},
             "thinking": "",
             "streaming_content": "",
-            "loop_iteration": 0
+            "loop_iteration": 0,
+            "request_images": 0
         })
+        self._request_images_total = 0
 
     async def update_stream(self, thinking: str = "", content: str = ""):
         """Appends to the current stream buffers and broadcasts."""
@@ -107,7 +114,7 @@ class TelemetryBroadcaster:
         })
 
     async def report_usage(
-        self, model: str, prompt_tokens: int, completion_tokens: int
+        self, model: str, prompt_tokens: int, completion_tokens: int, is_image: bool = False
     ):
         """Accumulates token usage. Resets 'Request' level if inactivity > 60s."""
         import time
@@ -123,6 +130,10 @@ class TelemetryBroadcaster:
 
         self._last_interaction_time = now
         
+        if is_image:
+            self._session_images_total += 1
+            self._request_images_total += 1
+
         self._session_prompt_total += prompt_tokens
         self._session_completion_total += completion_tokens
         
@@ -140,5 +151,7 @@ class TelemetryBroadcaster:
                     "prompt": self._session_prompt_total,
                     "completion": self._session_completion_total,
                 },
+                "session_images": self._session_images_total,
+                "request_images": self._request_images_total,
             }
         )

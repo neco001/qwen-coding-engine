@@ -1,0 +1,10 @@
+[2026-03-02 12:00:02.953257] URL: https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+[2026-03-02 12:00:02.953279] MASKED_KEY: sk-020...af38
+[2026-03-02 12:00:02.953283] HEADERS: {
+  "Content-Type": "application/json"
+}
+[2026-03-02 12:07:10.713484] URL: https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+[2026-03-02 12:07:10.713505] MASKED_KEY: sk-020...af38
+[2026-03-02 12:07:10.713509] HEADERS: {
+  "Content-Type": "application/json"
+}

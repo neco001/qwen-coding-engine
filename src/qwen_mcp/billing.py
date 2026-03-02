@@ -26,13 +26,19 @@ class BillingTracker:
                         model_name VARCHAR,
                         prompt_tokens INTEGER,
                         completion_tokens INTEGER,
-                        total_tokens INTEGER
+                        total_tokens INTEGER,
+                        image_count INTEGER DEFAULT 0
                     )
                 """)
+                # Migration: Add image_count to legacy tables if missing
+                try:
+                    con.execute("ALTER TABLE usage_stats ADD COLUMN image_count INTEGER DEFAULT 0")
+                except:
+                    pass
         except Exception as e:
             logger.error(f"BillingTracker: Failed to initialize DB: {e}")
 
-    def log_usage(self, project_name: str, model_name: str, prompt_tokens: int, completion_tokens: int):
+    def log_usage(self, project_name: str, model_name: str, prompt_tokens: int, completion_tokens: int, image_count: int = 0):
         total_tokens = prompt_tokens + completion_tokens
         now = datetime.now()
         try:
@@ -41,8 +47,8 @@ class BillingTracker:
                 try:
                     with duckdb.connect(str(self.db_path)) as con:
                         con.execute(
-                            "INSERT INTO usage_stats VALUES (?, ?, ?, ?, ?, ?)",
-                            (now, project_name, model_name, prompt_tokens, completion_tokens, total_tokens)
+                            "INSERT INTO usage_stats VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (now, project_name, model_name, prompt_tokens, completion_tokens, total_tokens, image_count)
                         )
                     break
                 except duckdb.IOException as e:

@@ -33,6 +33,11 @@ class SecuritySanitizer:
                 )
                 sanitized = re.sub(pattern, "[REDACTED]", sanitized)
         return sanitized
+        
+    @classmethod
+    def sanitize_input(cls, text: str) -> str:
+        """Alias for compatibility with BaseDashScopeClient expectations."""
+        return cls.redact(text)
 
 
 class ContentValidator:

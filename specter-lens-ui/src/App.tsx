@@ -159,22 +159,22 @@ function App() {
 
                 {/* 5. LIVE STREAM (Now with Markdown and Correct Direction) */}
                 <section className={`flex flex-col space-y-2 ${hasStream ? 'block' : 'hidden'}`}>
-                    <div className="text-[10px] text-[#facc15]/50 uppercase tracking-[0.2em] px-1 flex items-center space-x-2">
+                    <div className="text-[10px] text-[#00ff41]/70 uppercase tracking-[0.2em] px-1 flex items-center space-x-2">
                         <Zap className="w-3 h-3 animate-pulse" />
                         <span>Live Evolution</span>
                     </div>
                     <div
                         ref={streamRef}
-                        className="bg-white/[0.02] border border-[#facc15]/10 rounded-sm p-4 max-h-[350px] overflow-y-auto scroll-smooth leading-relaxed"
+                        className="bg-[#00ff41]/[0.02] border border-[#00ff41]/20 rounded-sm p-4 max-h-[350px] overflow-y-auto scroll-smooth leading-relaxed"
                     >
                         <div className="prose prose-invert prose-sm max-w-none">
                             {telemetry.thinking && (
-                                <div className="text-[#529b0d] italic mb-4 opacity-80 border-l-2 border-[#529b0d]/30 pl-3 py-1 font-medium text-[12px]">
+                                <div className="text-[#00ff41]/60 italic mb-4 opacity-80 border-l-2 border-[#00ff41]/30 pl-3 py-1 font-medium text-[12px]">
                                     <ReactMarkdown>{telemetry.thinking}</ReactMarkdown>
                                 </div>
                             )}
                             {telemetry.streaming_content && (
-                                <div className="text-white/80 text-[12px] font-medium markdown-body">
+                                <div className="text-[#00ff41] text-[12px] font-medium markdown-body drop-shadow-[0_0_5px_rgba(0,255,65,0.2)]">
                                     <ReactMarkdown>{telemetry.streaming_content}</ReactMarkdown>
                                 </div>
                             )}

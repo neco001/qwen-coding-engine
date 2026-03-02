@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List, Dict, Any, Union
 from mcp.server.fastmcp import FastMCP, Context
 from qwen_mcp.tools import (
     generate_audit,
@@ -12,6 +12,9 @@ from qwen_mcp.tools import (
     set_model_in_registry,
     generate_sparring,
     heal_registry,
+    refine_image_prompt,
+    prepare_visual_reference,
+    generate_qwen_image,
 )
 from qwen_mcp.specter.telemetry import get_broadcaster
 from qwen_mcp.registry import registry
@@ -243,6 +246,45 @@ async def qwen_init_request() -> str:
     broadcaster = get_broadcaster()
     await broadcaster.start_request()
     return "✅ Specter HUD: 'This Prompt' counters reset. Ready for new engagement."
+
+
+@mcp.tool()
+async def qwen_refine_image_prompt(raw_prompt: str, ctx: Context = None) -> str:
+    """
+    Uses qwen-plus to expand a raw idea into 3 balanced WanX-optimized prompts.
+    Provides realistic, artistic, and 'vibe' variations.
+    """
+    return await refine_image_prompt(raw_prompt, ctx)
+
+
+@mcp.tool()
+async def qwen_prepare_visual_reference(image_paths: List[str]) -> str:
+    """
+    Collates up to 4 reference images into a single grid (cheatsheet) for identity preservation.
+    Saves a temporary grid for use in WanX generation at .inbox/wanx_cheatsheet.png.
+    """
+    from typing import List
+    return await prepare_visual_reference(image_paths)
+
+
+@mcp.tool()
+async def wanx_gen_isolated(
+    prompt: str, 
+    image_paths: List[str] = None, 
+    aspect_ratio: str = "1:1",
+    dry_run: bool = False
+) -> str:
+    """
+    ULTRA-STABLE Image Generation. 
+    Renamed and simplified to bypass transport errors.
+    """
+    from qwen_mcp.tools import generate_qwen_image
+    return await generate_qwen_image(
+        prompt=prompt,
+        image_paths=image_paths,
+        aspect_ratio=aspect_ratio,
+        dry_run=dry_run
+    )
 
 
 @mcp.tool()

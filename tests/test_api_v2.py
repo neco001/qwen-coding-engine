@@ -24,7 +24,7 @@ async def test_generate_completion_reasoning_fallback():
     mock_response.choices = [mock_choice]
     mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=20)
 
-    with patch("qwen_mcp.api.AsyncOpenAI") as MockAsyncOpenAI:
+    with patch("qwen_mcp.base.AsyncOpenAI") as MockAsyncOpenAI:
         mock_instance = MockAsyncOpenAI.return_value
         # Mocking the async call
         mock_instance.chat.completions.create = AsyncMock(return_value=mock_response)
