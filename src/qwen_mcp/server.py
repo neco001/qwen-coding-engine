@@ -209,7 +209,7 @@ def run_telemetry_server():
         server = uvicorn.Server(config)
         server.run()
     except Exception as e:
-        print(f"❌ Telemetry Sidecar failed: {e}")
+        print(f"❌ Telemetry Sidecar failed: {e}", file=sys.stderr)
 
 async def sync_hud_state():
     """Broadcaster update for role mapping and basic state."""
@@ -218,8 +218,8 @@ async def sync_hud_state():
 
 def main():
     """Main entrypoint for the MCP server."""
-    print("🚀 [SPECTER] Starting Qwen Engineering Engine Context...")
-    print("📡 [SPECTER] Sidecar Uplink on port 8878/ws")
+    print("🚀 [SPECTER] Starting Qwen Engineering Engine Context...", file=sys.stderr)
+    print("📡 [SPECTER] Sidecar Uplink on port 8878/ws", file=sys.stderr)
     
     # Start telemetry in dedicated thread
     sidecar = threading.Thread(target=run_telemetry_server, daemon=True)
@@ -271,19 +271,27 @@ async def qwen_prepare_visual_reference(image_paths: List[str]) -> str:
 async def wanx_gen_isolated(
     prompt: str, 
     image_paths: List[str] = None, 
-    aspect_ratio: str = "1:1",
-    dry_run: bool = False
+    size: str = "1:1",
+    prompt_extend: bool = True,
+    dry_run: bool = False,
+    ctx: Context = None
 ) -> str:
     """
     ULTRA-STABLE Image Generation. 
-    Renamed and simplified to bypass transport errors.
+    Uses Lean Async architecture (Direct API + Auto-download).
+    
+    Parameters:
+    - size: Valid formats: '1:1', '16:9', '4:3', '3:4', '9:16' OR exact 'width*height' (e.g. '1664*928').
+    - prompt_extend: Whether to let AI refine your prompt. Set to False for strict detail fidelity.
     """
     from qwen_mcp.tools import generate_qwen_image
     return await generate_qwen_image(
         prompt=prompt,
         image_paths=image_paths,
-        aspect_ratio=aspect_ratio,
-        dry_run=dry_run
+        size=size,
+        prompt_extend=prompt_extend,
+        dry_run=dry_run,
+        ctx=ctx
     )
 
 

@@ -1,16 +1,20 @@
 import base64
 import os
 import mimetypes
+import logging
 from typing import List, Dict, Any, Optional
+from qwen_mcp.wanx_constants import ASPECT_RATIO_MAP, MODEL_LIMITS, DEFAULT_MODEL, DEFAULT_SIZE
+
+logger = logging.getLogger(__name__)
 
 class WanxPayloadBuilder:
-    def __init__(self, model: str = "qwen-image-edit-max", size: str = "1024*1024"):
+    def __init__(self, model: Optional[str] = None, size: Optional[str] = None):
         self.model = model
+        self.size = size
         self.prompt = ""
         self.images = []
-        self.size = size
         self.n = 1
-        self.negative_prompt = "low quality, bad proportions, blurry, text, digits"
+        self.negative_prompt = "low resolution, low quality, deformed limbs, deformed fingers, oversaturated, waxy, no facial details, overly smooth, AI-like, chaotic composition, blurry text, distorted text."
         self.prompt_extend = True
 
     def set_model(self, model: str) -> 'WanxPayloadBuilder':
@@ -22,14 +26,12 @@ class WanxPayloadBuilder:
         return self
 
     def set_images(self, images: List[str]) -> 'WanxPayloadBuilder':
-        if len(images) > 3:
-            # Instead of raising we can just slice to be more permissive with high-level tools
-            self.images = images[:3]
-        else:
-            self.images = images
+        # Limit to 3 images as per API spec for edit-max
+        self.images = images[:3]
         return self
 
     def set_size(self, size: str) -> 'WanxPayloadBuilder':
+        # size can be "1:1" or "1328*1328"
         self.size = size
         return self
 
@@ -37,46 +39,57 @@ class WanxPayloadBuilder:
         self.n = n
         return self
 
-    def set_negative_prompt(self, negative_prompt: str) -> 'WanxPayloadBuilder':
-        self.negative_prompt = negative_prompt
-        return self
-
     def set_prompt_extend(self, prompt_extend: bool) -> 'WanxPayloadBuilder':
         self.prompt_extend = prompt_extend
         return self
 
+    def _encode_image(self, path: str) -> str:
+        """Helper to encode local file to base64 with data URI."""
+        if path.startswith(("http://", "https://", "data:image")):
+            return path
+        
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                data = f.read()
+                b64_data = base64.b64encode(data).decode("utf-8")
+            mime = mimetypes.guess_type(path)[0] or "image/jpeg"
+            return f"data:{mime};base64,{b64_data}"
+        
+        return path
+
     def build(self) -> Dict[str, Any]:
-        """Constructs the final DashScope WanX 2.1 payload."""
+        """Constructs the final DashScope WanX payload."""
+        
+        # 1. Determine Model
+        model_name = self.model
+        if not model_name:
+            model_name = "qwen-image-edit-max" if self.images else "qwen-image-max"
+        
+        # 2. Determine Size String
+        # Map human-readable (16:9) to API format (1664*928)
+        size_str = ASPECT_RATIO_MAP.get(self.size, self.size) if self.size else DEFAULT_SIZE
+        if "*" not in size_str: # Final fail-safe
+            size_str = DEFAULT_SIZE
+
+        # 3. Model Constraints (Enforce n=1 for qwen-image-max)
+        n_val = self.n
+        if model_name == "qwen-image-max":
+            n_val = 1
+        
+        # 4. Construct Content Array
         content = []
         
-        # 1. Images (1 to 3 objects)
-        for i, path in enumerate(self.images[:3]):
-            if not path:
-                continue
-                
-            if path.startswith(("http://", "https://", "data:image")):
-                content.append({"image": path})
-            elif os.path.exists(path):
-                try:
-                    with open(path, "rb") as f:
-                        data = f.read()
-                        b64_data = base64.b64encode(data).decode("utf-8")
-                    # Try to guess mime, fallback to jpeg
-                    mime = mimetypes.guess_type(path)[0] or "image/jpeg"
-                    content.append({"image": f"data:{mime};base64,{b64_data}"})
-                except Exception as e:
-                    # In dry_run we maybe want to see the error, but builder should be robust
-                    content.append({"image": f"ERROR: Failed to encode {path}: {str(e)}"})
-            else:
-                # If it's not a URL and not a local file, it might be an orphaned string
-                # We append it as-is (maybe it's a temp URL from another tool)
-                content.append({"image": path})
+        # Images first
+        for img_path in self.images:
+            encoded = self._encode_image(img_path)
+            content.append({"image": encoded})
+        
+        # Exactly one text object (Required)
+        content.append({"text": self.prompt or "Generate an image."})
 
-        # 2. Text instruction (Exactly one)
-        content.append({"text": self.prompt or "Generate an image based on references."})
-
+        # Final Payload Structure
         return {
-            "model": self.model,
+            "model": model_name,
             "input": {
                 "messages": [
                     {
@@ -86,10 +99,10 @@ class WanxPayloadBuilder:
                 ]
             },
             "parameters": {
-                "n": self.n,
+                "size": size_str,
+                "n": n_val,
                 "negative_prompt": self.negative_prompt,
                 "prompt_extend": self.prompt_extend,
-                "watermark": False,
-                "size": self.size
+                "watermark": False
             }
         }

@@ -12,10 +12,13 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# Alibaba Cloud DashScope API base URL for OpenAI compatibility
+# Dynamic matching for WanX region based on main compatible endpoint
+_MAIN_BASE = os.getenv("DASHSCOPE_API_BASE", "https://dashscope-intl.aliyuncs.com")
+_IS_INTL = "intl" in _MAIN_BASE.lower()
+DEFAULT_WANX_BASE = "https://dashscope-intl.aliyuncs.com/api/v1" if _IS_INTL else "https://dashscope.aliyuncs.com/api/v1"
+
 DASHSCOPE_BASE_URL = os.getenv("DASHSCOPE_API_BASE", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
-# WanX Multi-modal API base URL (China region - handles Async better)
-DASHSCOPE_WANX_BASE_URL = os.getenv("DASHSCOPE_WANX_BASE", "https://dashscope.aliyuncs.com/api/v1")
+DASHSCOPE_WANX_BASE_URL = os.getenv("DASHSCOPE_WANX_BASE", DEFAULT_WANX_BASE)
 
 class BaseDashScopeClient:
     """Base client for DashScope/Ollama configuration and authentication."""
@@ -49,8 +52,9 @@ class BaseDashScopeClient:
         self.max_input_tokens = int(os.getenv("MAX_INPUT_TOKENS", "32000"))
         self.max_output_tokens = int(os.getenv("MAX_OUTPUT_TOKENS", "4000"))
 
+        self.api_key = api_key
         # Initialize the OpenAI async client
-        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=2)
+        self.client = AsyncOpenAI(api_key=self.api_key, base_url=base_url, max_retries=2)
         self.session_usage = {}
 
     def estimate_tokens(self, messages: List[Dict[str, str]]) -> int:

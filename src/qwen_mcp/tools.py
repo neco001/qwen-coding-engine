@@ -145,25 +145,61 @@ async def heal_registry() -> str:
 async def generate_qwen_image(
     prompt: str, 
     image_paths: List[str] = None, 
-    aspect_ratio: str = "1:1",
+    size: str = "1:1",
+    prompt_extend: bool = True,
     dry_run: bool = False,
+    ctx: Optional[Context] = None
 ) -> str:
-    """Executes WanX image generation via isolated synchronous worker."""
-    # NO top level imports of logic modules here to avoid circulars
-    from .executor import generate_qwen_image_robust
+    """Executes WanX image generation via direct async API calls."""
+    from qwen_mcp.wanx_client import WanxClient
+    from qwen_mcp.wanx_builder import WanxPayloadBuilder
+    from qwen_mcp.api import DashScopeClient
     
-    # We run the synchronous executor in a thread to not block the MCP event loop
-    import asyncio
-    loop = asyncio.get_event_loop()
+    # Get API key from DashScopeClient - fallback to environment
+    ds_client = DashScopeClient()
+    api_key = getattr(ds_client, 'api_key', None) or os.getenv("DASHSCOPE_API_KEY") or os.getenv("ALIBABA_AI_KEY")
     
-    executor_task = loop.run_in_executor(None, lambda: generate_qwen_image_robust(
-        prompt=prompt,
-        image_paths=image_paths,
-        aspect_ratio=aspect_ratio,
-        dry_run=dry_run
-    ))
+    if not api_key:
+        return "Error: DashScope API key not found in environment or client."
+
+    if dry_run:
+        return f"Dry Run: Would generate image with prompt '{prompt}' and images {image_paths}"
+
+    # Build payload using the smart builder
+    builder = WanxPayloadBuilder()
+    builder.set_prompt(prompt).set_size(size).set_prompt_extend(prompt_extend)
     
-    return await executor_task
+    if image_paths:
+        valid_paths = [p for p in image_paths if os.path.exists(p)]
+        builder.set_images(valid_paths)
+        for p in image_paths:
+            if not os.path.exists(p):
+                _dbg(f"Warning: Image path not found: {p}")
+
+    payload = builder.build()
+    
+    # Initialize WanxClient
+    wanx = WanxClient(api_key=api_key)
+    
+    try:
+        if ctx:
+            ctx.info(f"🎨 Starting WanX Generation (Lean Async)...")
+        
+        # Execute full cycle (Request -> Poll -> Download)
+        result = await wanx.generate_image_full(payload)
+        
+        local_paths = result.get("local_paths", [])
+        if not local_paths:
+            return "Error: Generation succeeded but no local files were saved."
+        
+        paths_str = "\n".join([f"- `{p}`" for p in local_paths])
+        return f"✅ **Image Generated Successfully!**\nLocal files saved at:\n{paths_str}\n\nYou can now view these files in your workspace."
+        
+    except Exception as e:
+        error_msg = f"❌ **Generation Failed:** {str(e)}"
+        _dbg(error_msg)
+        return error_msg
+
 
 
 async def refine_image_prompt(raw_prompt: str, ctx: Optional[Context] = None) -> str:

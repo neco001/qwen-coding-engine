@@ -116,7 +116,7 @@ async def test_wanx_client_generate_image_full_async_flow(mock_aiohttp):
     
     assert "local_paths" in result
     assert len(result["local_paths"]) == 1
-    assert "async-result" in result["local_paths"][0]
+    assert os.path.exists(result["local_paths"][0])
     
     if os.path.exists(result["local_paths"][0]):
         os.remove(result["local_paths"][0])
