@@ -118,3 +118,14 @@ Exception: DashScope API Error (403): {"request_id":"3059233e-7c1d-94ae-8f46-572
 [18:03:46.951] [TOOL] ❌ **Generation Failed:** DashScope API Error (400): {"request_id":"a868cfaf-da5f-9b34-9bcc-792ee4ca033b","code":"InvalidParameter","message":"Invalid size format: {\"name\": \"InvalidParameter\", \"code\": 400, \"message\": \"Invalid size format: 1:1, expected format: width*height\", \"internal_name\": \"InvalidParameter\"}"}
 [18:29:35.936] [TOOL] ❌ **Generation Failed:** DashScope API Error (400): {"request_id":"e7d70b28-9a33-9e66-8b6b-3944ac0f0883","code":"InvalidParameter","message":"For image editing, the message must contain 1~3 image content items. Got 0 image items."}
 [18:33:50.834] [TOOL] ❌ **Generation Failed:** DashScope API Error (400): {"request_id":"bcf39330-10d4-9097-bd9a-522d8382e8dc","code":"InvalidParameter","message":"messages parameter invalid, please check the request parameters."}
+[20:02:55.448] [TOOL] Warning: Image path not found: c:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\inbox\wanx_1640e06b.png
+[20:02:55.448] [TOOL] Warning: Image path not found: c:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\inbox\img5.jpg
+[20:02:55.449] [TOOL] Warning: Image path not found: c:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\inbox\img4.jpg
+[21:12:53.344] [TOOL] Warning: Image path not found: c:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\inbox\img4.jpg
+[21:12:53.345] [TOOL] Warning: Image path not found: c:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\inbox\img5.jpg
+[21:28:03.637] [TOOL] Warning: Image path not found: c:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\inbox\img4.jpg
+[21:28:03.638] [TOOL] Warning: Image path not found: c:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\inbox\img5.jpg
+[21:28:03.638] [TOOL] Warning: Image path not found: c:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\inbox\wanx_1640e06b.png
+[21:34:51.737] [TOOL] Warning: Image path not found: c:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\inbox\img4.jpg
+[21:34:51.738] [TOOL] Warning: Image path not found: c:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\inbox\img5.jpg
+[21:34:51.739] [TOOL] Warning: Image path not found: c:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\inbox\wanx_1640e06b.png

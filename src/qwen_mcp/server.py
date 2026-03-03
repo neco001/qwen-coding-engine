@@ -272,6 +272,7 @@ async def wanx_gen_isolated(
     prompt: str, 
     image_paths: List[str] = None, 
     size: str = "1:1",
+    model: Optional[str] = None,
     prompt_extend: bool = True,
     dry_run: bool = False,
     ctx: Context = None
@@ -282,6 +283,7 @@ async def wanx_gen_isolated(
     
     Parameters:
     - size: Valid formats: '1:1', '16:9', '4:3', '3:4', '9:16' OR exact 'width*height' (e.g. '1664*928').
+    - model: Optional: 'qwen-image-max' or 'qwen-image-edit-max'.
     - prompt_extend: Whether to let AI refine your prompt. Set to False for strict detail fidelity.
     """
     from qwen_mcp.tools import generate_qwen_image
@@ -289,6 +291,7 @@ async def wanx_gen_isolated(
         prompt=prompt,
         image_paths=image_paths,
         size=size,
+        model=model,
         prompt_extend=prompt_extend,
         dry_run=dry_run,
         ctx=ctx

@@ -146,6 +146,7 @@ async def generate_qwen_image(
     prompt: str, 
     image_paths: List[str] = None, 
     size: str = "1:1",
+    model: Optional[str] = None,
     prompt_extend: bool = True,
     dry_run: bool = False,
     ctx: Optional[Context] = None
@@ -167,7 +168,7 @@ async def generate_qwen_image(
 
     # Build payload using the smart builder
     builder = WanxPayloadBuilder()
-    builder.set_prompt(prompt).set_size(size).set_prompt_extend(prompt_extend)
+    builder.set_model(model).set_prompt(prompt).set_size(size).set_prompt_extend(prompt_extend)
     
     if image_paths:
         valid_paths = [p for p in image_paths if os.path.exists(p)]

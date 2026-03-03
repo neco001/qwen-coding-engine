@@ -95,3 +95,48 @@
 [2026-03-02 19:59:20.340119] HEADERS: {
   "Content-Type": "application/json"
 }
+[2026-03-02 20:02:55.451078] URL: https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+[2026-03-02 20:02:55.451113] ASYNC: False
+[2026-03-02 20:02:55.451125] HEADERS: {
+  "Content-Type": "application/json"
+}
+[2026-03-02 21:12:53.347006] URL: https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+[2026-03-02 21:12:53.347018] ASYNC: False
+[2026-03-02 21:12:53.347024] HEADERS: {
+  "Content-Type": "application/json"
+}
+[2026-03-02 21:28:03.640203] URL: https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+[2026-03-02 21:28:03.640220] ASYNC: False
+[2026-03-02 21:28:03.640225] HEADERS: {
+  "Content-Type": "application/json"
+}
+[2026-03-02 21:34:51.742082] URL: https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+[2026-03-02 21:34:51.742105] ASYNC: False
+[2026-03-02 21:34:51.742114] HEADERS: {
+  "Content-Type": "application/json"
+}
+[2026-03-03 14:41:35.643712] URL: https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+[2026-03-03 14:41:35.644060] ASYNC: False
+[2026-03-03 14:41:35.644076] HEADERS: {
+  "Content-Type": "application/json"
+}
+[2026-03-03 16:29:03.866028] URL: https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+[2026-03-03 16:29:03.866561] ASYNC: False
+[2026-03-03 16:29:03.866577] HEADERS: {
+  "Content-Type": "application/json"
+}
+[2026-03-03 16:31:20.642554] URL: https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+[2026-03-03 16:31:20.642579] ASYNC: False
+[2026-03-03 16:31:20.642587] HEADERS: {
+  "Content-Type": "application/json"
+}
+[2026-03-03 16:38:57.172294] URL: https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+[2026-03-03 16:38:57.172325] ASYNC: False
+[2026-03-03 16:38:57.172334] HEADERS: {
+  "Content-Type": "application/json"
+}
+[2026-03-03 17:08:41.450698] URL: https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+[2026-03-03 17:08:41.450738] ASYNC: False
+[2026-03-03 17:08:41.450750] HEADERS: {
+  "Content-Type": "application/json"
+}

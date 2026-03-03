@@ -18,13 +18,21 @@ async def test_async_wrapper_logic():
     
     img1_path = r"C:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\.inbox\img4.jpg"
     img2_path = r"C:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\.inbox\img5.jpg"
-    img3_path = r"C:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\.inbox\pict6.png"
-
+    
     img1_b64 = encode_image(img1_path)
     img2_b64 = encode_image(img2_path)
-    img3_b64 = encode_image(img3_path)
+    
+    # Cleaning the prompt from "episodes" - focused on geometry and identity.
     prompttt = """ 
-        improve details of powerbank on image3, with reference powerbanks on image1 and image2 . keep scene of image3 as it is. just improve details of powerbank.  
+        **The goal** of this task is to get **product packshot in new perspective**. 
+        - show product from image 1 and image 2.
+        - *Position:* The product is lying flat with the top edge pointing towards the upper right and the bottom edge towards the lower left.
+        - *Perspective:* The photo is taken from a high-angle, slightly elevated perspective (roughly 45 degrees), looking down at the device. 
+        - prohibited is to change color or change of the look of any part of the product
+        - product should be on white, plain background.
+        - you have to keep colors, and product details on very high level.
+        - Prohibited is to change color of displayed `100%` or `22.5W` text.
+        - keep high level od similarity of the braided lanyard, including the "cube" shape of the lanyard.
     """
     payload = {
         "model": "qwen-image-edit-max",
@@ -35,7 +43,6 @@ async def test_async_wrapper_logic():
                     "content": [
                         {"image": f"data:image/jpeg;base64,{img1_b64}"},
                         {"image": f"data:image/jpeg;base64,{img2_b64}"},
-                        {"image": f"data:image/jpeg;base64,{img3_b64}"},
                         {"text": f"{prompttt}"}
                     ]
                 }
@@ -44,8 +51,8 @@ async def test_async_wrapper_logic():
         "parameters": {
             "n": 1,
             "size": "1024*1024",
-            "negative_prompt": "low quality, bad proportions, blurry",
-            "prompt_extend": True,
+            "negative_prompt": "low quality, bad proportions, blurry, deformed text, stand-up position",
+            "prompt_extend": False,
             "watermark": False
         }
     }
