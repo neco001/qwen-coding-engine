@@ -7,25 +7,14 @@ from typing import List, Dict, Any, Optional
 # Base modules resulting from modularization
 from .registry import ModelRegistry, registry as global_registry
 from .completions import CompletionHandler
-from .images import ImageHandler, DEFAULT_IMAGE_SIZE
+from .billing import billing_tracker
 
 logger = logging.getLogger(__name__)
 
-# Standard aspect ratios for WanX 2.1
-ASPECT_RATIOS = {
-    "1:1": "1024*1024",
-    "16:9": "1280*720",
-    "9:16": "720*1280",
-    "3:2": "1200*800",
-    "2:3": "800*1200",
-    "4:3": "1024*768",
-    "3:4": "768*1024"
-}
-
-class DashScopeClient(CompletionHandler, ImageHandler):
+class DashScopeClient(CompletionHandler):
     """
     Unified client facade for DashScope interactions.
-    Delegates logic to CompletionHandler and ImageHandler while maintaining
+    Delegates logic to CompletionHandler while maintaining
     registry healing and common configuration from BaseDashScopeClient.
     """
 

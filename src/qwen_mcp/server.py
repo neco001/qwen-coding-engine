@@ -12,9 +12,6 @@ from qwen_mcp.tools import (
     set_model_in_registry,
     generate_sparring,
     heal_registry,
-    refine_image_prompt,
-    prepare_visual_reference,
-    generate_qwen_image,
 )
 from qwen_mcp.specter.telemetry import get_broadcaster
 from qwen_mcp.registry import registry
@@ -38,7 +35,7 @@ mcp = FastMCP("Qwen MCP Server (DashScope)")
 
 @mcp.tool()
 async def qwen_audit(
-    content: str, context: Optional[str] = None, ctx: Context = None
+    content: str, context: Optional[str] = None, swarm: bool = True, ctx: Context = None
 ) -> str:
     """
     Audits the provided code or terminal logs using Qwen models.
@@ -47,12 +44,12 @@ async def qwen_audit(
     await broadcaster.broadcast_state({
         "active_model": registry.get_best_model("strategist")
     })
-    return await generate_audit(content, context, ctx)
+    return await generate_audit(content, context, swarm, ctx)
 
 
 @mcp.tool()
 async def qwen_coder(
-    prompt: str, context: Optional[str] = None, ctx: Context = None
+    prompt: str, context: Optional[str] = None, swarm: bool = True, ctx: Context = None
 ) -> str:
     """
     Generates or completes code using Qwen 3.5 Plus.
@@ -61,12 +58,12 @@ async def qwen_coder(
     await broadcaster.broadcast_state({
         "active_model": registry.get_best_model("coding")
     })
-    return await generate_code(prompt, context, ctx)
+    return await generate_code(prompt, context, swarm, ctx)
 
 
 @mcp.tool()
 async def qwen_coder_25(
-    prompt: str, context: Optional[str] = None, ctx: Context = None
+    prompt: str, context: Optional[str] = None, swarm: bool = True, ctx: Context = None
 ) -> str:
     """
     Generates or completes code using specialized Qwen-2.5-Coder-32B.
@@ -75,7 +72,9 @@ async def qwen_coder_25(
     await broadcaster.broadcast_state({
         "active_model": registry.get_best_model("coding")
     })
-    return await generate_code_25(prompt, context, ctx)
+    # For now coder_25 still uses generate_code_25 which needs mode support if we want swarm here too
+    # Let's update generate_code_25 in tools.py similarly
+    return await generate_code_25(prompt, context, swarm, ctx)
 
 
 @mcp.tool()
@@ -248,54 +247,6 @@ async def qwen_init_request() -> str:
     return "✅ Specter HUD: 'This Prompt' counters reset. Ready for new engagement."
 
 
-@mcp.tool()
-async def qwen_refine_image_prompt(raw_prompt: str, ctx: Context = None) -> str:
-    """
-    Uses qwen-plus to expand a raw idea into 3 balanced WanX-optimized prompts.
-    Provides realistic, artistic, and 'vibe' variations.
-    """
-    return await refine_image_prompt(raw_prompt, ctx)
-
-
-@mcp.tool()
-async def qwen_prepare_visual_reference(image_paths: List[str]) -> str:
-    """
-    Collates up to 4 reference images into a single grid (cheatsheet) for identity preservation.
-    Saves a temporary grid for use in WanX generation at .inbox/wanx_cheatsheet.png.
-    """
-    from typing import List
-    return await prepare_visual_reference(image_paths)
-
-
-@mcp.tool()
-async def wanx_gen_isolated(
-    prompt: str, 
-    image_paths: List[str] = None, 
-    size: str = "1:1",
-    model: Optional[str] = None,
-    prompt_extend: bool = True,
-    dry_run: bool = False,
-    ctx: Context = None
-) -> str:
-    """
-    ULTRA-STABLE Image Generation. 
-    Uses Lean Async architecture (Direct API + Auto-download).
-    
-    Parameters:
-    - size: Valid formats: '1:1', '16:9', '4:3', '3:4', '9:16' OR exact 'width*height' (e.g. '1664*928').
-    - model: Optional: 'qwen-image-max' or 'qwen-image-edit-max'.
-    - prompt_extend: Whether to let AI refine your prompt. Set to False for strict detail fidelity.
-    """
-    from qwen_mcp.tools import generate_qwen_image
-    return await generate_qwen_image(
-        prompt=prompt,
-        image_paths=image_paths,
-        size=size,
-        model=model,
-        prompt_extend=prompt_extend,
-        dry_run=dry_run,
-        ctx=ctx
-    )
 
 
 @mcp.tool()

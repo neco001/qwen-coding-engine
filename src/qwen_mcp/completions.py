@@ -47,6 +47,7 @@ class CompletionHandler(BaseDashScopeClient):
         tags: Optional[List[str]] = None,
         include_reasoning: bool = False,
         model_override: Optional[str] = None,
+        mode: str = "default",
     ) -> str:
         """Generate common chat completion with financial circuit breakers and retries."""
         request_timeout = timeout or self.default_timeout
@@ -58,10 +59,18 @@ class CompletionHandler(BaseDashScopeClient):
         except ValueError as e:
             return f"❌ {str(e)} Please truncate your files or context."
 
-        # Sanitize all message content for security
         for msg in messages:
             if "content" in msg:
                 msg["content"] = self.sanitizer_cls.redact(msg["content"])
+
+        # Handle Swarm Mode
+        if mode == "swarm":
+            from .orchestrator import SwarmOrchestrator
+            # We take the last user message as the task for the swarm
+            user_content = next((m["content"] for m in reversed(messages) if m["role"] == "user"), None)
+            if user_content:
+                orchestrator = SwarmOrchestrator(completion_handler=self)
+                return await orchestrator.run_swarm(user_content)
 
         for attempt in range(2):
             target_model = model_override or (

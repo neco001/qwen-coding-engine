@@ -89,5 +89,21 @@ class BillingTracker:
             logger.error(f"BillingTracker: Failed to generate report: {e}")
             return []
 
+    def get_aggregated_report(self) -> str:
+        """Returns a Markdown formatted table of the daily project usage."""
+        report_data = self.get_daily_project_report()
+        if not report_data:
+            return "No usage data recorded in the last 30 days."
+
+        header = "| Date | Project | Model | Prompt | Cmpl | Total |"
+        separator = "|---|---|---|---|---|---|"
+        lines = [header, separator]
+
+        for entry in report_data:
+            line = f"| {entry['date']} | {entry['project_name']} | {entry['model_name']} | {entry['prompt_tokens']} | {entry['completion_tokens']} | {entry['total_tokens']} |"
+            lines.append(line)
+
+        return "\n".join(lines)
+
 # Singleton instance
 billing_tracker = BillingTracker()

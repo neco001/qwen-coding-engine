@@ -140,3 +140,18 @@
 [2026-03-03 17:08:41.450750] HEADERS: {
   "Content-Type": "application/json"
 }
+[2026-03-08 20:01:40.857546] URL: https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+[2026-03-08 20:01:40.857572] ASYNC: False
+[2026-03-08 20:01:40.857580] HEADERS: {
+  "Content-Type": "application/json"
+}
+[2026-03-08 20:01:53.505842] URL: https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+[2026-03-08 20:01:53.505863] ASYNC: False
+[2026-03-08 20:01:53.505868] HEADERS: {
+  "Content-Type": "application/json"
+}
+[2026-03-08 20:02:07.739423] URL: https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+[2026-03-08 20:02:07.739440] ASYNC: False
+[2026-03-08 20:02:07.739445] HEADERS: {
+  "Content-Type": "application/json"
+}
