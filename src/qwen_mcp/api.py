@@ -7,7 +7,6 @@ from typing import List, Dict, Any, Optional
 # Base modules resulting from modularization
 from .registry import ModelRegistry, registry as global_registry
 from .completions import CompletionHandler
-from .billing import billing_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +69,10 @@ class DashScopeClient(CompletionHandler):
 
     async def heal_registry(self) -> str:
         """Advanced Self-Healing: Uses meta-analysis via qwen-turbo to map roles by ROI."""
+        from .base import get_billing_mode
+        if get_billing_mode() == "coding_plan":
+            return "Self-healing disabled in Strict Coding Plan mode. Roles are hardcoded to plan models."
+            
         logger.info("Initiating Self-Healing Meta-Analysis via Qwen-Turbo...")
         all_models = await self.list_models()
         if not all_models:
@@ -101,7 +104,8 @@ class DashScopeClient(CompletionHandler):
 
         try:
             # We use the known stable 'qwen-turbo' for the meta-analysis itself
-            response = await self.client.chat.completions.create(
+            client_to_use = self.get_client_for_model("qwen-turbo")
+            response = await client_to_use.chat.completions.create(
                 model="qwen-turbo",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0,
@@ -109,7 +113,7 @@ class DashScopeClient(CompletionHandler):
                 timeout=20.0,
             )
 
-            from .utils import extract_json_from_text
+            from .tools import extract_json_from_text
             new_models = extract_json_from_text(response.choices[0].message.content)
 
             if new_models and isinstance(new_models, dict):

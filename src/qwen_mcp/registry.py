@@ -18,8 +18,7 @@ class ModelRegistry:
         "strategist": "Advanced reasoning, strategic planning, and adversary simulation. Focused on ROI.",
         "coding": "High-fidelity code generation and refactoring following production standards. Default model: qwen3-coder-plus.",
         "scout": "Exploration and identification of codebase patterns and structures.",
-        "analyst": "Deep dive into logs, performance metrics, and debugging complex runtime issues.",
-        "artist": "Creative image generation and visual design refinement."
+        "analyst": "Deep dive into logs, performance metrics, and debugging complex runtime issues."
     }
 
     COGNITIVE_LEVEL_MAP = {
@@ -46,19 +45,20 @@ class ModelRegistry:
         self.models = {
             "strategist": "qwen3.5-plus",
             "coder": "qwen3-coder-plus",
+            "coder_pro": "qwen2.5-72b-instruct",
             "specialist": "qwen2.5-coder-32b-instruct",
             "analyst": "qwq-plus",
             "scout": "qwen-turbo",
-            "artist": "qwen-image-edit",
         }
         self.metadata = {}  # Store HF metadata: {model_id: {tags, params, levels}}
         self.last_updated = datetime.min
         self.load_cache()
 
     async def sync_with_hf(self) -> str:
-        """Fetches latest Qwen model metadata from HF and updates levels/tags with scoring priority."""
+        """Fetches latest Qwen model metadata from HF and updates levels/tags."""
         url = "https://huggingface.co/api/models?search=qwen&sort=downloads&direction=-1&limit=100"
         try:
+            # Use run_in_executor for blocking urlopen
             loop = asyncio.get_event_loop()
 
             def fetch():
@@ -66,32 +66,37 @@ class ModelRegistry:
                     return json.loads(response.read().decode())
 
             models = await loop.run_in_executor(None, fetch)
-            
-            # Phase 1: Filter and Score
-            processed_models = self._filter_and_score_models(models)
-            
-            # Phase 2: Metadata Extraction & Level Mapping
+
             updates = 0
-            for m in processed_models:
+            for m in models:
                 mid = m.get("id")
                 if not mid:
                     continue
 
+                # Basic metadata extraction
                 pipeline = m.get("pipeline_tag", "text-generation")
                 tags = m.get("tags", [])
                 downloads = m.get("downloads", 0)
-                priority_score = m.get("priority_score", 0)
 
                 # Determine levels (heuristic)
                 levels = [2]  # default
                 m_lower = mid.lower()
 
-                if any(x in m_lower for x in ["qwq", "max", "plus", "72b", "110b", "math"]):
+                # Tier 4: Heavyweights
+                if any(
+                    x in m_lower for x in ["qwq", "max", "plus", "72b", "110b", "math"]
+                ):
                     levels.extend([3, 4])
+
+                # Tier 3: Specialists
                 if "coder" in m_lower or "next" in m_lower:
                     levels.extend([3, 4])
+
+                # Tier 1-2: Efficiency
                 if any(x in m_lower for x in ["turbo", "flash", "7b", "1.5b", "0.5b"]):
                     levels.extend([1, 2])
+
+                # SOTA override
                 if "3.5" in m_lower:
                     levels.append(4)
 
@@ -101,56 +106,60 @@ class ModelRegistry:
                     "tags": tags,
                     "downloads": downloads,
                     "levels": list(set(levels)),
-                    "priority_score": priority_score,
                 }
                 updates += 1
 
             await self.save_cache()
-            return f"Successfully synced {updates} models from HF (ROI-Filtered)."
+            return f"Successfully synced {updates} models from HF."
         except Exception as e:
             logger.error(f"HF Sync failed: {e}")
             return f"HF Sync failed: {str(e)}"
 
-    def _filter_and_score_models(self, raw_metadata: list) -> list:
-        """Filters noisy pipelines and calculates priority based on name length and year."""
-        filtered = []
-        garbage = ["audio", "tts", "video", "omni", "asr", "vc", "realtime", "mt"]
-        
-        for model in raw_metadata:
-            mid = model.get("id", "").lower()
-            name = model.get("name", mid).lower()
-            
-            # Filter noise
-            if any(kw in mid for kw in garbage):
-                continue
-            
-            # Calculate priority: (Shorter name = Higher Priority) + (Later year = Higher Priority)
-            year = self._extract_year_from_name(mid)
-            # Use a large multiplier for length to ensure shorter name ALWAYS wins over year tie-breakers.
-            priority_score = ((100 - len(mid)) * 10000) + year
-            
-            model["priority_score"] = priority_score
-            filtered.append(model)
-            
-        return filtered
+    def score_model(self, model_id: str, criteria: dict) -> int:
+        score: int = 0
+        mid = model_id.lower()
 
-    def _extract_year_from_name(self, name: str) -> int:
-        """Extracts 4-digit years (2024-2027) from name as priority tie-breaker."""
-        match = re.search(r"(202[4-7])", name)
-        return int(match.group(1)) if match else 0
+        garbage = ["vl", "audio", "image", "tts", "asr", "vc", "omni", "mt", "realtime"]
+        if any(g in mid for g in garbage) and not any(
+            m in mid for m in criteria.get("must_have", [])
+        ):
+            return -500
 
+        for word in criteria.get("must_have", []):
+            if word in mid:
+                score = score + 100
 
-    def load_cache(self, path: Path = None):
-        """Loads repository state from JSON cache. Handles schema migrations."""
-        target_file = path or self.cache_file
-        if target_file.exists():
+        for word in criteria.get("avoid", []):
+            if word in mid:
+                score = score - 50
+
+        numbers = re.findall(r"(\d+(?:\.\d+)?)", mid)
+        for num_str in numbers:
             try:
-                data = json.loads(target_file.read_text())
-                schema_v = data.get("schema_version", 1)
-                
-                if schema_v != 3:
+                num = float(num_str)
+                if 1.0 <= num <= 10.0:
+                    score = score + int(num * 10)
+                elif num > 2000:
+                    score = score + 1
+            except ValueError:
+                continue
+
+        if mid == criteria.get("fallback"):
+            score = score + 20
+
+        last_part = mid.split("-")[-1]
+        if "-" in mid and any(char.isdigit() for char in last_part):
+            score = score - 5
+
+        return score
+
+    def load_cache(self):
+        if self.cache_file.exists():
+            try:
+                data = json.loads(self.cache_file.read_text())
+                if data.get("schema_version", 1) != 2:
                     logger.warning(
-                        f"ModelRegistry: Cache schema mismatch (v{schema_v} vs v3). Starting fresh."
+                        "Cache schema version mismatch or old version. Regenerating..."
                     )
                     return
 
@@ -165,61 +174,68 @@ class ModelRegistry:
                     f"ModelRegistry: Cache corrupted. Backing up and starting fresh: {e}"
                 )
                 try:
-                    target_file.rename(target_file.with_suffix(".json.bak"))
+                    self.cache_file.rename(self.cache_file.with_suffix(".json.bak"))
                 except Exception:
                     pass
 
-    def load_cache_from_path(self, path: str):
-        """API wrapper for testing."""
-        self.load_cache(Path(path))
-
-    async def save_cache(self, path: Path = None):
-        """Atomic write of the model registry to cache file (schema v3)."""
+    async def save_cache(self):
         async with self._lock:
             try:
-                target_file = path or self.cache_file
                 self.last_updated = datetime.now()
                 data = {
-                    "schema_version": 3,
+                    "schema_version": 2,
                     "updated_at": self.last_updated.isoformat(),
                     "models": self.models,
                     "metadata": self.metadata,
                 }
 
-                temp_file = target_file.with_suffix(".json.tmp")
+                temp_file = self.cache_file.with_suffix(".json.tmp")
                 temp_file.write_text(json.dumps(data, indent=2))
-                os.replace(temp_file, target_file)
+                os.replace(temp_file, self.cache_file)
             except Exception as e:
                 logger.error(f"ModelRegistry: Failed to save cache: {e}")
 
-    def save_cache_to_path(self, path: str):
-        """API wrapper for testing (blocking)."""
-        target_file = Path(path)
-        self.last_updated = datetime.now()
-        data = {
-            "schema_version": 3,
-            "updated_at": self.last_updated.isoformat(),
-            "models": self.models,
-            "metadata": self.metadata,
+    def get_plan_model_for_role(self, task_type: str) -> str:
+        """Mappings specifically tailored for the Alibaba Coding Plan."""
+        plan_models = {
+            "strategist": "qwen3.5-plus",
+            "coder": "qwen3-coder-next",       # Fast, inline, lightweight
+            "coder_pro": "qwen3-coder-plus",   # Heavy lifter, huge context, system-wide refactors
+            "specialist": "qwen3-coder-plus",  # High capability logic/tooling operations
+            "analyst": "glm-5",
+            "scout": "kimi-k2.5",
         }
-        temp_file = target_file.with_suffix(".json.tmp")
-        temp_file.write_text(json.dumps(data, indent=2))
-        os.replace(temp_file, target_file)
-
-    def route_request(
-        self, task_type: str, complexity_hint: str = "auto", context_tags: list = []
-    ) -> str:
-        """Dynamic route to best model fitting the criteria with heuristic scoring."""
-        # Debug print to catch recursion in logs
-        # print(f"DEBUG: Routing request for {task_type} (complexity: {complexity_hint})")
-
-        complexity_map = {"low": 1, "auto": 2, "high": 3, "critical": 4}
-        # 0. Priority: Manual overrides/pinned roles
         mapping = {
             "discovery": "scout",
             "scout": "scout",
             "coding": "coder",
             "coder": "coder",
+            "coding_pro": "coder_pro",
+            "coder_pro": "coder_pro",
+            "refactoring": "specialist",
+            "specialist": "specialist",
+            "audit": "analyst",
+            "analyst": "analyst",
+            "planning": "strategist",
+            "strategist": "strategist",
+        }
+        role = mapping.get(task_type, "strategist")
+        return plan_models.get(role, "qwen3.5-plus")
+
+    def route_request(
+        self, task_type: str, complexity_hint: str = "auto", context_tags: list = [],
+        billing_mode: str = "hybrid", estimated_tokens: int = 0
+    ) -> str:
+        """Dynamic route to best model fitting the criteria with heuristic scoring."""
+        
+        # 1. Map task to logical role
+        mapping = {
+            "discovery": "scout",
+            "scout": "scout",
+            "coding": "coder",
+            "coder": "coder",
+            "coding_pro": "coder_pro",
+            "coder_pro": "coder_pro",
             "refactoring": "specialist",
             "specialist": "specialist",
             "audit": "analyst",
@@ -228,6 +244,32 @@ class ModelRegistry:
             "strategist": "strategist",
         }
         role = mapping.get(task_type)
+
+        # 2. Intelligent Auto-Upgrade: 
+        # If it's a standard coding task but looks heavy (long prompt), 
+        # force upgrade to coder_pro unless explicitly forbidden.
+        if role == "coder" and (estimated_tokens > 15000 or complexity_hint in ["high", "critical"]):
+            # Verification: In some billing modes, coder_pro might be restricted.
+            # For 'coding_plan' and 'hybrid' (which uses plan for coding), it's allowed.
+            if billing_mode in ["coding_plan", "hybrid"]:
+                role = "coder_pro"
+                # We map task_type to the next logical level for the plan mapping
+                task_type = "coding_pro"
+                logger.info(f"🚀 Intelligent Routing: Upgrading coding task to CODER_PRO (tokens: {estimated_tokens})")
+            else:
+                logger.warning(f"⚠️ Intelligent Routing: Auto-upgrade to CODER_PRO suppressed due to billing_mode: {billing_mode}")
+        
+        # 3. Mode-specific routing
+        if billing_mode == "coding_plan":
+            return self.get_plan_model_for_role(task_type)
+        
+        elif billing_mode == "hybrid":
+            # Cost optimization: route high-volume tasks to the prepaid Coding Plan.
+            if role in ["coder", "coder_pro", "specialist", "strategist", "scout", "discovery"]:
+                return self.get_plan_model_for_role(task_type)
+            # Use role-based mapping for others (e.g. analyst -> qwq-plus via PAYG)
+
+        # 4. Fallback to Manual overrides/pinned roles if exists
         if role and role in self.models:
             return self.models[role]
 
@@ -252,11 +294,12 @@ class ModelRegistry:
         scored_candidates = []
         for mid, meta in self.metadata.items():
             levels = meta.get("levels", [])
-            if target_level in levels:
+            # Explicit type check for levels to avoid lint error
+            if isinstance(levels, list) and target_level in levels:
                 # Check for task compatibility
                 pipeline = meta.get("pipeline", "")
                 tags = meta.get("tags", [])
-                if task_type in pipeline or any(task_type in t for t in tags):
+                if (isinstance(task_type, str) and task_type in pipeline) or any(task_type in t for t in tags):
                     score = 0
                     mid_lower = mid.lower()
 
@@ -264,8 +307,14 @@ class ModelRegistry:
                     if "instruct" in mid_lower or "chat" in mid_lower:
                         score += 1000
 
-                    # Heuristic B: SOTA preference (from metadata priority)
-                    score += meta.get("priority_score", 0)
+                    # Heuristic B: SOTA preference
+                    if "3.5" in mid_lower:
+                        score += 500
+                    elif "2.5" in mid_lower:
+                        score += 100
+
+                    # Heuristic C: Parameter tie-breaker (prefer larger for higher tiers)
+                    score += int(meta.get("params", 0) / 1e9)
 
                     scored_candidates.append((mid, score))
 

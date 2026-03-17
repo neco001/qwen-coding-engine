@@ -3,7 +3,7 @@ from mcp.server.fastmcp import FastMCP, Context
 from qwen_mcp.tools import (
     generate_audit,
     generate_code,
-    generate_code_pro,
+    generate_code_25,
     generate_lp_blueprint,
     read_repo_file,
     list_repo_files,
@@ -12,14 +12,8 @@ from qwen_mcp.tools import (
     set_model_in_registry,
     generate_sparring,
     heal_registry,
-    refine_image_prompt,
-    prepare_visual_reference,
-    generate_qwen_image,
-    set_billing_mode,
-    get_current_billing_mode,
 )
 from qwen_mcp.specter.telemetry import get_broadcaster
-from qwen_mcp.specter.identity import get_current_project_id
 from qwen_mcp.registry import registry
 import asyncio
 import sys
@@ -41,7 +35,7 @@ mcp = FastMCP("Qwen MCP Server (DashScope)")
 
 @mcp.tool()
 async def qwen_audit(
-    content: str, context: Optional[str] = None, ctx: Context = None
+    content: str, context: Optional[str] = None, swarm: bool = True, ctx: Context = None
 ) -> str:
     """
     Audits the provided code or terminal logs using Qwen models.
@@ -50,12 +44,12 @@ async def qwen_audit(
     await broadcaster.broadcast_state({
         "active_model": registry.get_best_model("strategist")
     })
-    return await generate_audit(content, context, ctx)
+    return await generate_audit(content, context, swarm, ctx)
 
 
 @mcp.tool()
 async def qwen_coder(
-    prompt: str, context: Optional[str] = None, ctx: Context = None
+    prompt: str, context: Optional[str] = None, swarm: bool = True, ctx: Context = None
 ) -> str:
     """
     Generates or completes code using Qwen 3.5 Plus.
@@ -64,21 +58,23 @@ async def qwen_coder(
     await broadcaster.broadcast_state({
         "active_model": registry.get_best_model("coding")
     })
-    return await generate_code(prompt, context, ctx)
+    return await generate_code(prompt, context, swarm, ctx)
 
 
 @mcp.tool()
-async def qwen_coder_pro(
-    prompt: str, context: Optional[str] = None, ctx: Context = None
+async def qwen_coder_25(
+    prompt: str, context: Optional[str] = None, swarm: bool = True, ctx: Context = None
 ) -> str:
     """
-    Generates or completes code using specialized Qwen-2.5-Coder-32B or 72B (Heavy Duty).
+    Generates or completes code using specialized Qwen-2.5-Coder-32B.
     """
     broadcaster = get_broadcaster()
     await broadcaster.broadcast_state({
-        "active_model": registry.get_best_model("coder_pro")
+        "active_model": registry.get_best_model("coding")
     })
-    return await generate_code_pro(prompt, context, ctx)
+    # For now coder_25 still uses generate_code_25 which needs mode support if we want swarm here too
+    # Let's update generate_code_25 in tools.py similarly
+    return await generate_code_25(prompt, context, swarm, ctx)
 
 
 @mcp.tool()
@@ -150,26 +146,9 @@ async def qwen_list_available_models() -> str:
 async def qwen_set_model(role: str, model_id: str) -> str:
     """
     Manually sets a specific model ID for a role.
-    Roles: 'strategist' (audit/LP), 'coder' (qwen_coder_pro), 'scout' (internal/discovery).
+    Roles: 'strategist' (audit/LP), 'coder' (qwen_coder_25), 'scout' (internal/discovery).
     """
     return await set_model_in_registry(role, model_id)
-
-
-@mcp.tool()
-async def qwen_set_billing_mode(mode: str) -> str:
-    """
-    Dynamically switches the billing mode of the Qwen Engine.
-    Valid modes: 'coding_plan' (Strict Plan), 'payg' (Strict Pay-As-You-Go), 'hybrid' (Plan preferred, PAYG fallback).
-    """
-    return await set_billing_mode(mode)
-
-
-@mcp.tool()
-async def qwen_get_billing_mode() -> str:
-    """
-    Returns the currently active billing mode ('coding_plan', 'payg', or 'hybrid').
-    """
-    return await get_current_billing_mode()
 
 
 @mcp.tool()
@@ -204,17 +183,12 @@ def run_telemetry_server():
 
     @app.get("/")
     async def root():
-        project_id = get_current_project_id()
-        return {
-            "status": "SPECTER LENS SIDECAR ACTIVE", 
-            "project_id": project_id,
-            "uplink": f"ws://127.0.0.1:8878/ws/telemetry?project_id={project_id}"
-        }
+        return {"status": "SPECTER LENS SIDECAR ACTIVE", "uplink": "ws://127.0.0.1:8878/ws/telemetry"}
 
     @app.websocket("/ws/telemetry")
-    async def websocket_endpoint(websocket: WebSocket, project_id: str = "default"):
+    async def websocket_endpoint(websocket: WebSocket):
         await websocket.accept()
-        await broadcaster.add_client(websocket, project_id=project_id)
+        await broadcaster.add_client(websocket)
         try:
             while True:
                 # Keep alive and signal handling
@@ -222,8 +196,7 @@ def run_telemetry_server():
                     # Non-blocking check for messages + heartbeat
                     await asyncio.wait_for(websocket.receive_text(), timeout=10)
                 except asyncio.TimeoutError:
-                    # Optional: send project-specific heartbeat if needed
-                    await websocket.send_json({"type": "heartbeat", "project_id": project_id})
+                    await websocket.send_json({"type": "heartbeat"})
         except Exception:
             pass
         finally:
@@ -235,7 +208,7 @@ def run_telemetry_server():
         server = uvicorn.Server(config)
         server.run()
     except Exception as e:
-        print(f"❌ Telemetry Sidecar failed: {e}")
+        print(f"❌ Telemetry Sidecar failed: {e}", file=sys.stderr)
 
 async def sync_hud_state():
     """Broadcaster update for role mapping and basic state."""
@@ -244,8 +217,8 @@ async def sync_hud_state():
 
 def main():
     """Main entrypoint for the MCP server."""
-    print("🚀 [SPECTER] Starting Qwen Engineering Engine Context...")
-    print("📡 [SPECTER] Sidecar Uplink on port 8878/ws")
+    print("🚀 [SPECTER] Starting Qwen Engineering Engine Context...", file=sys.stderr)
+    print("📡 [SPECTER] Sidecar Uplink on port 8878/ws", file=sys.stderr)
     
     # Start telemetry in dedicated thread
     sidecar = threading.Thread(target=run_telemetry_server, daemon=True)
@@ -270,9 +243,10 @@ async def qwen_init_request() -> str:
     Failure to call this results in incorrect token accumulation in telemetry.
     """
     broadcaster = get_broadcaster()
-    project_id = get_current_project_id()
-    await broadcaster.start_request(project_id=project_id)
-    return f"✅ Specter HUD: 'This Prompt' counters reset for {project_id}. Ready for new engagement."
+    await broadcaster.start_request()
+    return "✅ Specter HUD: 'This Prompt' counters reset. Ready for new engagement."
+
+
 
 
 @mcp.tool()

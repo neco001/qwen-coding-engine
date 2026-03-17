@@ -91,22 +91,76 @@ Because we use **The Lachman Protocol** (Spec -> Code -> Audit), we rely on **St
 
 ---
 
-## The Arsenal (Dynamic 5-Role Registry)
+## The Arsenal (Dynamic 12-Role Registry)
 
-The engine automatically selects the best model for each task via **Qwen-Turbo Meta-Analysis** to ensure maximum ROI and capability.
+The engine automatically selects the best model for each task via **Qwen-Turbo Meta-Analysis** to ensure maximum ROI and capability. The model selection is **strictly governed by your billing mode**:
 
-| Category | Tool | Role/Role | Default Model (SOTA) |
+### Billing Mode Behavior
+
+| Mode | Model Selection Policy |
+| :--- | :--- |
+| **`coding_plan`** | **STRICT**: Uses ONLY Coding Plan models (`qwen3-coder-*`, `glm-5`, `kimi-k2.5`, `qwen3.5-plus`). No PAYG models are accessible. |
+| **`hybrid`** | **PRIORITY**: Prefers Coding Plan models for standard tasks (coding, planning, scouting). Falls back to PAYG models (`qwq-plus`, `qwen2.5-*`) only when the task explicitly requires higher ROI that justifies the cost. |
+| **`payg`** | **STRICT**: Uses ONLY PAYG models. No Coding Plan models are accessed. |
+
+---
+
+### PAYG Mode (Default)
+| Category | Tool | Role | Default Model |
 | :--- | :--- | :--- | :--- |
 | **Logic** | `qwen_architect` | **Strategist**: Expert planner & JSON architect. | `qwen3.5-plus` |
-| **Code** | `qwen_coder` | **Coder**: Writing production-grade complete files. | `qwen3-coder-plus` |
-| **Code** | `qwen_coder_25` | **Specialist**: Expert in complex logic & Refactoring. | `qwen3-coder-next` |
+| **Code** | `qwen_coder` | **Coder**: Writing production-grade complete files. | `qwen2.5-coder-32b-instruct` |
+| **Code** | `qwen_coder_pro` | **Specialist**: Expert in complex logic & Refactoring. | `qwen2.5-72b-instruct` |
 | **SRE** | `qwen_audit` | **Analyst**: Reason-heavy SRE/Debugging (QwQ). | `qwq-plus` |
-| **Data** | `qwen_read_file` | **Scout**: Context discovery and fast summaries. | `qwen-flash` |
-| **Data** | `qwen_list_files` | **Explorer**: Map project structure. | `qwen-flash` |
+| **Strategy** | `qwen_sparring_flash` | **Tactician**: Quick strategic analysis & reasoning. | `qwq-plus` → `qwen3.5-plus` |
+| **Strategy** | `qwen_sparring_pro` | **Debate Master**: Full adversarial multi-agent debate. | `qwen3.5-plus` / `qwq-plus` |
+| **Data** | `qwen_read_file` | **Scout**: Context discovery and fast summaries. | `qwen-turbo` |
+| **Data** | `qwen_list_files` | **Explorer**: Map project structure. | `qwen-turbo` |
 | **Admin** | `qwen_usage_report`| **Billing**: Token/Cost report from DuckDB. | N/A |
+| **Admin** | `qwen_init_request`| **Telemetry**: Reset token counter for new tasks. | N/A |
 | **Logic** | `qwen_refresh_models`| **Intelligence**: Trigger meta-analysis update. | `qwen-turbo` |
+| **Logic** | `qwen_heal_registry`| **Self-Heal**: Auto-repair model role mappings. | N/A |
 | **Logic** | `qwen_set_model` | **Manual**: Override a role assignment. | User Defined |
+| **Logic** | `qwen_set_billing_mode`| **Finance**: Switch between payg/coding_plan/hybrid. | N/A |
+| **Logic** | `qwen_get_billing_mode`| **Finance**: Query current billing mode. | N/A |
 | **Logic** | `qwen_list_available_models`| **Discovery**: List all models from your API key. | N/A |
+
+---
+
+### Coding Plan Mode (Strict Isolation)
+When `billing_mode="coding_plan"`, the engine uses **ONLY** these models:
+
+| Category | Tool | Role | Plan Model |
+| :--- | :--- | :--- | :--- |
+| **Logic** | `qwen_architect` | **Strategist** | `qwen3.5-plus` |
+| **Code** | `qwen_coder` | **Coder** | `qwen3-coder-next` (fast, lightweight) |
+| **Code** | `qwen_coder_pro` | **Specialist** | `qwen3-coder-plus` (heavy refactor, huge context) |
+| **SRE** | `qwen_audit` | **Analyst** | `glm-5` |
+| **Data** | `qwen_read_file` | **Scout** | `kimi-k2.5` |
+
+> **Important**: In `coding_plan` mode, tools like `qwen_sparring_flash` and `qwen_sparring_pro` will use `glm-5` for audit tasks instead of `qwq-plus`, and `kimi-k2.5` for scouting instead of `qwen-turbo`.
+
+---
+
+### Model Rotation in Sparring Engine
+
+The Sparring Engine uses **dynamic model rotation** within a single tool call. The actual models depend on your billing mode:
+
+**`qwen_sparring_flash`** (2-turn analysis):
+| Turn | Role | PAYG Model | Coding Plan Model |
+| :--- | :--- | :--- | :--- |
+| Turn 1 | Analyst | `qwq-plus` | `glm-5` |
+| Turn 2 | Drafter | `qwen3.5-plus` | `qwen3.5-plus` |
+
+**`qwen_sparring_pro`** (multi-turn war game):
+| Turn | Role | PAYG Model | Coding Plan Model |
+| :--- | :--- | :--- | :--- |
+| Discovery | Role Assembler | `qwen3.5-plus` | `qwen3.5-plus` |
+| Red Cell | Adversary Audit | `qwq-plus` | `glm-5` |
+| Blue Cell | Strategic Defense | `qwen3.5-plus` | `qwen3.5-plus` |
+| White Cell | Final Consensus | `qwen3.5-plus` | `qwen3.5-plus` |
+
+This rotation ensures each phase uses the most cost-effective model for its specific cognitive task while respecting billing mode constraints.
 
 ---
 
@@ -130,7 +184,7 @@ graph TD
   F --> G[Step-by-Step Implementation]
   G --> H{Complexity Check}
   H -- "Standard" --> I[qwen3-coder-plus]
-  H -- "High Logic / Specialist" --> J[qwen-2.5-coder-32b]
+  H -- "High Logic / Specialist" --> J[qwen2.5-72b-instruct]
   I --> K[Complete, No-Placeholder Code]
   J --> K
   end
@@ -142,9 +196,29 @@ graph TD
   M -- "Success" --> N[Production Ready Asset]
   end
 
+  subgraph "Phase 4: Strategic Debate (Sparring)"
+  N --> O{Strategic Decision Needed?}
+  O -- "Quick Analysis" --> P[qwen_sparring_flash]
+  O -- "Deep Debate" --> Q[qwen_sparring_pro]
+  P --> R[Strategic Recommendation]
+  Q --> R
+  R --> A
+  end
+
+  subgraph "Phase 5: Parallel Execution (Swarm)"
+  G --> S{Parallelizable Task?}
+  S -- "Yes" --> T[SwarmOrchestrator]
+  T --> U[Decompose into SubTasks]
+  U --> V[Execute in Parallel (max 5)]
+  V --> W[Synthesize Results]
+  W --> K
+  end
+
   style B fill:#f96,stroke:#333,stroke-width:2px
   style F fill:#00d2ff,stroke:#333,stroke-width:2px
   style N fill:#00c853,stroke:#333,stroke-width:2px
+  style R fill:#9c27b0,stroke:#333,stroke-width:2px
+  style W fill:#ff9800,stroke:#333,stroke-width:2px
 ```
 
 ### The Architect (The Strategist)
@@ -156,7 +230,7 @@ The Architect doesn't just write a list of steps. It initiates the **Lachman Pro
 *  **Output:** A high-precision JSON Blueprint with a TDD-first roadmap and "Clean Slate" instructions (what to delete).
 
 ### The Coder (The Implementation)
-**Logic:** `qwen_coder` / `qwen_coder_25` / **Model:** `qwen3-coder-plus` or `qwen3-coder-next`
+**Logic:** `qwen_coder` / `qwen_coder_pro` / **Model:** `qwen3-coder-plus` or `qwen2.5-72b-instruct`
 The Coder is bound by strict **Surgicial Precision Rules**:
 -  **No Placeholders:** A absolute ban on `// ... rest of code`. Every file is generated in full or as a clean, integrable block.
 -  **Context Awareness:** It consumes the Architect's blueprint to stay aligned with the big picture.
@@ -168,6 +242,61 @@ The Auditor uses **heavy reasoning (QwQ)** to act as a Senior SRE (Site Reliabil
 -  **Root Cause Analysis (RCA):** Feed it terminal logs, and it will find the exact line causing the memory leak or dependency conflict.
 -  **Brevity & ROI:** It doesn't nitpick code style. It focuses on high-impact fixes, security vulnerabilities, and edge cases that simpler models miss.
 -  **Zero Fluff:** You get actionable feedback and specific code blocks to fix, nothing more.
+
+---
+
+## 🐝 Swarm Mode: Parallel Agent Execution
+
+For complex tasks that can be parallelized, the engine includes a **Swarm Orchestrator** that decomposes work into subtasks and executes them concurrently.
+
+### How It Works:
+1. **Decompose**: The SwarmOrchestrator analyzes your prompt and breaks it into independent subtasks
+2. **Execute**: Subtasks are executed in parallel (default concurrency: 5 workers)
+3. **Synthesize**: Results are combined into a cohesive final output
+
+### Usage:
+Enable Swarm Mode by passing `swarm=True` to supported tools:
+- `qwen_coder(prompt="...", swarm=True)` - Parallel code generation
+- `qwen_audit(content="...", swarm=True)` - Parallel audit analysis
+
+The SwarmOrchestrator uses a priority-based scheduling system and automatically handles task dependencies.
+
+---
+
+## 💰 Billing Modes: Financial Control
+
+The engine supports three billing modes to optimize costs based on your subscription:
+
+| Mode | Description | Use Case |
+| :--- | :--- | :--- |
+| **`payg`** | Pay-As-You-Go (default) | Flexible usage, no commitment |
+| **`coding_plan`** | Strict Plan mode | High-volume coding with subscription |
+| **`hybrid`** | Plan preferred, PAYG fallback | Best of both worlds |
+
+### Managing Billing Modes:
+- **Check current mode**: `qwen_get_billing_mode()`
+- **Switch mode**: `qwen_set_billing_mode(mode="coding_plan")`
+
+The **Financial Circuit Breaker** automatically monitors token consumption and terminates processes before they exceed your budget limits.
+
+---
+
+## 🔬 SPECTER Telemetry: Real-Time HUD
+
+The engine includes a lightweight telemetry sidecar that streams real-time token usage and billing data to your VSCode HUD.
+
+### Architecture:
+- **Port**: 8878 (WebSocket)
+- **Protocol**: JSON telemetry events
+- **Integration**: VSCode extension (specter-qwen-hud)
+
+### Telemetry Events:
+- Token consumption (prompt/completion)
+- Billing mode switches
+- Model routing decisions
+- Financial circuit breaker triggers
+
+The telemetry server starts automatically when you run `qwen-coding-local` and can be monitored via the VSCode extension.
 
 ---
 
@@ -239,7 +368,7 @@ Since the package is in development, install it in editable mode:
 
 ```bash
 git clone <this-repo-url>
-cd qwen-coding-engine
+cd qwen-coding-local
 uv pip install -e .
 ```
 
@@ -258,13 +387,13 @@ Don't waste time manually editing config files. Just copy the prompt from **[INS
 ```json
 {
  "mcpServers": {
-  "qwen-coding": {
+  "qwen-coding-local": {
    "command": "uv",
    "args": [
     "--directory",
-    "C:\\absolute\\path\\to\\qwen-coding-engine",
+    "C:\\absolute\\path\\to\\qwen-coding-local",
     "run",
-    "qwen-coding-engine"
+    "qwen-coding-local"
    ],
    "env": {
     "DASHSCOPE_API_KEY": "your_api_key",

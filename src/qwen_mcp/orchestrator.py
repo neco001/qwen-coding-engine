@@ -124,18 +124,32 @@ class SwarmOrchestrator:
         
         return final_response
 
-    async def run_swarm(self, prompt: str) -> str:
+    async def run_swarm(self, prompt: str, task_type: str = "general") -> str:
         """
         High-level entry point: Decompose -> Parallel Execute -> Synthesize.
         """
-        logger.info(f"Starting Swarm for prompt: {prompt[:50]}...")
+        logger.info(f"Starting Swarm for prompt: {prompt[:50]}... (Task Type: {task_type})")
         
         # 1. Decompose
         swarm_plan = await self.decompose(prompt)
+        
+        # 🧪 Force Decomposition for Coding if needed
+        is_coding = task_type and task_type.startswith("coding")
+        if is_coding and (not swarm_plan.intent_validation or not swarm_plan.sub_tasks):
+            logger.info(f"Forcing {task_type} decomposition into phases...")
+            from .orchestrator import SubTask
+            swarm_plan.intent_validation = True
+            swarm_plan.sub_tasks = [
+                SubTask(id="T1", task=f"Analyze current state for: {prompt}"),
+                SubTask(id="T2", task=f"Plan changes for: {prompt}"),
+                SubTask(id="T3", task=f"Implement changes for: {prompt}")
+            ]
+
         if not swarm_plan.intent_validation or not swarm_plan.sub_tasks:
             logger.info("Swarm decomposition skipped: intent invalid or no sub-tasks.")
             # Fallback to normal completion if no decomposition
-            return await self.completion_handler.generate_completion(prompt)
+            # Wrap prompt as message for consistency
+            return await self.completion_handler.generate_completion([{"role": "user", "content": prompt}], task_type=task_type)
 
         # 2. Execute Parallel
         logger.info(f"Executing swarm with {len(swarm_plan.sub_tasks)} agents")

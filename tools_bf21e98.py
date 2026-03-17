@@ -1,10 +1,12 @@
 import logging
 import json
 import re
+import os
+import sys
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 from mcp.server.fastmcp import Context
 from qwen_mcp.api import DashScopeClient
-from qwen_mcp.base import set_billing_mode as apply_billing_mode, get_billing_mode
 from qwen_mcp.registry import registry
 from qwen_mcp.sanitizer import ContentValidator
 from qwen_mcp.specter.telemetry import get_broadcaster
@@ -12,28 +14,24 @@ from qwen_mcp.specter.telemetry import get_broadcaster
 # New modular imports
 from qwen_mcp.prompts.system import AUDIT_SYSTEM_PROMPT, CODER_SYSTEM_PROMPT
 from qwen_mcp.prompts.lachman import LP_DISCOVERY_PROMPT, LP_ARCHITECT_PROMPT, LP_VERIFIER_PROMPT
-from qwen_mcp.prompts.image import IMAGE_PROMPT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
-def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
-    """Utility to pull JSON blocks from LLM markdown responses."""
+def _dbg(msg: str):
+    """Debug logger — writes to .inbox/debug_payload.log AND stderr."""
+    ts = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+    line = f"[{ts}] [TOOL] {msg}"
+    print(line, file=sys.stderr, flush=True)
     try:
-        # Try finding a ```json block first
-        match = re.search(r'```json\n(.*?)\n```', text, re.DOTALL)
-        json_str = match.group(1) if match else text
-        return json.loads(json_str.strip())
+        os.makedirs('.inbox', exist_ok=True)
+        with open('.inbox/debug_payload.log', 'a', encoding='utf-8') as f:
+            f.write(line + '\n')
     except Exception:
-        # Fallback to finding anything that looks like a JSON object
-        try:
-            match = re.search(r'\{.*\}', text, re.DOTALL)
-            if match:
-                return json.loads(match.group(0))
-        except Exception:
-            pass
-    return None
+        pass
 
-async def generate_audit(content: str, context: Optional[str] = None, ctx: Optional[Context] = None) -> str:
+from .utils import extract_json_from_text
+
+async def generate_audit(content: str, context: Optional[str] = None, swarm: bool = True, ctx: Optional[Context] = None) -> str:
     client = DashScopeClient()
     messages = [
         {"role": "system", "content": AUDIT_SYSTEM_PROMPT},
@@ -44,10 +42,11 @@ async def generate_audit(content: str, context: Optional[str] = None, ctx: Optio
         task_type="audit",
         complexity="high",
         tags=["audit"],
-        progress_callback=ctx.report_progress if ctx else None
+        progress_callback=ctx.report_progress if ctx else None,
+        mode="swarm" if swarm else "default"
     )
 
-async def generate_code(prompt: str, context: Optional[str] = None, ctx: Optional[Context] = None) -> str:
+async def generate_code(prompt: str, context: Optional[str] = None, swarm: bool = True, ctx: Optional[Context] = None) -> str:
     client = DashScopeClient()
     messages = [
         {"role": "system", "content": CODER_SYSTEM_PROMPT},
@@ -57,10 +56,11 @@ async def generate_code(prompt: str, context: Optional[str] = None, ctx: Optiona
         messages=messages, 
         task_type="coding", 
         tags=["coder"],
-        progress_callback=ctx.report_progress if ctx else None
+        progress_callback=ctx.report_progress if ctx else None,
+        mode="swarm" if swarm else "default"
     )
 
-async def generate_code_pro(prompt: str, context: Optional[str] = None, ctx: Optional[Context] = None) -> str:
+async def generate_code_25(prompt: str, context: Optional[str] = None, swarm: bool = True, ctx: Optional[Context] = None) -> str:
     client = DashScopeClient()
     messages = [
         {"role": "system", "content": CODER_SYSTEM_PROMPT},
@@ -68,10 +68,11 @@ async def generate_code_pro(prompt: str, context: Optional[str] = None, ctx: Opt
     ]
     return await client.generate_completion(
         messages=messages, 
-        task_type="coder_pro", 
-        complexity="high",
-        tags=["coder_pro"],
-        progress_callback=ctx.report_progress if ctx else None
+        model_override="qwen2.5-72b-instruct", 
+        task_type="coding", 
+        tags=["coder25"],
+        progress_callback=ctx.report_progress if ctx else None,
+        mode="swarm" if swarm else "default"
     )
 
 async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: Optional[Context] = None) -> str:
@@ -123,18 +124,6 @@ async def set_model_in_registry(role: str, model_id: str) -> str:
     await registry.save_cache()
     return f"Success: Role '{role}' set to '{model_id}'."
 
-async def set_billing_mode(mode: str) -> str:
-    """Changes the global billing mode: 'payg', 'coding_plan', or 'hybrid'."""
-    success = apply_billing_mode(mode)
-    if success:
-        return f"✅ Billing Mode changed to: {mode.upper()}"
-    return f"❌ Invalid mode: {mode}. Use 'payg', 'coding_plan', or 'hybrid'."
-
-async def get_current_billing_mode() -> str:
-    """Returns the current billing mode."""
-    mode = get_billing_mode()
-    return f"Current Billing Mode: {mode.upper()}"
-
 async def generate_sparring(
     topic: str, context: str = "", mode: str = "flash", ctx: Optional[Context] = None
 ) -> str:
@@ -154,3 +143,4 @@ async def generate_sparring(
 async def heal_registry() -> str:
     client = DashScopeClient()
     return await client.heal_registry()
+

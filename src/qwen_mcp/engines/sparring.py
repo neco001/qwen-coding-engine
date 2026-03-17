@@ -10,7 +10,7 @@ from qwen_mcp.prompts.sparring import (
     BLUE_CELL_PROMPT,
     WHITE_CELL_PROMPT
 )
-from qwen_mcp.utils import extract_json_from_text
+from qwen_mcp.tools import extract_json_from_text
 
 async def report_safe_progress(ctx: Optional[Context], progress: float, message: str):
     """Unified telemetry helper to avoid Pydantic float/None errors."""

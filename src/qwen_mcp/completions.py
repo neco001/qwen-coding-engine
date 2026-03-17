@@ -18,8 +18,9 @@ from tenacity import (
     retry_if_exception_type,
 )
 
-from .base import BaseDashScopeClient
+from .base import BaseDashScopeClient, get_billing_mode
 from .specter.telemetry import get_broadcaster
+from .specter.identity import get_current_project_id
 from .billing import billing_tracker
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,6 @@ class CompletionHandler(BaseDashScopeClient):
         tags: Optional[List[str]] = None,
         include_reasoning: bool = False,
         model_override: Optional[str] = None,
-        mode: str = "default",
     ) -> str:
         """Generate common chat completion with financial circuit breakers and retries."""
         request_timeout = timeout or self.default_timeout
@@ -59,23 +59,21 @@ class CompletionHandler(BaseDashScopeClient):
         except ValueError as e:
             return f"❌ {str(e)} Please truncate your files or context."
 
+        # Sanitize all message content for security
         for msg in messages:
             if "content" in msg:
                 msg["content"] = self.sanitizer_cls.redact(msg["content"])
 
-        # Handle Swarm Mode
-        if mode == "swarm":
-            from .orchestrator import SwarmOrchestrator
-            # We take the last user message as the task for the swarm
-            user_content = next((m["content"] for m in reversed(messages) if m["role"] == "user"), None)
-            if user_content:
-                orchestrator = SwarmOrchestrator(completion_handler=self)
-                return await orchestrator.run_swarm(user_content)
-
         for attempt in range(2):
+            billing_mode_val = get_billing_mode()
+            estimated_input = self.estimate_tokens(messages) or 0
             target_model = model_override or (
                 self.registry.route_request(
-                    task_type, complexity_hint=complexity, context_tags=tags or []
+                    task_type, 
+                    complexity_hint=complexity, 
+                    context_tags=tags or [], 
+                    billing_mode=billing_mode_val,
+                    estimated_tokens=estimated_input
                 )
                 if task_type
                 else self.model_name
@@ -108,7 +106,8 @@ class CompletionHandler(BaseDashScopeClient):
                 return await self._handle_error(e, request_timeout)
 
     async def _stream_completion(self, model, messages, temp, max_t, timeout, extra, include_reasoning):
-        response = await self.client.chat.completions.create(
+        client_to_use = self.get_client_for_model(model)
+        response = await client_to_use.chat.completions.create(
             model=model, messages=messages, temperature=temp, max_tokens=max_t,
             timeout=timeout, stream=True, stream_options={"include_usage": True},
             extra_body=extra if extra else None,
@@ -119,33 +118,38 @@ class CompletionHandler(BaseDashScopeClient):
         
         async for chunk in response:
             if hasattr(chunk, "usage") and chunk.usage:
-                await self._log_usage(model, chunk.usage.prompt_tokens, chunk.usage.completion_tokens)
+                project_id = get_current_project_id()
+                await self._log_usage(model, chunk.usage.prompt_tokens, chunk.usage.completion_tokens, project_id=project_id)
 
             if hasattr(chunk, "choices") and chunk.choices:
                 delta = chunk.choices[0].delta
                 reasoning = getattr(delta, "reasoning_content", None)
                 if reasoning:
                     reasoning_log += reasoning
-                    await get_broadcaster().update_stream(thinking=reasoning)
+                    await get_broadcaster().update_stream(thinking=reasoning, project_id=get_current_project_id())
 
                 content = getattr(delta, "content", None)
                 if content:
                     full_response += content
-                    await get_broadcaster().update_stream(content=content)
+                    await get_broadcaster().update_stream(content=content, project_id=get_current_project_id())
 
         if include_reasoning and reasoning_log:
-            return f"<thought>\n{reasoning_log.strip()}\n</thought>\n\n{full_response.strip()}".strip()
-        
-        return (full_response or reasoning_log).strip() or "Error: Empty stream response."
+            output = f"<thought>\n{reasoning_log.strip()}\n</thought>\n\n{full_response.strip()}".strip()
+        else:
+            output = (full_response or reasoning_log).strip() or "Error: Empty stream response."
+            
+        return await self._prepend_warnings(output)
 
     async def _standard_completion(self, model, messages, temp, max_t, timeout, include_reasoning):
-        response = await self.client.chat.completions.create(
+        client_to_use = self.get_client_for_model(model)
+        response = await client_to_use.chat.completions.create(
             model=model, messages=messages, temperature=temp, max_tokens=max_t,
             timeout=timeout, stream=False,
         )
 
         if hasattr(response, "usage") and response.usage:
-            await self._log_usage(model, response.usage.prompt_tokens, response.usage.completion_tokens)
+            project_id = get_current_project_id()
+            await self._log_usage(model, response.usage.prompt_tokens, response.usage.completion_tokens, project_id=project_id)
 
         if not response.choices:
             return "Error: Empty response."
@@ -155,21 +159,32 @@ class CompletionHandler(BaseDashScopeClient):
         reasoning = getattr(msg, "reasoning_content", "") or ""
 
         if include_reasoning and reasoning:
-            return f"<thought>\n{reasoning.strip()}\n</thought>\n\n{content.strip()}".strip()
+            output = f"<thought>\n{reasoning.strip()}\n</thought>\n\n{content.strip()}".strip()
+        else:
+            output = (content or reasoning).strip() or "Error: Empty content."
+            
+        return await self._prepend_warnings(output)
 
-        return (content or reasoning).strip() or "Error: Empty content."
+    async def _prepend_warnings(self, content: str) -> str:
+        """Attaches active warnings to the response string and clears the warning queue."""
+        if hasattr(self, "active_warnings") and self.active_warnings:
+            warnings_str = "\n".join(self.active_warnings)
+            self.active_warnings.clear()  # Drain the queue
+            delimiter = "-" * 40
+            return f"{warnings_str}\n{delimiter}\n\n{content}"
+        return content
 
-    async def _log_usage(self, model, prompt, completion):
+    async def _log_usage(self, model, prompt, completion, project_id: str = "default"):
         """Standardized billing and HUD telemetry logging."""
         if model not in self.session_usage:
             self.session_usage[model] = {"prompt": 0, "completion": 0}
         self.session_usage[model]["prompt"] += prompt
         self.session_usage[model]["completion"] += completion
 
-        project_name = os.getenv("QWEN_PROJECT_NAME", "adhoc")
+        project_name = project_id
         try:
             billing_tracker.log_usage(project_name, model, prompt, completion)
-            await get_broadcaster().report_usage(model, prompt, completion)
+            await get_broadcaster().report_usage(model, prompt, completion, project_id=project_id)
         except Exception as e:
             logger.error(f"Telemetry logging failed: {e}")
 
