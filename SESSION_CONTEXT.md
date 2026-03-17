@@ -1,4 +1,18 @@
-## 🟢 CURRENT SESSION: Specter Qwen HUD Deployment & VSIX Packaging
+## 🟢 CURRENT SESSION: Model Router Stabilization & Image Subsystem Excision
+- **Conversation ID**: b716a9d0-7596-45d6-9aea-24a5385c09c2
+- **Date**: 2026-03-17
+- **Workspace Path**: c:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local
+- **Cel**: Stabilizacja Model Registry, implementacja Billing Guard w routerze oraz usunięcie podsystemu generowania obrazów (WanX).
+- **Podsumowanie**: 
+  1. Zaimplementowano inteligentny routing z blokadą bilingową (auto-upgrade do `coder_pro` tylko w planach abonamentowych). 
+  2. Wyeliminowano ryzyko rekurencji w routerze modeli. 
+  3. Dokonano pełnej operacji usunięcia (excision) narzędzi `qwen_refine_image_prompt`, `qwen_prepare_visual_reference` i `qwen_generate_image` wraz z ich implementacjami i plikami źródłowymi (`images.py`, `wanx_builder.py`, `prompts/image.py`). 
+  4. Naprawiono błędy typowania i linta w `registry.py`. 
+  5. System jest teraz lżejszy i skupiony wyłącznie na zadaniach SRE/Coding.
+
+---
+
+## ⚪ PREVIOUS SESSION: Specter Qwen HUD Deployment & VSIX Packaging
 - **Conversation ID**: e60a99cd-43cc-463c-87b2-44e87086acad
 - **Date**: 2026-02-25
 - **Workspace Path**: c:\Users\pawel\OneDrive\python_reps\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local

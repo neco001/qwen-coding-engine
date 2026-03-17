@@ -11,7 +11,11 @@ def get_current_project_id() -> str:
         return project_name
     
     cwd = os.getcwd()
-    # Normalize path for multi-window consistency
-    normalized_cwd = os.path.normpath(cwd).lower()
+    # Normalize path for multi-window consistency and handle symlinks
+    try:
+        normalized_cwd = os.path.realpath(cwd).lower()
+    except Exception:
+        normalized_cwd = os.path.normpath(cwd).lower()
+        
     project_hash = hashlib.sha256(normalized_cwd.encode()).hexdigest()[:8]
     return f"project_{project_hash}"

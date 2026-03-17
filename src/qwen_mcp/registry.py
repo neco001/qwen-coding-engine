@@ -4,6 +4,7 @@ import re
 import asyncio
 import logging
 import urllib.request
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 from datetime import datetime
 from platformdirs import user_cache_dir
@@ -116,42 +117,48 @@ class ModelRegistry:
             return f"HF Sync failed: {str(e)}"
 
     def score_model(self, model_id: str, criteria: dict) -> int:
-        score: int = 0
-        mid = model_id.lower()
+        base_score: int = 0
+        mid: str = model_id.lower()
 
+        # 1. Filter out garbage models unless specifically requested
         garbage = ["vl", "audio", "image", "tts", "asr", "vc", "omni", "mt", "realtime"]
         if any(g in mid for g in garbage) and not any(
             m in mid for m in criteria.get("must_have", [])
         ):
             return -500
 
+        # 2. Key word matching
         for word in criteria.get("must_have", []):
             if word in mid:
-                score = score + 100
+                base_score = base_score + 100
 
         for word in criteria.get("avoid", []):
             if word in mid:
-                score = score - 50
+                base_score = base_score - 50
 
+        # 3. Parameter and version detection
         numbers = re.findall(r"(\d+(?:\.\d+)?)", mid)
         for num_str in numbers:
             try:
                 num = float(num_str)
                 if 1.0 <= num <= 10.0:
-                    score = score + int(num * 10)
-                elif num > 2000:
-                    score = score + 1
-            except ValueError:
+                    base_score = base_score + int(num * 10)
+                elif num > 2000:  # Context window or timestamp
+                    base_score = base_score + 1
+            except (ValueError, TypeError):
                 continue
 
+        # 4. Specific heuristics
         if mid == criteria.get("fallback"):
-            score = score + 20
+            base_score = base_score + 20
 
-        last_part = mid.split("-")[-1]
-        if "-" in mid and any(char.isdigit() for char in last_part):
-            score = score - 5
+        # Penalize timestamped versions (prefer stable)
+        if "-" in mid:
+            last_token = mid.split("-")[-1]
+            if any(c.isdigit() for c in last_token) and len(last_token) > 4:
+                base_score = base_score - 10
 
-        return score
+        return int(base_score)
 
     def load_cache(self):
         if self.cache_file.exists():
@@ -314,7 +321,9 @@ class ModelRegistry:
                         score += 100
 
                     # Heuristic C: Parameter tie-breaker (prefer larger for higher tiers)
-                    score += int(meta.get("params", 0) / 1e9)
+                    params_val = meta.get("params", 0)
+                    if isinstance(params_val, (int, float)):
+                        score += int(params_val / 1e9)
 
                     scored_candidates.append((mid, score))
 

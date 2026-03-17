@@ -12,7 +12,6 @@ from qwen_mcp.specter.telemetry import get_broadcaster
 # New modular imports
 from qwen_mcp.prompts.system import AUDIT_SYSTEM_PROMPT, CODER_SYSTEM_PROMPT
 from qwen_mcp.prompts.lachman import LP_DISCOVERY_PROMPT, LP_ARCHITECT_PROMPT, LP_VERIFIER_PROMPT
-from qwen_mcp.prompts.image import IMAGE_PROMPT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 

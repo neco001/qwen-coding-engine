@@ -79,7 +79,14 @@ class CompletionHandler(BaseDashScopeClient):
                 else self.model_name
             )
             
-            logger.info(f"Completion Request | Model: {target_model} | Attempt: {attempt+1}")
+            project_id = get_current_project_id()
+            logger.info(f"Completion Request | Model: {target_model} | Attempt: {attempt+1} | Project: {project_id}")
+
+            # Telemetry: Update total tokens in HUD with estimated plan tokens
+            await get_broadcaster().broadcast_state({
+                "active_model": target_model,
+                "request_tokens": {"prompt": estimated_input, "completion": 0}
+            }, project_id=project_id)
 
             # Auto-detect reasoning models
             is_reasoning_model = "qwq" in target_model.lower() or task_type == "analyst"
@@ -90,12 +97,12 @@ class CompletionHandler(BaseDashScopeClient):
                 if use_streaming:
                     return await self._stream_completion(
                         target_model, messages, temperature, force_max_tokens, 
-                        request_timeout, extra_body, include_reasoning
+                        request_timeout, extra_body, include_reasoning, project_id=project_id
                     )
                 else:
                     return await self._standard_completion(
                         target_model, messages, temperature, force_max_tokens, 
-                        request_timeout, include_reasoning
+                        request_timeout, include_reasoning, project_id=project_id
                     )
             except Exception as e:
                 is_model_error = "model_not_found" in str(e).lower() or "not found" in str(e).lower()
@@ -105,7 +112,7 @@ class CompletionHandler(BaseDashScopeClient):
                     continue
                 return await self._handle_error(e, request_timeout)
 
-    async def _stream_completion(self, model, messages, temp, max_t, timeout, extra, include_reasoning):
+    async def _stream_completion(self, model, messages, temp, max_t, timeout, extra, include_reasoning, project_id="default"):
         client_to_use = self.get_client_for_model(model)
         response = await client_to_use.chat.completions.create(
             model=model, messages=messages, temperature=temp, max_tokens=max_t,
@@ -118,20 +125,21 @@ class CompletionHandler(BaseDashScopeClient):
         
         async for chunk in response:
             if hasattr(chunk, "usage") and chunk.usage:
-                project_id = get_current_project_id()
+                # Actual usage from API
                 await self._log_usage(model, chunk.usage.prompt_tokens, chunk.usage.completion_tokens, project_id=project_id)
 
             if hasattr(chunk, "choices") and chunk.choices:
                 delta = chunk.choices[0].delta
-                reasoning = getattr(delta, "reasoning_content", None)
+                # Support both reasoning_content and legacy thought/reasoning attributes
+                reasoning = getattr(delta, "reasoning_content", None) or getattr(delta, "thought", None)
                 if reasoning:
                     reasoning_log += reasoning
-                    await get_broadcaster().update_stream(thinking=reasoning, project_id=get_current_project_id())
+                    await get_broadcaster().update_stream(thinking=reasoning, project_id=project_id)
 
                 content = getattr(delta, "content", None)
                 if content:
                     full_response += content
-                    await get_broadcaster().update_stream(content=content, project_id=get_current_project_id())
+                    await get_broadcaster().update_stream(content=content, project_id=project_id)
 
         if include_reasoning and reasoning_log:
             output = f"<thought>\n{reasoning_log.strip()}\n</thought>\n\n{full_response.strip()}".strip()
@@ -140,7 +148,7 @@ class CompletionHandler(BaseDashScopeClient):
             
         return await self._prepend_warnings(output)
 
-    async def _standard_completion(self, model, messages, temp, max_t, timeout, include_reasoning):
+    async def _standard_completion(self, model, messages, temp, max_t, timeout, include_reasoning, project_id="default"):
         client_to_use = self.get_client_for_model(model)
         response = await client_to_use.chat.completions.create(
             model=model, messages=messages, temperature=temp, max_tokens=max_t,
@@ -148,7 +156,6 @@ class CompletionHandler(BaseDashScopeClient):
         )
 
         if hasattr(response, "usage") and response.usage:
-            project_id = get_current_project_id()
             await self._log_usage(model, response.usage.prompt_tokens, response.usage.completion_tokens, project_id=project_id)
 
         if not response.choices:
@@ -156,7 +163,7 @@ class CompletionHandler(BaseDashScopeClient):
 
         msg = response.choices[0].message
         content = getattr(msg, "content", "") or ""
-        reasoning = getattr(msg, "reasoning_content", "") or ""
+        reasoning = getattr(msg, "reasoning_content", "") or getattr(msg, "thought", "") or ""
 
         if include_reasoning and reasoning:
             output = f"<thought>\n{reasoning.strip()}\n</thought>\n\n{content.strip()}".strip()

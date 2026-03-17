@@ -12,9 +12,6 @@ from qwen_mcp.tools import (
     set_model_in_registry,
     generate_sparring,
     heal_registry,
-    refine_image_prompt,
-    prepare_visual_reference,
-    generate_qwen_image,
     set_billing_mode,
     get_current_billing_mode,
 )
@@ -46,10 +43,10 @@ async def qwen_audit(
     """
     Audits the provided code or terminal logs using Qwen models.
     """
-    broadcaster = get_broadcaster()
-    await broadcaster.broadcast_state({
+    project_id = get_current_project_id()
+    await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("strategist")
-    })
+    }, project_id=project_id)
     return await generate_audit(content, context, ctx)
 
 
@@ -60,10 +57,10 @@ async def qwen_coder(
     """
     Generates or completes code using Qwen 3.5 Plus.
     """
-    broadcaster = get_broadcaster()
-    await broadcaster.broadcast_state({
+    project_id = get_current_project_id()
+    await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("coding")
-    })
+    }, project_id=project_id)
     return await generate_code(prompt, context, ctx)
 
 
@@ -74,10 +71,10 @@ async def qwen_coder_pro(
     """
     Generates or completes code using specialized Qwen-2.5-Coder-32B or 72B (Heavy Duty).
     """
-    broadcaster = get_broadcaster()
-    await broadcaster.broadcast_state({
+    project_id = get_current_project_id()
+    await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("coder_pro")
-    })
+    }, project_id=project_id)
     return await generate_code_pro(prompt, context, ctx)
 
 
@@ -89,10 +86,10 @@ async def qwen_architect(
     Initiates 'The Lachman Protocol' (LP).
     The server hires a dynamic expert squad to audit your goal and generate a high-precision Blueprint.
     """
-    broadcaster = get_broadcaster()
-    await broadcaster.broadcast_state({
+    project_id = get_current_project_id()
+    await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("strategist")
-    })
+    }, project_id=project_id)
     if ctx:
         await ctx.report_progress(
             progress=0, total=None, message="Initiating Lachman Protocol..."
