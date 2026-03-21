@@ -122,11 +122,14 @@ class CompletionHandler(BaseDashScopeClient):
 
         full_response = ""
         reasoning_log = ""
+        usage_reported = False
         
         async for chunk in response:
+            # Report usage if present in chunk (some APIs send it mid-stream)
             if hasattr(chunk, "usage") and chunk.usage:
                 # Actual usage from API
                 await self._log_usage(model, chunk.usage.prompt_tokens, chunk.usage.completion_tokens, project_id=project_id)
+                usage_reported = True
 
             if hasattr(chunk, "choices") and chunk.choices:
                 delta = chunk.choices[0].delta
@@ -140,6 +143,14 @@ class CompletionHandler(BaseDashScopeClient):
                 if content:
                     full_response += content
                     await get_broadcaster().update_stream(content=content, project_id=project_id)
+
+        # CRITICAL FIX: Report usage at END of stream if not already reported
+        # Coding Plan API and some other providers only send usage in the final chunk
+        if not usage_reported:
+            # Estimate tokens if not provided (fallback) - use minimum of 1 to avoid 0 counts
+            estimated_prompt = max(1, self.estimate_tokens(messages))
+            estimated_completion = max(1, self.estimate_tokens([{"role": "assistant", "content": full_response}]))
+            await self._log_usage(model, estimated_prompt, estimated_completion, project_id=project_id)
 
         if include_reasoning and reasoning_log:
             output = f"<thought>\n{reasoning_log.strip()}\n</thought>\n\n{full_response.strip()}".strip()
@@ -155,8 +166,14 @@ class CompletionHandler(BaseDashScopeClient):
             timeout=timeout, stream=False,
         )
 
+        project_id = project_id
         if hasattr(response, "usage") and response.usage:
             await self._log_usage(model, response.usage.prompt_tokens, response.usage.completion_tokens, project_id=project_id)
+        else:
+            # FALLBACK: Coding Plan and some APIs don't return usage - estimate it
+            estimated_prompt = max(1, self.estimate_tokens(messages))
+            estimated_completion = max(1, self.estimate_tokens([{"role": "assistant", "content": getattr(response.choices[0].message, "content", "") or ""}]))
+            await self._log_usage(model, estimated_prompt, estimated_completion, project_id=project_id)
 
         if not response.choices:
             return "Error: Empty response."

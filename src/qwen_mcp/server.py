@@ -45,7 +45,9 @@ async def qwen_audit(
     """
     project_id = get_current_project_id()
     await get_broadcaster().broadcast_state({
-        "active_model": registry.get_best_model("strategist")
+        "active_model": registry.get_best_model("strategist"),
+        "role_mapping": registry.models,
+        "is_live": True
     }, project_id=project_id)
     return await generate_audit(content, context, ctx)
 
@@ -59,7 +61,9 @@ async def qwen_coder(
     """
     project_id = get_current_project_id()
     await get_broadcaster().broadcast_state({
-        "active_model": registry.get_best_model("coding")
+        "active_model": registry.get_best_model("coding"),
+        "role_mapping": registry.models,
+        "is_live": True
     }, project_id=project_id)
     return await generate_code(prompt, context, ctx)
 
@@ -73,7 +77,9 @@ async def qwen_coder_pro(
     """
     project_id = get_current_project_id()
     await get_broadcaster().broadcast_state({
-        "active_model": registry.get_best_model("coder_pro")
+        "active_model": registry.get_best_model("coder_pro"),
+        "role_mapping": registry.models,
+        "is_live": True
     }, project_id=project_id)
     return await generate_code_pro(prompt, context, ctx)
 
@@ -88,7 +94,9 @@ async def qwen_architect(
     """
     project_id = get_current_project_id()
     await get_broadcaster().broadcast_state({
-        "active_model": registry.get_best_model("strategist")
+        "active_model": registry.get_best_model("strategist"),
+        "role_mapping": registry.models,
+        "is_live": True
     }, project_id=project_id)
     if ctx:
         await ctx.report_progress(
@@ -105,6 +113,12 @@ async def qwen_sparring_flash(
     ⚡ FLASH MODE: High-speed strategic analysis and reasoning-only deep dive.
     Best for: Quick tactical decisions, content refinement, and logic checks.
     """
+    project_id = get_current_project_id()
+    await get_broadcaster().broadcast_state({
+        "active_model": registry.get_best_model("strategist"),
+        "role_mapping": registry.models,
+        "is_live": True
+    }, project_id=project_id)
     return await generate_sparring(topic, context, "flash", ctx)
 
 
@@ -116,6 +130,12 @@ async def qwen_sparring_pro(
     🔥 PRO MODE: Full adversarial multi-agent debate (Lachman Protocol for Strategy).
     Best for: High-stakes dilemmas, critical audit of plans, and stress-testing moves.
     """
+    project_id = get_current_project_id()
+    await get_broadcaster().broadcast_state({
+        "active_model": registry.get_best_model("strategist"),
+        "role_mapping": registry.models,
+        "is_live": True
+    }, project_id=project_id)
     return await generate_sparring(topic, context, "pro", ctx)
 
 
@@ -237,7 +257,10 @@ def run_telemetry_server():
 async def sync_hud_state():
     """Broadcaster update for role mapping and basic state."""
     await asyncio.sleep(2) # Wait for sidecar thread to start
-    await get_broadcaster().broadcast_state({"role_mapping": registry.models})
+    await get_broadcaster().broadcast_state({
+        "role_mapping": registry.models,
+        "is_live": False
+    })
 
 def main():
     """Main entrypoint for the MCP server."""

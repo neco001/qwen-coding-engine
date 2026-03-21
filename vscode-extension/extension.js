@@ -1,6 +1,7 @@
 const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 function activate(context) {
     const provider = new SpecterViewProvider(context.extensionUri);
@@ -23,9 +24,91 @@ class SpecterViewProvider {
 
         try {
             webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
+            
+            // Set up message handling for session updates
+            webviewView.webview.onDidReceiveMessage(message => {
+                if (message.type === 'getSessionConfig') {
+                    const sessions = this._detectMcpSessions();
+                    webviewView.webview.postMessage({
+                        type: 'sessionConfig',
+                        sessions: sessions
+                    });
+                }
+            });
         } catch (e) {
             webviewView.webview.html = `<html><body><pre>FAILED TO LOAD HUD: ${e.message}</pre></body></html>`;
         }
+    }
+
+    _detectMcpSessions() {
+        // Detect MCP server configurations from Antigravity/Gemini config files
+        const sessions = [];
+        
+        // Path to Gemini/Antigravity MCP config
+        const geminiConfigPath = 'c:/Users/pawel/.gemini/antigravity/mcp_config.json';
+        // Path to Roo Code MCP settings
+        const rooConfigPath = 'c:/Users/pawel/AppData/Roaming/Antigravity/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json';
+        
+        // Check Gemini config
+        try {
+            if (fs.existsSync(geminiConfigPath)) {
+                const geminiConfig = JSON.parse(fs.readFileSync(geminiConfigPath, 'utf8'));
+                const servers = geminiConfig.mcpServers || {};
+                
+                // Check for any qwen-coding server in Gemini config
+                const hasQwenServer = Object.keys(servers).some(key =>
+                    key.toLowerCase().includes('qwen') && !key.toLowerCase().includes('_roo')
+                );
+                
+                if (hasQwenServer) {
+                    sessions.push({
+                        id: 'gemini',
+                        name: 'Gemini',
+                        projectId: this._hashProjectId('gemini-' + vscode.workspace.workspaceFolders?.[0]?.name || 'default')
+                    });
+                }
+            }
+        } catch (e) {
+            console.log('[SPECTER] Failed to read Gemini config:', e.message);
+        }
+        
+        // Check Roo Code config
+        try {
+            if (fs.existsSync(rooConfigPath)) {
+                const rooConfig = JSON.parse(fs.readFileSync(rooConfigPath, 'utf8'));
+                const servers = rooConfig.mcpServers || {};
+                
+                // Check for any qwen-coding_roo or roo-specific server
+                const hasRooQwenServer = Object.keys(servers).some(key =>
+                    key.toLowerCase().includes('qwen') && key.toLowerCase().includes('_roo')
+                );
+                
+                if (hasRooQwenServer) {
+                    sessions.push({
+                        id: 'roocode',
+                        name: 'Roo Code',
+                        projectId: this._hashProjectId('roocode-' + vscode.workspace.workspaceFolders?.[0]?.name || 'default')
+                    });
+                }
+            }
+        } catch (e) {
+            console.log('[SPECTER] Failed to read Roo config:', e.message);
+        }
+        
+        // Fallback: always provide at least one default session
+        if (sessions.length === 0) {
+            sessions.push({
+                id: 'default',
+                name: 'Default',
+                projectId: this._hashProjectId('default-' + vscode.workspace.workspaceFolders?.[0]?.name || 'default')
+            });
+        }
+        
+        return sessions;
+    }
+
+    _hashProjectId(input) {
+        return crypto.createHash('sha256').update(input).digest('hex').substring(0, 8);
     }
 
     _getHtmlForWebview(webview) {
@@ -55,6 +138,10 @@ class SpecterViewProvider {
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(assetsUri, jsFile));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(assetsUri, cssFile));
 
+        // Get detected sessions
+        const sessions = this._detectMcpSessions();
+        const sessionsJson = JSON.stringify(sessions).replace(/"/g, '"');
+
         return `<!DOCTYPE html>
             <html lang="en">
             <head>
@@ -63,6 +150,9 @@ class SpecterViewProvider {
                 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'unsafe-inline' 'unsafe-eval' blob:; connect-src ws://127.0.0.1:8878 http://127.0.0.1:8878 ws://localhost:8878 http://localhost:8878;">
                 <link href="${styleUri}" rel="stylesheet">
                 <title>Specter Cockpit</title>
+                <script>
+                    window.INITIAL_SESSIONS = ${sessionsJson};
+                </script>
                 <style>
                     body { padding: 0; margin: 0; overflow: hidden; background-color: #0a0a0a; color: #333; font-family: monospace; }
                     #root { height: 100vh; position: relative; z-index: 1; }

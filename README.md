@@ -20,7 +20,7 @@ By offloading heavy architectural planning and raw coding to specialized Qwen mo
 ### This IS for you if:
 - You are a **"Vibecoder"** (building complex apps primarily via AI chat) and you're sick of the "Fix one feature, break two others" cycle.
 - You're a **Senior Developer** who wants to delegate the "dirty work"—auditing logs, writing boilerplate, and complex refactoring—to an agent that won't get tired or impatient.
-- You want the power of **Qwen 3.5 Plus** and **Qwen 2.5 Coder 32B** at a **fraction of the cost** of GPT-4o or Claude 3.5 Opus.
+- You want the power of **Qwen 3.5 Plus** (strategist) and **Qwen 3 Coder Plus** (coding) at a **fraction of the cost** of GPT-4o or Claude 3.5 Opus.
 
 ---
 
@@ -91,9 +91,11 @@ Because we use **The Lachman Protocol** (Spec -> Code -> Audit), we rely on **St
 
 ---
 
-## The Arsenal (Dynamic 12-Role Registry)
+## The Arsenal (Dynamic 6-Role Registry)
 
 The engine automatically selects the best model for each task via **Qwen-Turbo Meta-Analysis** to ensure maximum ROI and capability. The model selection is **strictly governed by your billing mode**:
+
+**Core Roles:** `strategist`, `coder`, `coder_pro`, `specialist`, `analyst`, `scout`
 
 ### Billing Mode Behavior
 
@@ -109,7 +111,7 @@ The engine automatically selects the best model for each task via **Qwen-Turbo M
 | Category | Tool | Role | Default Model |
 | :--- | :--- | :--- | :--- |
 | **Logic** | `qwen_architect` | **Strategist**: Expert planner & JSON architect. | `qwen3.5-plus` |
-| **Code** | `qwen_coder` | **Coder**: Writing production-grade complete files. | `qwen2.5-coder-32b-instruct` |
+| **Code** | `qwen_coder` | **Coder**: Writing production-grade complete files. | `qwen3-coder-plus` |
 | **Code** | `qwen_coder_pro` | **Specialist**: Expert in complex logic & Refactoring. | `qwen2.5-72b-instruct` |
 | **SRE** | `qwen_audit` | **Analyst**: Reason-heavy SRE/Debugging (QwQ). | `qwq-plus` |
 | **Strategy** | `qwen_sparring_flash` | **Tactician**: Quick strategic analysis & reasoning. | `qwq-plus` → `qwen3.5-plus` |
@@ -133,7 +135,7 @@ When `billing_mode="coding_plan"`, the engine uses **ONLY** these models:
 | Category | Tool | Role | Plan Model |
 | :--- | :--- | :--- | :--- |
 | **Logic** | `qwen_architect` | **Strategist** | `qwen3.5-plus` |
-| **Code** | `qwen_coder` | **Coder** | `qwen3-coder-next` (fast, lightweight) |
+| **Code** | `qwen_coder` | **Coder** | `qwen3-coder-next` (fast, inline) |
 | **Code** | `qwen_coder_pro` | **Specialist** | `qwen3-coder-plus` (heavy refactor, huge context) |
 | **SRE** | `qwen_audit` | **Analyst** | `glm-5` |
 | **Data** | `qwen_read_file` | **Scout** | `kimi-k2.5` |
@@ -234,7 +236,7 @@ The Architect doesn't just write a list of steps. It initiates the **Lachman Pro
 The Coder is bound by strict **Surgicial Precision Rules**:
 -  **No Placeholders:** A absolute ban on `// ... rest of code`. Every file is generated in full or as a clean, integrable block.
 -  **Context Awareness:** It consumes the Architect's blueprint to stay aligned with the big picture.
--  **Model Switching:** For simple boilerplate, it uses standard coder models. For complex algorithms or heavy refactoring, it escalation to `qwen-2.5-coder-32b` (Coder-Next) for maximum logic density.
+-  **Model Switching:** For simple boilerplate, it uses `qwen3-coder-next` (fast, inline). For complex algorithms or heavy refactoring, it escalates to `qwen3-coder-plus` (huge context) or `qwen2.5-72b-instruct` (maximum logic density).
 
 ### The Auditor (The Analyst)
 **Logic:** `qwen_audit` / **Model:** `qwq-plus`
@@ -242,24 +244,6 @@ The Auditor uses **heavy reasoning (QwQ)** to act as a Senior SRE (Site Reliabil
 -  **Root Cause Analysis (RCA):** Feed it terminal logs, and it will find the exact line causing the memory leak or dependency conflict.
 -  **Brevity & ROI:** It doesn't nitpick code style. It focuses on high-impact fixes, security vulnerabilities, and edge cases that simpler models miss.
 -  **Zero Fluff:** You get actionable feedback and specific code blocks to fix, nothing more.
-
----
-
-## 🐝 Swarm Mode: Parallel Agent Execution
-
-For complex tasks that can be parallelized, the engine includes a **Swarm Orchestrator** that decomposes work into subtasks and executes them concurrently.
-
-### How It Works:
-1. **Decompose**: The SwarmOrchestrator analyzes your prompt and breaks it into independent subtasks
-2. **Execute**: Subtasks are executed in parallel (default concurrency: 5 workers)
-3. **Synthesize**: Results are combined into a cohesive final output
-
-### Usage:
-Enable Swarm Mode by passing `swarm=True` to supported tools:
-- `qwen_coder(prompt="...", swarm=True)` - Parallel code generation
-- `qwen_audit(content="...", swarm=True)` - Parallel audit analysis
-
-The SwarmOrchestrator uses a priority-based scheduling system and automatically handles task dependencies.
 
 ---
 
@@ -279,6 +263,14 @@ The engine supports three billing modes to optimize costs based on your subscrip
 
 The **Financial Circuit Breaker** automatically monitors token consumption and terminates processes before they exceed your budget limits.
 
+### Intelligent Auto-Upgrade Routing
+
+The engine includes **smart routing** that automatically upgrades coding tasks to `qwen_coder_pro` when:
+- **Prompt size > 15,000 tokens** (complex context)
+- **Complexity hint = "high" or "critical"**
+
+This ensures heavy tasks get the most capable model without manual intervention. The upgrade is **automatically suppressed** in `payg` mode to respect billing constraints.
+
 ---
 
 ## 🔬 SPECTER Telemetry: Real-Time HUD
@@ -295,6 +287,12 @@ The engine includes a lightweight telemetry sidecar that streams real-time token
 - Billing mode switches
 - Model routing decisions
 - Financial circuit breaker triggers
+- **Live streaming**: Real-time thinking buffer and content output
+
+### Recent Fixes (2026-03-20):
+- **Coding Plan API Support**: Added token usage fallback estimation when API doesn't return usage data mid-stream
+- **Live Model Display**: HUD now broadcasts `active_model` at the start of each request
+- **Stream Completion**: Token usage is now reported at the END of streaming if not provided during chunks
 
 The telemetry server starts automatically when you run `qwen-coding-local` and can be monitored via the VSCode extension.
 

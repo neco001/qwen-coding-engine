@@ -1,65 +1,161 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Activity, ShieldAlert, Cpu, Eye, RadioTower, Zap, Terminal, Hash } from 'lucide-react';
+import { Activity, ShieldAlert, Cpu, Eye, RadioTower, Zap, Terminal, Hash, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 
 interface TokenCount { prompt: number; completion: number; }
 interface TelemetryState {
     active_model: string;
+    status: string; // "idle", "live", "processing"
+    operation: string;
+    progress_percent: number;
     request_tokens: TokenCount;
     session_tokens: TokenCount;
     loop_iteration: number;
     role_mapping: Record<string, string>;
     thinking: string;
     streaming_content: string;
+    is_live: boolean;
 }
 
 const DEFAULT_STATE: TelemetryState = {
     active_model: 'Standby...',
+    status: 'idle',
+    operation: '',
+    progress_percent: 0,
     request_tokens: { prompt: 0, completion: 0 },
     session_tokens: { prompt: 0, completion: 0 },
     loop_iteration: 0,
     role_mapping: {},
     thinking: '',
     streaming_content: '',
+    is_live: false,
 };
 
+// Session type for multi-session support
+interface Session {
+    id: string;
+    name: string;
+    projectId: string;
+    telemetry: TelemetryState;
+    isConnected: boolean;
+    ws: WebSocket | null;
+}
+
 function App() {
-    const [telemetry, setTelemetry] = useState<TelemetryState>(DEFAULT_STATE);
-    const [isConnected, setIsConnected] = useState(false);
+    const [sessions, setSessions] = useState<Session[]>([]);
+    const [activeSessionId, setActiveSessionId] = useState<string>('');
     const streamRef = useRef<HTMLDivElement>(null);
-    const fadeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const fadeTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
+    // Initialize sessions from VSCode extension or defaults
     useEffect(() => {
-        const ws = new WebSocket('ws://127.0.0.1:8878/ws/telemetry');
-
-        ws.onopen = () => setIsConnected(true);
-
-        ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                if (data.type === 'heartbeat') return;
-                setTelemetry(t => ({ ...t, ...data }));
-
-                // Auto-clear streaming content after 12s of silence
-                if (data.streaming_content || data.thinking) {
-                    clearTimeout(fadeTimer.current);
-                    fadeTimer.current = setTimeout(() => {
-                        setTelemetry(t => ({ ...t, streaming_content: '', thinking: '' }));
-                    }, 12000);
-                }
-            } catch (e) {
-                console.error("Failed to parse telemetry");
+        // Try to get sessions from VSCode extension first
+        const vscodeSessions = (window as any).INITIAL_SESSIONS;
+        
+        if (vscodeSessions && Array.isArray(vscodeSessions)) {
+            // Use sessions from extension
+            const initialSessions: Session[] = vscodeSessions.map((s: any) => ({
+                id: s.id,
+                name: s.name,
+                projectId: s.projectId,
+                telemetry: DEFAULT_STATE,
+                isConnected: false,
+                ws: null
+            }));
+            setSessions(initialSessions);
+            if (initialSessions.length > 0) {
+                setActiveSessionId(initialSessions[0].id);
             }
-        };
-
-        ws.onclose = () => {
-            setIsConnected(false);
-            setTimeout(() => window.location.reload(), 3000);
-        };
-
-        return () => { ws.close(); clearTimeout(fadeTimer.current); };
+        } else {
+            // Fallback: Default sessions
+            const defaultSessions: Session[] = [
+                { id: 'gemini', name: 'Gemini', projectId: 'gemini', telemetry: DEFAULT_STATE, isConnected: false, ws: null },
+                { id: 'roocode', name: 'Roo Code', projectId: 'roocode', telemetry: DEFAULT_STATE, isConnected: false, ws: null }
+            ];
+            setSessions(defaultSessions);
+            setActiveSessionId('gemini');
+        }
     }, []);
+
+    // Connect WebSocket for each session
+    useEffect(() => {
+        sessions.forEach(session => {
+            if (session.ws) return; // Already connected
+
+            const ws = new WebSocket(`ws://127.0.0.1:8878/ws/telemetry?project_id=${session.projectId}`);
+            
+            ws.onopen = () => {
+                setSessions(prev => prev.map(s =>
+                    s.id === session.id ? { ...s, isConnected: true } : s
+                ));
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'heartbeat') return;
+                    
+                    setSessions(prev => prev.map(s => {
+                        if (s.id === session.id) {
+                            const newTelemetry = { ...s.telemetry, ...data };
+                            // Update is_live based on status
+                            newTelemetry.is_live = data.status === 'live' || data.status === 'processing';
+                            return { ...s, telemetry: newTelemetry };
+                        }
+                        return s;
+                    }));
+
+                    // Auto-clear streaming content after 12s of silence
+                    if (data.streaming_content || data.thinking) {
+                        if (fadeTimers.current.has(session.id)) {
+                            clearTimeout(fadeTimers.current.get(session.id));
+                        }
+                        fadeTimers.current.set(session.id, setTimeout(() => {
+                            setSessions(prev => prev.map(s =>
+                                s.id === session.id
+                                    ? { ...s, telemetry: { ...s.telemetry, streaming_content: '', thinking: '' } }
+                                    : s
+                            ));
+                        }, 12000));
+                    }
+                } catch (e) {
+                    console.error("Failed to parse telemetry");
+                }
+            };
+
+            ws.onclose = () => {
+                setSessions(prev => prev.map(s =>
+                    s.id === session.id ? { ...s, isConnected: false, ws: null } : s
+                ));
+                // Attempt reconnect after 3 seconds
+                setTimeout(() => {
+                    setSessions(prev => prev.map(s =>
+                        s.id === session.id ? { ...s, ws: null } : s
+                    ));
+                }, 3000);
+            };
+
+            ws.onerror = () => {
+                ws.close();
+            };
+
+            // Update session with WebSocket
+            setSessions(prev => prev.map(s =>
+                s.id === session.id ? { ...s, ws } : s
+            ));
+        });
+
+        return () => {
+            sessions.forEach(s => s.ws?.close());
+            fadeTimers.current.forEach((timer) => clearTimeout(timer));
+        };
+    }, [sessions.length]);
+
+    // Get active session
+    const activeSession = sessions.find(s => s.id === activeSessionId);
+    const telemetry = activeSession?.telemetry || DEFAULT_STATE;
+    const isConnected = activeSession?.isConnected || false;
 
     // Auto-scroll logic: only when at bottom or small height
     useEffect(() => {
@@ -74,9 +170,31 @@ function App() {
 
     const hasStream = (telemetry.streaming_content?.length > 0) || (telemetry.thinking?.length > 0);
     const hasRoles = Object.keys(telemetry.role_mapping).length > 0;
+    const hasProgress = telemetry.status === 'processing' && telemetry.progress_percent > 0;
 
     return (
         <div className="app-container h-screen bg-[#0a0a0a] text-white/80 font-mono flex flex-col select-none text-[13px]">
+
+            {/* 0. SESSION TABS (Multi-session support) */}
+            <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5 bg-white/[0.02] shrink-0">
+                <Layers className="w-3.5 h-3.5 text-white/30 mr-1" />
+                {sessions.map(session => (
+                    <button
+                        key={session.id}
+                        onClick={() => setActiveSessionId(session.id)}
+                        className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-sm transition-all ${
+                            activeSessionId === session.id
+                                ? 'bg-[#facc15]/20 text-[#facc15] border border-[#facc15]/40'
+                                : 'bg-white/5 text-white/40 border border-transparent hover:bg-white/10'
+                        }`}
+                    >
+                        {session.name}
+                        {session.isConnected && (
+                            <span className="ml-1.5 w-1.5 h-1.5 inline-block rounded-full bg-green-500 animate-pulse" />
+                        )}
+                    </button>
+                ))}
+            </div>
 
             {/* 1. TACTICAL HEADER */}
             <header className="flex justify-between items-center px-3 py-3 border-b border-white/5 shrink-0">
@@ -93,6 +211,27 @@ function App() {
             </header>
 
             <main className="flex-1 overflow-y-auto p-3 space-y-5">
+
+                {/* 1.5 PROGRESS BAR (For long operations) */}
+                {hasProgress && (
+                    <section className="bg-white/[0.02] border border-white/10 p-2.5 rounded-sm">
+                        <div className="flex items-center justify-between mb-1.5">
+                            <div className="text-[9px] text-white/40 uppercase tracking-wider flex items-center gap-1">
+                                <Zap className="w-3 h-3 animate-pulse" />
+                                {telemetry.operation || 'Processing...'}
+                            </div>
+                            <div className="text-[10px] text-[#facc15] font-bold">
+                                {telemetry.progress_percent}%
+                            </div>
+                        </div>
+                        <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                            <div
+                                className="h-full bg-gradient-to-r from-[#facc15] to-[#facc15]/50 transition-all duration-300"
+                                style={{ width: `${telemetry.progress_percent}%` }}
+                            />
+                        </div>
+                    </section>
+                )}
 
                 {/* 2. COMPUTE HUB (Active Model) */}
                 <section className="bg-white/[0.03] border border-white/10 p-2.5 rounded-sm">
@@ -140,6 +279,11 @@ function App() {
                 <section className="space-y-2">
                     <div className="text-[10px] text-white/30 uppercase tracking-[0.2em] px-1 flex items-center gap-1">
                         <Hash className="w-3 h-3" /> Logic Matrix
+                        {(telemetry.is_live || telemetry.status === 'live' || telemetry.status === 'processing') && (
+                            <span className="ml-2 px-1.5 py-0.5 bg-green-500/20 border border-green-500/40 text-green-400 text-[7px] font-black uppercase tracking-widest rounded-sm animate-pulse">
+                                LIVE
+                            </span>
+                        )}
                     </div>
                     <div className="bg-white/[0.02] border border-white/10 rounded-sm divide-y divide-white/5">
                         {hasRoles ? (
@@ -159,22 +303,22 @@ function App() {
 
                 {/* 5. LIVE STREAM (Now with Markdown and Correct Direction) */}
                 <section className={`flex flex-col space-y-2 ${hasStream ? 'block' : 'hidden'}`}>
-                    <div className="text-[10px] text-[#00ff41]/70 uppercase tracking-[0.2em] px-1 flex items-center space-x-2">
+                    <div className="text-[10px] text-[#facc15]/50 uppercase tracking-[0.2em] px-1 flex items-center space-x-2">
                         <Zap className="w-3 h-3 animate-pulse" />
                         <span>Live Evolution</span>
                     </div>
                     <div
                         ref={streamRef}
-                        className="bg-[#00ff41]/[0.02] border border-[#00ff41]/20 rounded-sm p-4 max-h-[350px] overflow-y-auto scroll-smooth leading-relaxed"
+                        className="bg-white/[0.02] border border-[#facc15]/10 rounded-sm p-4 max-h-[350px] overflow-y-auto scroll-smooth leading-relaxed"
                     >
                         <div className="prose prose-invert prose-sm max-w-none">
                             {telemetry.thinking && (
-                                <div className="text-[#00ff41]/60 italic mb-4 opacity-80 border-l-2 border-[#00ff41]/30 pl-3 py-1 font-medium text-[12px]">
+                                <div className="text-[#529b0d] italic mb-4 opacity-80 border-l-2 border-[#529b0d]/30 pl-3 py-1 font-medium text-[12px]">
                                     <ReactMarkdown>{telemetry.thinking}</ReactMarkdown>
                                 </div>
                             )}
                             {telemetry.streaming_content && (
-                                <div className="text-[#00ff41] text-[12px] font-medium markdown-body drop-shadow-[0_0_5px_rgba(0,255,65,0.2)]">
+                                <div className="text-white/80 text-[12px] font-medium markdown-body">
                                     <ReactMarkdown>{telemetry.streaming_content}</ReactMarkdown>
                                 </div>
                             )}
@@ -213,7 +357,13 @@ function App() {
 
             {/* FOOTER */}
             <footer className="px-4 py-3 border-t border-white/5 flex justify-between items-center text-[9px] uppercase tracking-[0.3em] text-white/10 shrink-0">
-                <span>Core.v1.1.2 - Tactical</span>
+                <div className="flex items-center gap-3">
+                    <span>Core.v1.1.3 - Multi-Session</span>
+                    <span className="text-white/20">|</span>
+                    <span className={isConnected ? 'text-green-400/60' : 'text-red-400/60'}>
+                        {sessions.filter(s => s.isConnected).length}/{sessions.length} Sessions Active
+                    </span>
+                </div>
                 <span className="text-[#facc15]/10">0X-SPECTER-LENS-HUD</span>
             </footer>
 
