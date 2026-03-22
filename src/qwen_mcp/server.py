@@ -21,8 +21,12 @@ from qwen_mcp.registry import registry
 import asyncio
 import sys
 import threading
+import socket
 import uvicorn
 from fastapi import FastAPI, WebSocket
+
+# Global flag to track if telemetry server is already running
+_TELEMETRY_SERVER_RUNNING = False
 
 # Force UTF-8 encoding for stdout/stderr on Windows to prevent 'krzaki'
 if sys.platform == "win32":
@@ -106,12 +110,35 @@ async def qwen_architect(
 
 
 @mcp.tool()
-async def qwen_sparring_flash(
-    topic: str, context: str = "", ctx: Context = None
+async def qwen_sparring(
+    mode: str = "flash",
+    topic: str = "",
+    context: str = "",
+    session_id: str = "",
+    ctx: Context = None
 ) -> str:
     """
-    ⚡ FLASH MODE: High-speed strategic analysis and reasoning-only deep dive.
-    Best for: Quick tactical decisions, content refinement, and logic checks.
+    Sparring Engine v2 - Step-by-step adversarial analysis with session checkpointing.
+    
+    MODES:
+    - flash: Quick analysis + draft (single call, no session needed)
+    - discovery: Create session + define roles (returns session_id for next steps)
+    - red: Execute Red Cell critique (requires session_id from discovery)
+    - blue: Execute Blue Cell defense (requires session_id + red critique completed)
+    - white: Execute White Cell synthesis (requires session_id + red + blue completed)
+    
+    GUIDED UX:
+    Each response includes next_step hints and suggested commands.
+    
+    EXAMPLES:
+    1. Quick analysis: qwen_sparring(mode="flash", topic="Should we use microservices?")
+    2. Start session: qwen_sparring(mode="discovery", topic="Migration strategy")
+    3. Continue: qwen_sparring(mode="red", session_id="sp_abc123")
+    4. Next step: qwen_sparring(mode="blue", session_id="sp_abc123")
+    5. Final: qwen_sparring(mode="white", session_id="sp_abc123")
+    
+    TIMEOUTS:
+    Each mode has reduced timeout (60-90s) to avoid MCP 300s client limit.
     """
     project_id = get_current_project_id()
     await get_broadcaster().broadcast_state({
@@ -119,24 +146,7 @@ async def qwen_sparring_flash(
         "role_mapping": registry.models,
         "is_live": True
     }, project_id=project_id)
-    return await generate_sparring(topic, context, "flash", ctx)
-
-
-@mcp.tool()
-async def qwen_sparring_pro(
-    topic: str, context: str = "", ctx: Context = None
-) -> str:
-    """
-    🔥 PRO MODE: Full adversarial multi-agent debate (Lachman Protocol for Strategy).
-    Best for: High-stakes dilemmas, critical audit of plans, and stress-testing moves.
-    """
-    project_id = get_current_project_id()
-    await get_broadcaster().broadcast_state({
-        "active_model": registry.get_best_model("strategist"),
-        "role_mapping": registry.models,
-        "is_live": True
-    }, project_id=project_id)
-    return await generate_sparring(topic, context, "pro", ctx)
+    return await generate_sparring(topic, context, mode, session_id, ctx)
 
 
 @mcp.tool()
@@ -214,8 +224,30 @@ async def qwen_usage_report() -> str:
     return await generate_usage_report()
 
 
+def is_port_in_use(port: int) -> bool:
+    """Check if a TCP port is already in use on localhost."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("127.0.0.1", port))
+            return False
+        except OSError:
+            return True
+
 def run_telemetry_server():
     """Starts a lightweight FastAPI server for the HUD telemetry."""
+    global _TELEMETRY_SERVER_RUNNING
+    
+    # Check if port is already in use (another MCP instance is running)
+    if is_port_in_use(8878):
+        print("ℹ️ [SPECTER] Telemetry server already running on port 8878, skipping startup")
+        _TELEMETRY_SERVER_RUNNING = True
+        return
+    
+    if _TELEMETRY_SERVER_RUNNING:
+        print("ℹ️ [SPECTER] Telemetry server already started in this process")
+        return
+    
     app = FastAPI()
     broadcaster = get_broadcaster()
 
@@ -250,9 +282,11 @@ def run_telemetry_server():
     try:
         config = uvicorn.Config(app, host="127.0.0.1", port=8878, log_level="warning")
         server = uvicorn.Server(config)
+        _TELEMETRY_SERVER_RUNNING = True
         server.run()
     except Exception as e:
         print(f"❌ Telemetry Sidecar failed: {e}")
+        _TELEMETRY_SERVER_RUNNING = False
 
 async def sync_hud_state():
     """Broadcaster update for role mapping and basic state."""
@@ -264,12 +298,21 @@ async def sync_hud_state():
 
 def main():
     """Main entrypoint for the MCP server."""
-    print("🚀 [SPECTER] Starting Qwen Engineering Engine Context...")
-    print("📡 [SPECTER] Sidecar Uplink on port 8878/ws")
+    global _TELEMETRY_SERVER_RUNNING
     
-    # Start telemetry in dedicated thread
-    sidecar = threading.Thread(target=run_telemetry_server, daemon=True)
-    sidecar.start()
+    print("🚀 [SPECTER] Starting Qwen Engineering Engine Context...")
+    
+    # Check if telemetry server is already running (shared across MCP instances)
+    if is_port_in_use(8878):
+        print("ℹ️ [SPECTER] Connecting to existing telemetry server on port 8878")
+        _TELEMETRY_SERVER_RUNNING = True
+    else:
+        print("📡 [SPECTER] Starting telemetry sidecar on port 8878/ws")
+        # Start telemetry in dedicated thread
+        sidecar = threading.Thread(target=run_telemetry_server, daemon=True)
+        sidecar.start()
+        # Wait briefly for server to start
+        threading.Event().wait(0.5)
     
     # Schedule initial state sync
     try:

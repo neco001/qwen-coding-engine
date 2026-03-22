@@ -135,19 +135,48 @@ async def get_current_billing_mode() -> str:
     return f"Current Billing Mode: {mode.upper()}"
 
 async def generate_sparring(
-    topic: str, context: str = "", mode: str = "flash", ctx: Optional[Context] = None
+    topic: str = "",
+    context: str = "",
+    mode: str = "flash",
+    session_id: str = "",
+    ctx: Optional[Context] = None
 ) -> str:
     """
-    Executes the 5D Sparring Engine via SparringEngine module.
-    """
-    from qwen_mcp.engines.sparring import SparringEngine
-    client = DashScopeClient()
-    engine = SparringEngine(client)
+    Executes the Sparring Engine v2 with step-by-step execution.
     
-    if mode == "flash":
-        return await engine.run_flash(topic, context, ctx)
-    else:
-        return await engine.run_pro(topic, context, ctx)
+    Modes:
+    - flash: Quick analysis + draft (single call, no session)
+    - discovery: Create session + define roles (returns session_id)
+    - red: Execute Red Cell critique (requires session_id)
+    - blue: Execute Blue Cell defense (requires session_id + red critique)
+    - white: Execute White Cell synthesis (requires session_id + red + blue)
+    
+    Args:
+        topic: The topic to analyze (required for flash/discovery)
+        context: Additional context (optional)
+        mode: One of: flash, discovery, red, blue, white
+        session_id: Session ID for red/blue/white modes (required for non-flash modes)
+    
+    Returns:
+        Markdown-formatted response with guided UX hints
+    """
+    from qwen_mcp.engines.sparring_v2 import SparringEngineV2
+    
+    client = DashScopeClient()
+    engine = SparringEngineV2(client)
+    
+    # Handle session_id parameter
+    if mode != "flash" and not session_id:
+        session_id = None
+    
+    response = await engine.execute(
+        mode=mode,
+        topic=topic or None,
+        context=context or None,
+        session_id=session_id or None
+    )
+    
+    return response.to_markdown()
 
 
 async def heal_registry() -> str:

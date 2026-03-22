@@ -214,8 +214,16 @@ class CompletionHandler(BaseDashScopeClient):
 
     async def _handle_error(self, e, timeout):
         """Centralized error translation."""
+        from dashscope.api_entities.api_error import APIError
+        from dashscope.api_entities.api_timeout_error import APITimeoutError
+        
+        if isinstance(e, APITimeoutError):
+            return f"Error: API Timeout (>{timeout}s). The request took too long to complete."
         if isinstance(e, APIError):
-            return f"Error: API Error ({e.status_code}): {e.message}"
+            # Some APIError subclasses may not have status_code
+            status_code = getattr(e, 'status_code', 'unknown')
+            message = getattr(e, 'message', str(e))
+            return f"Error: API Error ({status_code}): {message}"
         if "model_not_found" in str(e).lower() or "not found" in str(e).lower():
             return f"Error: Model not found. {str(e)}"
         logger.exception("Unexpected Completion Error")
