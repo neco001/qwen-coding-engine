@@ -290,15 +290,25 @@ class SparringEngineV2:
             tags=["sparring", "discovery"]
         )
         
-        # Parse roles
+        # Parse roles and models
         try:
-            roles = extract_json_from_text(discovery_raw)
-            required_keys = ["red_role", "red_profile", "blue_role", "blue_profile", 
+            parsed = extract_json_from_text(discovery_raw)
+            required_keys = ["red_role", "red_profile", "blue_role", "blue_profile",
                            "white_role", "white_profile"]
-            if not roles or not all(k in roles for k in required_keys):
+            if not parsed or not all(k in parsed for k in required_keys):
                 raise ValueError("Incomplete role discovery")
+            
+            # Extract roles
+            roles = {k: v for k, v in parsed.items() if not k.endswith("_model")}
+            
+            # Extract models (with defaults)
+            models = {
+                "red_model": parsed.get("red_model", "glm-5"),
+                "blue_model": parsed.get("blue_model", "qwen3.5-plus"),
+                "white_model": parsed.get("white_model", "qwen3.5-plus"),
+            }
         except Exception:
-            # Fallback to default roles
+            # Fallback to default roles and models
             roles = {
                 "red_role": "Red Cell (Adversarial Audit)",
                 "red_profile": "Cyniczny audytor metod i niuansów persony",
@@ -307,11 +317,17 @@ class SparringEngineV2:
                 "white_role": "White Cell (Final Consensus)",
                 "white_profile": "Chief of Staff dbający o logiczną spójność i ROI"
             }
-            logger.warning("Using default roles due to discovery parse failure")
+            models = {
+                "red_model": "glm-5",
+                "blue_model": "qwen3.5-plus",
+                "white_model": "qwen3.5-plus",
+            }
+            logger.warning("Using default roles and models due to discovery parse failure")
         
         # Create session
         session = self.session_store.create_session(topic=topic, context=context)
         session.roles = roles
+        session.models = models
         self.session_store.save(session)
         
         return SparringResponse(
@@ -320,7 +336,7 @@ class SparringEngineV2:
             step_completed="discovery",
             next_step="red",
             next_command=f"sparring(session_id='{session.session_id}', mode='red')",
-            result={"roles": roles},
+            result={"roles": roles, "models": models},
             message="Discovery complete. Session created."
         )
     
@@ -379,6 +395,9 @@ class SparringEngineV2:
         api_start = time.time()
         logger.info(f"[TIMING Red] API call starting at {api_start:.2f} (delta: {api_start - progress_time:.2f}s)")
         
+        # Get model from session or use default
+        red_model = session.models.get("red_model", "glm-5") if session.models else "glm-5"
+        
         red_critique = await self.client.generate_completion(
             messages=red_messages,
             temperature=0.8,
@@ -386,7 +405,8 @@ class SparringEngineV2:
             timeout=TIMEOUTS["red_cell"],
             complexity="high",
             tags=["sparring", "red-cell"],
-            include_reasoning=True
+            include_reasoning=True,
+            model_override=red_model
         )
         
         # TIMING: Log after API call
@@ -477,6 +497,9 @@ class SparringEngineV2:
             {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}\n\nRed Critique:\n{red_critique}"},
         ]
         
+        # Get model from session or use default
+        blue_model = session.models.get("blue_model", "qwen3.5-plus") if session.models else "qwen3.5-plus"
+        
         blue_defense = await self.client.generate_completion(
             messages=blue_messages,
             temperature=0.5,
@@ -484,7 +507,8 @@ class SparringEngineV2:
             timeout=TIMEOUTS["blue_cell"],
             complexity="high",
             tags=["sparring", "blue-cell"],
-            include_reasoning=True
+            include_reasoning=True,
+            model_override=blue_model
         )
         blue_defense = ContentValidator.validate_response(blue_defense)
         
@@ -573,16 +597,18 @@ class SparringEngineV2:
                 {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}\n\nRed Audit:\n{red_critique}\n\nBlue Defense:\n{blue_defense}"},
             ]
             
-            # Use qwen3.5-plus directly for synthesis (avoid glm-5 routing issues)
+            # Get model from session or use default
+            white_model = session.models.get("white_model", "qwen3.5-plus") if session.models else "qwen3.5-plus"
+            
             white_consensus = await self.client.generate_completion(
                 messages=white_messages,
                 temperature=0.1,
-                task_type="analyst",
+                task_type="audit",
                 timeout=TIMEOUTS["white_cell"],
                 complexity="critical",
                 tags=["sparring", "white-cell", f"loop-{loop_count}"],
                 include_reasoning=True,
-                model_override="qwen3.5-plus"  # Force reliable model
+                model_override=white_model
             )
             white_consensus = ContentValidator.validate_response(white_consensus)
             
@@ -602,16 +628,16 @@ class SparringEngineV2:
                 {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}\n\nRed Critique:\n{red_critique}"},
             ]
             
-            # Use qwen3.5-plus directly for defense regen (avoid glm-5 routing issues)
+            # Use blue model for regeneration as well
             blue_defense = await self.client.generate_completion(
                 messages=blue_messages,
                 temperature=0.5,
-                task_type="analyst",
+                task_type="audit",
                 timeout=TIMEOUTS["blue_cell"],
                 complexity="high",
                 tags=["sparring", "blue-cell", "regen"],
                 include_reasoning=True,
-                model_override="qwen3.5-plus"  # Force reliable model
+                model_override=blue_model
             )
             blue_defense = ContentValidator.validate_response(blue_defense)
             

@@ -2,18 +2,36 @@ from typing import Dict
 
 # --- WAR GAME PROTOCOL v4.0 PROMPTS ---
 
-SPARRING_DISCOVERY_PROMPT = """Analizujesz temat i kontekst sesji strategicznej. 
-Twoim zadaniem jest optymalne obsadzenie 3 ról do debaty War Game Protocol.
-Wybierz role, które zagwarantują najwyższą precyzję i ROI dla konkretnego problemu.
+# Available models for sparring (Coding Plan)
+SPARRING_MODELS = {
+    "qwen3.5-plus": "Best for strategic analysis, balanced reasoning",
+    "qwen3-coder-plus": "Best for technical/code-heavy topics",
+    "glm-5": "Best for deep analytical audits",
+    "kimi-k2.5": "Best for discovery and fast analysis",
+}
 
-Zwróć WYŁĄCZNIE JSON: 
+SPARRING_DISCOVERY_PROMPT = """Analizujesz temat i kontekst sesji strategicznej.
+Twoim zadaniem jest optymalne obsadzenie 3 ról do debaty War Game Protocol ORAZ dobór modeli.
+
+Dostępne modele:
+- qwen3.5-plus: Najlepszy do analizy strategicznej, zbalansowane rozumowanie
+- qwen3-coder-plus: Najlepszy do tematów technicznych/code-heavy
+- glm-5: Najlepszy do głębokich audytów analitycznych
+- kimi-k2.5: Najlepszy do discovery i szybkiej analizy
+
+Wybierz role i modele, które zagwarantują najwyższą precyzję i ROI dla konkretnego problemu.
+
+Zwróć WYŁĄCZNIE JSON:
 {
   "red_role": "Red Team (Audytor)",
   "red_profile": "Opis profilu (szuka dziur w logice i niuansach persony)",
+  "red_model": "glm-5",
   "blue_role": "Blue Team (Obrońca)",
   "blue_profile": "Opis profilu (broni wizji i autentyczności tonu)",
+  "blue_model": "qwen3.5-plus",
   "white_role": "White Cell (Strateg)",
   "white_profile": "Opis profilu (Chief of Staff, dba o logiczną SPÓJNOŚĆ i ROI)",
+  "white_model": "qwen3.5-plus",
   "strategic_nuance": "Na co modele muszą zwrócić uwagę w warstwie psychologii i tonu"
 }"""
 

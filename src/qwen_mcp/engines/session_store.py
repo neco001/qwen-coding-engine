@@ -36,6 +36,7 @@ class SessionCheckpoint:
         steps_completed: List of completed steps (discovery, red, blue, white)
         current_step: The current/next step to execute
         roles: Discovered roles (red_role, blue_role, white_role, etc.)
+        models: Selected models for each role (red_model, blue_model, white_model)
         results: Results from each completed step
         loop_count: Number of regeneration loops (for blue/white cycle)
         error: Error message if status is 'failed'
@@ -49,6 +50,7 @@ class SessionCheckpoint:
     steps_completed: List[str] = None
     current_step: str = "discovery"
     roles: Dict[str, str] = None
+    models: Dict[str, str] = None  # New: stores red_model, blue_model, white_model
     results: Dict[str, Any] = None
     loop_count: int = 0
     error: Optional[str] = None
@@ -58,6 +60,8 @@ class SessionCheckpoint:
             self.steps_completed = []
         if self.roles is None:
             self.roles = {}
+        if self.models is None:
+            self.models = {}
         if self.results is None:
             self.results = {}
         if not self.created_at:

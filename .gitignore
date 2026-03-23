@@ -26,4 +26,5 @@ debug_*.txt
 chunks_raw.log
 pytest_out.txt
 hf_output.txt
-hf_sync_res.txt
+hf_sync_res.txt
+.sparring_sessions/
