@@ -2,27 +2,30 @@ from typing import Dict
 
 # --- WAR GAME PROTOCOL v4.0 PROMPTS ---
 
-# Available models for sparring (Coding Plan)
-SPARRING_MODELS = {
-    "qwen3.5-plus": "Best for strategic analysis, balanced reasoning",
-    "qwen3-coder-plus": "Best for technical/code-heavy topics",
-    "glm-5": "Best for deep analytical audits",
-    "kimi-k2.5": "Best for discovery and fast analysis",
-}
-
-SPARRING_DISCOVERY_PROMPT = """Analizujesz temat i kontekst sesji strategicznej.
+def get_discovery_prompt(billing_mode: str = "coding_plan") -> str:
+    """
+    Generate discovery prompt with models available for the current billing mode.
+    
+    Args:
+        billing_mode: 'coding_plan', 'payg', or 'hybrid'
+        
+    Returns:
+        Formatted discovery prompt string
+    """
+    from qwen_mcp.registry import ModelEntitlementRegistry
+    
+    models_str = ModelEntitlementRegistry.get_models_for_discovery(billing_mode)
+    
+    return f"""Analizujesz temat i kontekst sesji strategicznej.
 Twoim zadaniem jest optymalne obsadzenie 3 ról do debaty War Game Protocol ORAZ dobór modeli.
 
 Dostępne modele:
-- qwen3.5-plus: Najlepszy do analizy strategicznej, zbalansowane rozumowanie
-- qwen3-coder-plus: Najlepszy do tematów technicznych/code-heavy
-- glm-5: Najlepszy do głębokich audytów analitycznych
-- kimi-k2.5: Najlepszy do discovery i szybkiej analizy
+{models_str}
 
 Wybierz role i modele, które zagwarantują najwyższą precyzję i ROI dla konkretnego problemu.
 
 Zwróć WYŁĄCZNIE JSON:
-{
+{{
   "red_role": "Red Team (Audytor)",
   "red_profile": "Opis profilu (szuka dziur w logice i niuansach persony)",
   "red_model": "glm-5",
@@ -33,7 +36,11 @@ Zwróć WYŁĄCZNIE JSON:
   "white_profile": "Opis profilu (Chief of Staff, dba o logiczną SPÓJNOŚĆ i ROI)",
   "white_model": "qwen3.5-plus",
   "strategic_nuance": "Na co modele muszą zwrócić uwagę w warstwie psychologii i tonu"
-}"""
+}}"""
+
+
+# Static fallback for backwards compatibility
+SPARRING_DISCOVERY_PROMPT = get_discovery_prompt("coding_plan")
 
 FLASH_ANALYST_PROMPT = """Jesteś 'Red Team Analyst'. Twoim zadaniem jest 'Stress-Test' logiki użytkownika.
 1. Zidentyfikuj krytyczne punkty zapalne (failure points) zakładając, że ograniczenia są realne.

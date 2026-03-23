@@ -12,6 +12,231 @@ from platformdirs import user_cache_dir
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# MODEL ENTITLEMENT REGISTRY
+# Centralized source of truth for model availability per billing mode
+# =============================================================================
+
+class ModelEntitlementRegistry:
+    """
+    Defines which models are available in each billing mode.
+    
+    Billing Modes:
+    - coding_plan: Prepaid Alibaba Coding Plan (fixed model set)
+    - payg: Pay-as-you-go via DashScope API
+    - hybrid: Coding Plan for coding tasks, PAYG for others
+    """
+    
+    # Models available in Alibaba Coding Plan (as of 2026-01)
+    CODING_PLAN_MODELS = {
+        # Qwen Family
+        "qwen3.5-plus": {
+            "brand": "Qwen",
+            "capabilities": ["text-generation", "deep-thinking", "visual-understanding"],
+            "priority": 10,
+            "description": "Best for strategic analysis, balanced reasoning"
+        },
+        "qwen3-max-2026-01-23": {
+            "brand": "Qwen",
+            "capabilities": ["text-generation", "deep-thinking"],
+            "priority": 11,
+            "description": "Highest capability Qwen model"
+        },
+        "qwen3-coder-next": {
+            "brand": "Qwen",
+            "capabilities": ["text-generation"],
+            "priority": 8,
+            "description": "Fast code generation, inline tasks"
+        },
+        "qwen3-coder-plus": {
+            "brand": "Qwen",
+            "capabilities": ["text-generation"],
+            "priority": 9,
+            "description": "Heavy-duty code generation, large context"
+        },
+        # Zhipu Family
+        "glm-5": {
+            "brand": "Zhipu",
+            "capabilities": ["text-generation", "deep-thinking"],
+            "priority": 9,
+            "description": "Best for deep analytical audits"
+        },
+        "glm-4.7": {
+            "brand": "Zhipu",
+            "capabilities": ["text-generation", "deep-thinking"],
+            "priority": 8,
+            "description": "Strong reasoning capabilities"
+        },
+        # Kimi Family
+        "kimi-k2.5": {
+            "brand": "Kimi",
+            "capabilities": ["text-generation", "deep-thinking", "visual-understanding"],
+            "priority": 8,
+            "description": "Best for discovery and fast analysis"
+        },
+        # MiniMax Family
+        "MiniMax-M2.5": {
+            "brand": "MiniMax",
+            "capabilities": ["text-generation", "deep-thinking"],
+            "priority": 7,
+            "description": "Alternative reasoning model"
+        },
+    }
+    
+    # PAYG-only models (NOT available in Coding Plan)
+    PAYG_ONLY_MODELS = {
+        "qwq-plus": {
+            "brand": "Qwen",
+            "capabilities": ["text-generation", "reasoning"],
+            "priority": 10,
+            "description": "Advanced reasoning model (PAYG only)"
+        },
+        "qwen-turbo": {
+            "brand": "Qwen",
+            "capabilities": ["text-generation"],
+            "priority": 5,
+            "description": "Fast, cheap model (PAYG only)"
+        },
+        "qwen2.5-72b-instruct": {
+            "brand": "Qwen",
+            "capabilities": ["text-generation"],
+            "priority": 9,
+            "description": "Large instruct model (PAYG only)"
+        },
+        "qwen2.5-coder-32b-instruct": {
+            "brand": "Qwen",
+            "capabilities": ["text-generation", "coding"],
+            "priority": 8,
+            "description": "Specialized coder (PAYG only)"
+        },
+        "qwen-plus": {
+            "brand": "Qwen",
+            "capabilities": ["text-generation"],
+            "priority": 6,
+            "description": "Standard model (PAYG only)"
+        },
+    }
+    
+    @classmethod
+    def get_available_models(cls, billing_mode: str) -> Dict[str, dict]:
+        """
+        Get all models available for a given billing mode.
+        
+        Args:
+            billing_mode: 'coding_plan', 'payg', or 'hybrid'
+            
+        Returns:
+            Dict of model_id -> model_info
+        """
+        if billing_mode == "coding_plan":
+            return cls.CODING_PLAN_MODELS.copy()
+        elif billing_mode == "payg":
+            # PAYG has access to all models
+            all_models = cls.CODING_PLAN_MODELS.copy()
+            all_models.update(cls.PAYG_ONLY_MODELS)
+            return all_models
+        elif billing_mode == "hybrid":
+            # Hybrid uses Coding Plan for coding, but has PAYG fallback
+            return cls.CODING_PLAN_MODELS.copy()
+        else:
+            # Default to Coding Plan
+            return cls.CODING_PLAN_MODELS.copy()
+    
+    @classmethod
+    def validate_override(cls, model_id: str, billing_mode: str) -> tuple[bool, str]:
+        """
+        Validate if a model can be used in the given billing mode.
+        
+        Args:
+            model_id: The model to validate
+            billing_mode: Current billing mode
+            
+        Returns:
+            (is_valid, fallback_model_or_reason)
+        """
+        available = cls.get_available_models(billing_mode)
+        
+        if model_id in available:
+            return True, model_id
+        
+        # Model not available - find best fallback
+        if billing_mode == "coding_plan":
+            # Suggest highest priority Coding Plan model
+            fallback = max(
+                cls.CODING_PLAN_MODELS.items(),
+                key=lambda x: x[1]["priority"]
+            )[0]
+            return False, f"Model '{model_id}' not available in Coding Plan. Fallback: {fallback}"
+        
+        elif billing_mode == "hybrid":
+            # In hybrid, suggest PAYG fallback
+            all_models = {**cls.CODING_PLAN_MODELS, **cls.PAYG_ONLY_MODELS}
+            if model_id in all_models:
+                return False, f"Model '{model_id}' requires PAYG. Using Coding Plan fallback."
+            fallback = max(
+                cls.CODING_PLAN_MODELS.items(),
+                key=lambda x: x[1]["priority"]
+            )[0]
+            return False, f"Model '{model_id}' not found. Fallback: {fallback}"
+        
+        else:  # payg
+            return False, f"Model '{model_id}' not found in available models."
+    
+    @classmethod
+    def get_fallback_model(cls, billing_mode: str, task_type: str = "strategist") -> str:
+        """
+        Get the best fallback model for a given billing mode and task.
+        
+        Args:
+            billing_mode: Current billing mode
+            task_type: Type of task (strategist, coder, analyst, etc.)
+            
+        Returns:
+            Model ID to use as fallback
+        """
+        available = cls.get_available_models(billing_mode)
+        
+        # Task-specific preferences
+        task_preferences = {
+            "strategist": ["qwen3-max-2026-01-23", "qwen3.5-plus", "glm-5"],
+            "coder": ["qwen3-coder-plus", "qwen3-coder-next", "qwen3.5-plus"],
+            "coder_pro": ["qwen3-coder-plus", "qwen3.5-plus"],
+            "analyst": ["glm-5", "qwen3.5-plus", "kimi-k2.5"],
+            "scout": ["kimi-k2.5", "qwen3.5-plus"],
+            "audit": ["glm-5", "qwen3.5-plus"],
+        }
+        
+        preferences = task_preferences.get(task_type, task_preferences["strategist"])
+        
+        for model_id in preferences:
+            if model_id in available:
+                return model_id
+        
+        # Ultimate fallback: highest priority available
+        return max(available.items(), key=lambda x: x[1]["priority"])[0]
+    
+    @classmethod
+    def get_models_for_discovery(cls, billing_mode: str = "coding_plan") -> str:
+        """
+        Get a formatted string of available models for the discovery prompt.
+        
+        Args:
+            billing_mode: Current billing mode
+            
+        Returns:
+            Formatted string for LLM prompt
+        """
+        available = cls.get_available_models(billing_mode)
+        
+        lines = []
+        for model_id, info in sorted(available.items(), key=lambda x: -x[1]["priority"]):
+            brand = info["brand"]
+            desc = info["description"]
+            lines.append(f"- {model_id}: {desc} ({brand})")
+        
+        return "\n".join(lines)
+
+
 class ModelRegistry:
     """Dynamic registry for ROI-optimized model selection (JSON Cached)."""
 
@@ -211,6 +436,8 @@ class ModelRegistry:
                 os.replace(temp_file, self.cache_file)
             except Exception as e:
                 logger.error(f"ModelRegistry: Failed to save cache: {e}")
+
+
 
     def get_plan_model_for_role(self, task_type: str) -> str:
         """Mappings specifically tailored for the Alibaba Coding Plan."""

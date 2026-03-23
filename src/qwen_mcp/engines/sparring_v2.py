@@ -19,7 +19,7 @@ from qwen_mcp.api import DashScopeClient
 from qwen_mcp.sanitizer import ContentValidator
 from qwen_mcp.engines.session_store import SessionStore, SessionCheckpoint
 from qwen_mcp.prompts.sparring import (
-    SPARRING_DISCOVERY_PROMPT,
+    get_discovery_prompt,
     FLASH_ANALYST_PROMPT,
     FLASH_DRAFTER_PROMPT,
     RED_CELL_PROMPT,
@@ -27,6 +27,8 @@ from qwen_mcp.prompts.sparring import (
     WHITE_CELL_PROMPT
 )
 from qwen_mcp.tools import extract_json_from_text
+from qwen_mcp.registry import ModelEntitlementRegistry
+from qwen_mcp.base import get_billing_mode
 
 logger = logging.getLogger(__name__)
 
@@ -275,8 +277,12 @@ class SparringEngineV2:
         """Execute discovery mode: Define roles and create session."""
         await self._report_progress(ctx, 0.0, "[Discovery] Assembling Expert Bench...")
         
+        # Get billing mode for model selection
+        billing_mode = get_billing_mode()
+        discovery_prompt = get_discovery_prompt(billing_mode)
+        
         discovery_messages = [
-            {"role": "system", "content": SPARRING_DISCOVERY_PROMPT},
+            {"role": "system", "content": discovery_prompt},
             {"role": "user", "content": f"Topic: {topic}\n\nContext: {context}"},
         ]
         
@@ -284,7 +290,7 @@ class SparringEngineV2:
         discovery_raw = await self.client.generate_completion(
             messages=discovery_messages,
             temperature=0.0,
-            task_type="scout",  # Use scout (qwen-turbo) for fast JSON extraction
+            task_type="scout",  # Use scout (kimi-k2.5) for fast JSON extraction
             timeout=TIMEOUTS["discovery"],
             complexity="low",
             tags=["sparring", "discovery"]
@@ -301,12 +307,26 @@ class SparringEngineV2:
             # Extract roles
             roles = {k: v for k, v in parsed.items() if not k.endswith("_model")}
             
-            # Extract models (with defaults)
-            models = {
+            # Extract models with validation against billing mode
+            raw_models = {
                 "red_model": parsed.get("red_model", "glm-5"),
                 "blue_model": parsed.get("blue_model", "qwen3.5-plus"),
                 "white_model": parsed.get("white_model", "qwen3.5-plus"),
             }
+            
+            # Validate each model against billing mode
+            models = {}
+            for role_key, model_id in raw_models.items():
+                is_valid, result = ModelEntitlementRegistry.validate_override(model_id, billing_mode)
+                if is_valid:
+                    models[role_key] = model_id
+                else:
+                    # Use fallback model
+                    task_type = "analyst" if role_key == "red_model" else "strategist"
+                    fallback = ModelEntitlementRegistry.get_fallback_model(billing_mode, task_type)
+                    models[role_key] = fallback
+                    logger.warning(f"[Discovery] {result}. Using fallback: {fallback}")
+            
         except Exception:
             # Fallback to default roles and models
             roles = {
@@ -317,10 +337,11 @@ class SparringEngineV2:
                 "white_role": "White Cell (Final Consensus)",
                 "white_profile": "Chief of Staff dbający o logiczną spójność i ROI"
             }
+            # Use validated fallbacks
             models = {
-                "red_model": "glm-5",
-                "blue_model": "qwen3.5-plus",
-                "white_model": "qwen3.5-plus",
+                "red_model": ModelEntitlementRegistry.get_fallback_model(billing_mode, "analyst"),
+                "blue_model": ModelEntitlementRegistry.get_fallback_model(billing_mode, "strategist"),
+                "white_model": ModelEntitlementRegistry.get_fallback_model(billing_mode, "strategist"),
             }
             logger.warning("Using default roles and models due to discovery parse failure")
         
