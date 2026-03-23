@@ -214,9 +214,6 @@ class CompletionHandler(BaseDashScopeClient):
 
     async def _handle_error(self, e, timeout):
         """Centralized error translation."""
-        from dashscope.api_entities.api_error import APIError
-        from dashscope.api_entities.api_timeout_error import APITimeoutError
-        
         if isinstance(e, APITimeoutError):
             return f"Error: API Timeout (>{timeout}s). The request took too long to complete."
         if isinstance(e, APIError):

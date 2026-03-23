@@ -481,3 +481,117 @@ class TestFullSessionFlow:
         assert response.session_id in markdown
         assert "➡️" in markdown
         assert "Next step" in markdown
+
+
+class TestFullMode:
+    """Tests for the new 'full' mode that executes entire session in one call."""
+    
+    @pytest.mark.asyncio
+    async def test_full_mode_executes_all_steps(self, engine, mock_client):
+        """Test that full mode executes discovery→red→blue→white in one call."""
+        # Setup mocks for all 4 API calls
+        mock_client.generate_completion.side_effect = [
+            # Discovery
+            '{"red_role": "R", "red_profile": "RP", "blue_role": "B", "blue_profile": "BP", "white_role": "W", "white_profile": "WP"}',
+            # Red
+            '<thought>Red thought</thought>Red critique',
+            # Blue
+            '<thought>Blue thought</thought>Blue defense',
+            # White
+            '<thought>White thought</thought>White consensus'
+        ]
+        
+        # Execute full mode
+        result = await engine.execute(
+            mode="full",
+            topic="Test Topic",
+            context="Test Context"
+        )
+        
+        # Verify success
+        assert result.success is True
+        assert result.step_completed == "full"
+        assert result.next_step is None
+        assert result.message == "Full sparring session complete"
+        
+        # Verify all 4 API calls were made
+        assert mock_client.generate_completion.call_count == 4
+        
+        # Verify session was created
+        assert result.session_id is not None
+        session = engine.session_store.load(result.session_id)
+        assert session is not None
+        assert session.topic == "Test Topic"
+    
+    @pytest.mark.asyncio
+    async def test_full_mode_fails_at_discovery(self, engine, mock_client):
+        """Test that full mode fails gracefully when discovery fails."""
+        # Setup mock to fail at discovery
+        mock_client.generate_completion.side_effect = Exception("API Error")
+        
+        # Execute full mode
+        result = await engine.execute(
+            mode="full",
+            topic="Test Topic",
+            context="Test Context"
+        )
+        
+        # Verify failure
+        assert result.success is False
+        assert result.step_completed == "full"
+        assert "discovery" in result.message.lower()
+        assert result.session_id is None
+    
+    @pytest.mark.asyncio
+    async def test_full_mode_fails_at_red(self, engine, mock_client):
+        """Test that full mode fails gracefully when red cell fails."""
+        # Setup mocks - discovery succeeds, red fails
+        mock_client.generate_completion.side_effect = [
+            # Discovery
+            '{"red_role": "R", "red_profile": "RP", "blue_role": "B", "blue_profile": "BP", "white_role": "W", "white_profile": "WP"}',
+            # Red - fails
+            Exception("Red API Error")
+        ]
+        
+        # Execute full mode
+        result = await engine.execute(
+            mode="full",
+            topic="Test Topic",
+            context="Test Context"
+        )
+        
+        # Verify failure at red step
+        assert result.success is False
+        assert result.step_completed == "full"
+        assert result.next_step == "red"
+        assert "red" in result.message.lower()
+        assert result.session_id is not None  # Session was created
+    
+    @pytest.mark.asyncio
+    async def test_full_mode_returns_report(self, engine, mock_client):
+        """Test that full mode returns assembled report on success."""
+        mock_client.generate_completion.side_effect = [
+            # Discovery
+            '{"red_role": "R", "red_profile": "RP", "blue_role": "B", "blue_profile": "BP", "white_role": "W", "white_profile": "WP"}',
+            # Red
+            '<thought>Red thought</thought>Red critique',
+            # Blue
+            '<thought>Blue thought</thought>Blue defense',
+            # White
+            '<thought>White thought</thought>White consensus'
+        ]
+        
+        result = await engine.execute(
+            mode="full",
+            topic="Test Topic",
+            context="Test Context"
+        )
+        
+        assert result.success is True
+        assert "full_report" in result.result
+        report = result.result["full_report"]
+        assert "# 🛡️ War Game Report:" in report
+        assert "Test Topic" in report
+        assert "Red critique" in report
+        assert "Blue defense" in report
+        assert "White consensus" in report

@@ -2,8 +2,7 @@ from typing import Optional, List, Dict, Any, Union
 from mcp.server.fastmcp import FastMCP, Context
 from qwen_mcp.tools import (
     generate_audit,
-    generate_code,
-    generate_code_pro,
+    generate_code_unified,
     generate_lp_blueprint,
     read_repo_file,
     list_repo_files,
@@ -58,10 +57,28 @@ async def qwen_audit(
 
 @mcp.tool()
 async def qwen_coder(
-    prompt: str, context: Optional[str] = None, ctx: Context = None
+    prompt: str,
+    mode: str = "auto",
+    context: Optional[str] = None,
+    ctx: Context = None
 ) -> str:
     """
-    Generates or completes code using Qwen 3.5 Plus.
+    Unified code generation tool with mode-based routing.
+    
+    MODES:
+    - auto: Intelligent routing based on prompt complexity (default)
+    - standard: Fast generation using qwen3-coder-next
+    - pro: Heavy-duty generation using qwen3-coder-plus
+    - expert: Maximum capability for complex refactors/architecture
+    
+    EXAMPLES:
+    1. Simple task: qwen_coder(prompt="Write a function to add two numbers")
+    2. Complex task: qwen_coder(prompt="...", mode="pro")
+    3. Expert refactor: qwen_coder(prompt="...", mode="expert")
+    
+    DEPRECATED TOOLS (still available but use unified internally):
+    - qwen_coder (old) → now calls qwen_coder(mode="standard")
+    - qwen_coder_pro (old) → now calls qwen_coder(mode="pro")
     """
     project_id = get_current_project_id()
     await get_broadcaster().broadcast_state({
@@ -69,23 +86,7 @@ async def qwen_coder(
         "role_mapping": registry.models,
         "is_live": True
     }, project_id=project_id)
-    return await generate_code(prompt, context, ctx)
-
-
-@mcp.tool()
-async def qwen_coder_pro(
-    prompt: str, context: Optional[str] = None, ctx: Context = None
-) -> str:
-    """
-    Generates or completes code using specialized Qwen-2.5-Coder-32B or 72B (Heavy Duty).
-    """
-    project_id = get_current_project_id()
-    await get_broadcaster().broadcast_state({
-        "active_model": registry.get_best_model("coder_pro"),
-        "role_mapping": registry.models,
-        "is_live": True
-    }, project_id=project_id)
-    return await generate_code_pro(prompt, context, ctx)
+    return await generate_code_unified(prompt, mode, context, ctx)
 
 
 @mcp.tool()
@@ -118,27 +119,23 @@ async def qwen_sparring(
     ctx: Context = None
 ) -> str:
     """
-    Sparring Engine v2 - Step-by-step adversarial analysis with session checkpointing.
+    Adwersarialna analiza z sesyjnym checkpointingiem.
     
     MODES:
-    - flash: Quick analysis + draft (single call, no session needed)
-    - discovery: Create session + define roles (returns session_id for next steps)
-    - red: Execute Red Cell critique (requires session_id from discovery)
-    - blue: Execute Blue Cell defense (requires session_id + red critique completed)
-    - white: Execute White Cell synthesis (requires session_id + red + blue completed)
-    
-    GUIDED UX:
-    Each response includes next_step hints and suggested commands.
+    - flash: Szybka analiza + draft (pojedyncze wywołanie, bez sesji)
+    - discovery: Utwórz sesję + zdefiniuj role (zwraca session_id)
+    - red: Krytyka Red Cell (wymaga session_id z discovery)
+    - blue: Obrona Blue Cell (wymaga session_id + red)
+    - white: Synteza White Cell (wymaga session_id + red + blue)
+    - full: Cała sesja (discovery→red→blue→white) w jednym wywołaniu
     
     EXAMPLES:
-    1. Quick analysis: qwen_sparring(mode="flash", topic="Should we use microservices?")
-    2. Start session: qwen_sparring(mode="discovery", topic="Migration strategy")
-    3. Continue: qwen_sparring(mode="red", session_id="sp_abc123")
-    4. Next step: qwen_sparring(mode="blue", session_id="sp_abc123")
-    5. Final: qwen_sparring(mode="white", session_id="sp_abc123")
-    
-    TIMEOUTS:
-    Each mode has reduced timeout (60-90s) to avoid MCP 300s client limit.
+    1. qwen_sparring(mode="flash", topic="Czy użyć mikroserwisów?")
+    2. qwen_sparring(mode="discovery", topic="Strategia migracji")
+    3. qwen_sparring(mode="red", session_id="sp_abc123")
+    4. qwen_sparring(mode="blue", session_id="sp_abc123")
+    5. qwen_sparring(mode="white", session_id="sp_abc123")
+    6. qwen_sparring(mode="full", topic="Decyzja architektoniczna")
     """
     project_id = get_current_project_id()
     await get_broadcaster().broadcast_state({

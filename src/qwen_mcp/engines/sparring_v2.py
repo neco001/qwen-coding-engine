@@ -159,8 +159,8 @@ class SparringEngineV2:
         Execute a sparring step.
         
         Args:
-            mode: One of 'flash', 'discovery', 'red', 'blue', 'white'
-            topic: Topic for the sparring (required for flash/discovery)
+            mode: One of 'flash', 'discovery', 'red', 'blue', 'white', 'full'
+            topic: Topic for the sparring (required for flash/discovery/full)
             context: Additional context
             session_id: Session ID for step modes
             ctx: MCP context for progress reporting
@@ -182,6 +182,8 @@ class SparringEngineV2:
                 return await self._execute_blue(session_id, ctx)
             elif mode == "white":
                 return await self._execute_white(session_id, ctx)
+            elif mode == "full":
+                return await self._execute_full(topic, context, ctx)
             else:
                 return SparringResponse(
                     success=False,
@@ -191,7 +193,7 @@ class SparringEngineV2:
                     next_command=None,
                     result=None,
                     message="Invalid mode",
-                    error=f"Unknown mode: {mode}. Use: flash, discovery, red, blue, white"
+                    error=f"Unknown mode: {mode}. Use: flash, discovery, red, blue, white, full"
                 )
         except Exception as e:
             logger.exception(f"Sparring execution failed: {e}")
@@ -278,10 +280,11 @@ class SparringEngineV2:
             {"role": "user", "content": f"Topic: {topic}\n\nContext: {context}"},
         ]
         
+        # Use fast model for discovery - it's just JSON extraction
         discovery_raw = await self.client.generate_completion(
             messages=discovery_messages,
             temperature=0.0,
-            task_type="strategist",
+            task_type="scout",  # Use scout (qwen-turbo) for fast JSON extraction
             timeout=TIMEOUTS["discovery"],
             complexity="low",
             tags=["sparring", "discovery"]
@@ -353,12 +356,28 @@ class SparringEngineV2:
                 error="Session not found"
             )
         
+        # Checkpoint: Mark step as in-progress BEFORE long-running operation
+        session.current_step = "red"
+        self.session_store.save(session)
+        
+        # TIMING: Log checkpoint save time
+        checkpoint_time = time.time()
+        logger.info(f"[TIMING Red] Checkpoint saved at {checkpoint_time:.2f}")
+        
         await self._report_progress(ctx, 0.0, f"[Red Cell] {session.roles.get('red_role', 'Red')} auditing...")
+        
+        # TIMING: Log progress report time
+        progress_time = time.time()
+        logger.info(f"[TIMING Red] Progress reported at {progress_time:.2f} (delta: {progress_time - checkpoint_time:.2f}s)")
         
         red_messages = [
             {"role": "system", "content": f"Jesteś {session.roles.get('red_role', 'Red Cell')}. Profil: {session.roles.get('red_profile', '')}\n\nZADANIE:\n{RED_CELL_PROMPT}"},
             {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}"},
         ]
+        
+        # TIMING: Log before API call
+        api_start = time.time()
+        logger.info(f"[TIMING Red] API call starting at {api_start:.2f} (delta: {api_start - progress_time:.2f}s)")
         
         red_critique = await self.client.generate_completion(
             messages=red_messages,
@@ -369,14 +388,26 @@ class SparringEngineV2:
             tags=["sparring", "red-cell"],
             include_reasoning=True
         )
+        
+        # TIMING: Log after API call
+        api_end = time.time()
+        logger.info(f"[TIMING Red] API call completed at {api_end:.2f} (elapsed: {api_end - api_start:.2f}s)")
         red_critique = ContentValidator.validate_response(red_critique)
         
         # Update session
+        update_start = time.time()
+        logger.info(f"[TIMING Red] Session update starting at {update_start:.2f} (delta: {update_start - api_end:.2f}s)")
+        
         self.session_store.update_step(
-            session_id, "red", 
+            session_id, "red",
             {"critique": red_critique, "raw": red_critique},
             next_step="blue"
         )
+        
+        # TIMING: Log after session update
+        update_end = time.time()
+        logger.info(f"[TIMING Red] Session update completed at {update_end:.2f} (elapsed: {update_end - update_start:.2f}s)")
+        logger.info(f"[TIMING Red] TOTAL STEP TIME: {update_end - checkpoint_time:.2f}s")
         
         return SparringResponse(
             success=True,
@@ -435,6 +466,10 @@ class SparringEngineV2:
                 error="Missing red critique"
             )
         
+        # Checkpoint: Mark step as in-progress BEFORE long-running operation
+        session.current_step = "blue"
+        self.session_store.save(session)
+        
         await self._report_progress(ctx, 0.0, f"[Blue Cell] {session.roles.get('blue_role', 'Blue')} defending...")
         
         blue_messages = [
@@ -445,7 +480,7 @@ class SparringEngineV2:
         blue_defense = await self.client.generate_completion(
             messages=blue_messages,
             temperature=0.5,
-            task_type="strategist",
+            task_type="audit",
             timeout=TIMEOUTS["blue_cell"],
             complexity="high",
             tags=["sparring", "blue-cell"],
@@ -520,6 +555,10 @@ class SparringEngineV2:
                 error="Missing prerequisites"
             )
         
+        # Checkpoint: Mark step as in-progress BEFORE long-running operation
+        session.current_step = "white"
+        self.session_store.save(session)
+        
         # Regeneration loop
         max_loops = 2
         loop_count = session.loop_count
@@ -534,14 +573,16 @@ class SparringEngineV2:
                 {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}\n\nRed Audit:\n{red_critique}\n\nBlue Defense:\n{blue_defense}"},
             ]
             
+            # Use qwen3.5-plus directly for synthesis (avoid glm-5 routing issues)
             white_consensus = await self.client.generate_completion(
                 messages=white_messages,
                 temperature=0.1,
-                task_type="strategist",
+                task_type="analyst",
                 timeout=TIMEOUTS["white_cell"],
                 complexity="critical",
                 tags=["sparring", "white-cell", f"loop-{loop_count}"],
-                include_reasoning=True
+                include_reasoning=True,
+                model_override="qwen3.5-plus"  # Force reliable model
             )
             white_consensus = ContentValidator.validate_response(white_consensus)
             
@@ -561,14 +602,16 @@ class SparringEngineV2:
                 {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}\n\nRed Critique:\n{red_critique}"},
             ]
             
+            # Use qwen3.5-plus directly for defense regen (avoid glm-5 routing issues)
             blue_defense = await self.client.generate_completion(
                 messages=blue_messages,
                 temperature=0.5,
-                task_type="strategist",
+                task_type="analyst",
                 timeout=TIMEOUTS["blue_cell"],
                 complexity="high",
                 tags=["sparring", "blue-cell", "regen"],
-                include_reasoning=True
+                include_reasoning=True,
+                model_override="qwen3.5-plus"  # Force reliable model
             )
             blue_defense = ContentValidator.validate_response(blue_defense)
             
@@ -595,6 +638,200 @@ class SparringEngineV2:
             result={"consensus": white_consensus, "report": report, "loops": loop_count},
             message=f"White Cell synthesis complete ({loop_count} loop{'s' if loop_count > 1 else ''})"
         )
+    
+    # -------------------------------------------------------------------------
+    # Full Mode - Execute entire session in one call
+    # -------------------------------------------------------------------------
+    
+    async def _execute_full(self, topic: str, context: str,
+                           ctx: Optional[Context]) -> SparringResponse:
+        """Execute complete sparring session in one call: discovery→red→blue→white."""
+        session_id = None
+        
+        try:
+            # Krok 1: Discovery (25%)
+            await self._report_progress(ctx, 25.0, "[Full] 1/4: Discovery - Defining roles...")
+            discovery_result = await self._execute_discovery(topic, context, ctx)
+            session_id = discovery_result.session_id
+            
+            if not session_id:
+                return SparringResponse(
+                    success=False,
+                    session_id=None,
+                    step_completed="full",
+                    next_step=None,
+                    next_command=None,
+                    result=None,
+                    message="Full mode failed at discovery step",
+                    error=discovery_result.error or "No session_id returned"
+                )
+            
+            # Krok 2: Red Cell (50%)
+            await self._report_progress(ctx, 50.0, "[Full] 2/4: Red Cell - Auditing...")
+            red_result = await self._execute_red(session_id, ctx)
+            
+            if not red_result.success:
+                return SparringResponse(
+                    success=False,
+                    session_id=session_id,
+                    step_completed="full",
+                    next_step="red",
+                    next_command=f'qwen_sparring(mode="red", session_id="{session_id}")',
+                    result=None,
+                    message="Full mode failed at red cell step",
+                    error=red_result.error
+                )
+            
+            # Krok 3: Blue Cell (75%)
+            await self._report_progress(ctx, 75.0, "[Full] 3/4: Blue Cell - Defending...")
+            blue_result = await self._execute_blue(session_id, ctx)
+            
+            if not blue_result.success:
+                return SparringResponse(
+                    success=False,
+                    session_id=session_id,
+                    step_completed="full",
+                    next_step="blue",
+                    next_command=f'qwen_sparring(mode="blue", session_id="{session_id}")',
+                    result=None,
+                    message="Full mode failed at blue cell step",
+                    error=blue_result.error
+                )
+            
+            # Krok 4: White Cell (100%)
+            await self._report_progress(ctx, 100.0, "[Full] 4/4: White Cell - Synthesizing...")
+            white_result = await self._execute_white(session_id, ctx)
+            
+            if not white_result.success:
+                return SparringResponse(
+                    success=False,
+                    session_id=session_id,
+                    step_completed="full",
+                    next_step="white",
+                    next_command=f'qwen_sparring(mode="white", session_id="{session_id}")',
+                    result=None,
+                    message="Full mode failed at white cell step",
+                    error=white_result.error
+                )
+            
+            # Złóż finalny raport
+            final_report = self._assemble_full_report(
+                discovery_result, red_result, blue_result, white_result
+            )
+            
+            return SparringResponse(
+                success=True,
+                session_id=session_id,
+                step_completed="full",
+                next_step=None,
+                next_command=None,
+                result={"full_report": final_report},
+                message="Full sparring session complete"
+            )
+            
+        except Exception as e:
+            # Handle exceptions at each step
+            logger.exception(f"Full mode failed: {e}")
+            if session_id is None:
+                # Failed at discovery
+                return SparringResponse(
+                    success=False,
+                    session_id=None,
+                    step_completed="full",
+                    next_step=None,
+                    next_command=None,
+                    result=None,
+                    message="Full mode failed at discovery step",
+                    error=str(e)
+                )
+            else:
+                # Need to determine which step failed based on session state
+                session = self.session_store.load(session_id)
+                if session:
+                    if "red" not in session.steps_completed:
+                        return SparringResponse(
+                            success=False,
+                            session_id=session_id,
+                            step_completed="full",
+                            next_step="red",
+                            next_command=f'qwen_sparring(mode="red", session_id="{session_id}")',
+                            result=None,
+                            message="Full mode failed at red cell step",
+                            error=str(e)
+                        )
+                    elif "blue" not in session.steps_completed:
+                        return SparringResponse(
+                            success=False,
+                            session_id=session_id,
+                            step_completed="full",
+                            next_step="blue",
+                            next_command=f'qwen_sparring(mode="blue", session_id="{session_id}")',
+                            result=None,
+                            message="Full mode failed at blue cell step",
+                            error=str(e)
+                        )
+                    else:
+                        return SparringResponse(
+                            success=False,
+                            session_id=session_id,
+                            step_completed="full",
+                            next_step="white",
+                            next_command=f'qwen_sparring(mode="white", session_id="{session_id}")',
+                            result=None,
+                            message="Full mode failed at white cell step",
+                            error=str(e)
+                        )
+                # Fallback
+                return SparringResponse(
+                    success=False,
+                    session_id=session_id,
+                    step_completed="full",
+                    next_step=None,
+                    next_command=None,
+                    result=None,
+                    message="Full mode failed",
+                    error=str(e)
+                )
+    
+    def _assemble_full_report(self, discovery: SparringResponse,
+                             red: SparringResponse, blue: SparringResponse,
+                             white: SparringResponse) -> str:
+        """Assemble full session report from all 4 steps."""
+        session_id = discovery.session_id
+        
+        # Load session to get topic and roles
+        session = self.session_store.load(session_id)
+        if not session:
+            return "# Error: Session not found"
+        
+        # Extract results from each step
+        red_content = red.result.get('critique', '') if red.result else ''
+        blue_content = blue.result.get('defense', '') if blue.result else ''
+        white_content = white.result.get('consensus', '') if white.result else ''
+        
+        roles = session.roles if session.roles else {}
+        
+        report = f"# 🛡️ War Game Report: {session.topic}\n\n"
+        report += f"> **Session ID:** `{session_id}`\n\n"
+        report += f"> **Selected Roles:** {roles.get('red_role', 'Red')}, {roles.get('blue_role', 'Blue')}, {roles.get('white_role', 'White')}\n\n"
+        
+        # Format each section - handle empty content gracefully
+        if red_content:
+            report += f"## 🥊 Turn 2: {roles.get('red_role', 'Red')}\n\n{self._format_output(red_content, roles.get('red_role', 'Red'))}\n\n---\n\n"
+        else:
+            report += f"## 🥊 Turn 2: {roles.get('red_role', 'Red')}\n\n*No content*\n\n---\n\n"
+        
+        if blue_content:
+            report += f"## 🛡️ Turn 3: {roles.get('blue_role', 'Blue')}\n\n{self._format_output(blue_content, roles.get('blue_role', 'Blue'))}\n\n---\n\n"
+        else:
+            report += f"## 🛡️ Turn 3: {roles.get('blue_role', 'Blue')}\n\n*No content*\n\n---\n\n"
+        
+        if white_content:
+            report += f"## ⚖️ Turn 4: {roles.get('white_role', 'White')}\n\n{self._format_output(white_content, roles.get('white_role', 'White'))}\n\n"
+        else:
+            report += f"## ⚖️ Turn 4: {roles.get('white_role', 'White')}\n\n*No content*\n\n"
+        
+        return report
     
     # -------------------------------------------------------------------------
     # Helpers

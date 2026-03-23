@@ -59,19 +59,43 @@ async def generate_code(prompt: str, context: Optional[str] = None, ctx: Optiona
         progress_callback=ctx.report_progress if ctx else None
     )
 
-async def generate_code_pro(prompt: str, context: Optional[str] = None, ctx: Optional[Context] = None) -> str:
+async def generate_code_unified(
+    prompt: str,
+    mode: str = "auto",
+    context: Optional[str] = None,
+    ctx: Optional[Context] = None
+) -> str:
+    """
+    Unified code generation with mode-based routing.
+    
+    Modes:
+    - auto: Intelligent routing based on prompt complexity (default)
+    - standard: Fast generation using qwen3-coder-next
+    - pro: Heavy-duty generation using qwen3-coder-plus
+    - expert: Maximum capability for complex refactors/architecture
+    
+    Args:
+        prompt: The code generation request
+        mode: One of 'auto', 'standard', 'pro', 'expert'
+        context: Additional context (optional)
+        ctx: MCP context for progress reporting
+    
+    Returns:
+        Markdown-formatted response with generated code
+    """
+    from qwen_mcp.engines.coder_v2 import CoderEngineV2
+    
     client = DashScopeClient()
-    messages = [
-        {"role": "system", "content": CODER_SYSTEM_PROMPT},
-        {"role": "user", "content": f"Context: {context or 'None'}\n\nPrompt: {prompt}"}
-    ]
-    return await client.generate_completion(
-        messages=messages, 
-        task_type="coder_pro", 
-        complexity="high",
-        tags=["coder_pro"],
-        progress_callback=ctx.report_progress if ctx else None
+    engine = CoderEngineV2(client)
+    
+    response = await engine.execute(
+        prompt=prompt,
+        mode=mode,
+        context=context or "",
+        ctx=ctx
     )
+    
+    return response.to_markdown()
 
 async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: Optional[Context] = None) -> str:
     # This remains complex, but keeps the modular structure
@@ -150,11 +174,12 @@ async def generate_sparring(
     - red: Execute Red Cell critique (requires session_id)
     - blue: Execute Blue Cell defense (requires session_id + red critique)
     - white: Execute White Cell synthesis (requires session_id + red + blue)
+    - full: Execute entire session (discovery→red→blue→white) in one call with progress reporting
     
     Args:
-        topic: The topic to analyze (required for flash/discovery)
+        topic: The topic to analyze (required for flash/discovery/full)
         context: Additional context (optional)
-        mode: One of: flash, discovery, red, blue, white
+        mode: One of: flash, discovery, red, blue, white, full
         session_id: Session ID for red/blue/white modes (required for non-flash modes)
     
     Returns:
@@ -173,7 +198,8 @@ async def generate_sparring(
         mode=mode,
         topic=topic or None,
         context=context or None,
-        session_id=session_id or None
+        session_id=session_id or None,
+        ctx=ctx  # Pass context for progress reporting
     )
     
     return response.to_markdown()

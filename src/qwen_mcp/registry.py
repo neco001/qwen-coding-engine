@@ -18,8 +18,18 @@ class ModelRegistry:
     ROLE_PROMPTS = {
         "strategist": "Advanced reasoning, strategic planning, and adversary simulation. Focused on ROI.",
         "coding": "High-fidelity code generation and refactoring following production standards. Default model: qwen3-coder-plus.",
+        "coder": "Fast code generation using qwen3-coder-next for simple tasks.",
+        "coder_pro": "Heavy-duty code generation using qwen3-coder-plus for complex features and refactors.",
         "scout": "Exploration and identification of codebase patterns and structures.",
         "analyst": "Deep dive into logs, performance metrics, and debugging complex runtime issues."
+    }
+
+    # Mode descriptions for unified coder tool
+    CODER_MODES = {
+        "auto": "Intelligent routing based on prompt complexity (default)",
+        "standard": "Fast generation using qwen3-coder-next for simple tasks",
+        "pro": "Heavy-duty generation using qwen3-coder-plus for complex features",
+        "expert": "Maximum capability using qwen2.5-coder-32b for architecture/refactors",
     }
 
     COGNITIVE_LEVEL_MAP = {
