@@ -90,6 +90,7 @@ class SessionStore:
     - File locking for concurrent access protection
     - Automatic directory creation
     - JSON schema validation
+    - Configurable storage directory via environment variable
     """
     
     DEFAULT_DIR = ".sparring_sessions"
@@ -99,12 +100,77 @@ class SessionStore:
         Initialize the session store.
         
         Args:
-            storage_dir: Directory to store session files. 
-                        Defaults to .sparring_sessions in current working directory.
+            storage_dir: Directory to store session files.
+                        Resolution order:
+                        1. Explicit storage_dir parameter
+                        2. QWEN_SPARRING_SESSIONS_DIR environment variable
+                        3. User-level directory (%APPDATA%\\qwen-mcp\\sparring_sessions on Windows,
+                           ~/.qwen-mcp/sparring_sessions on Unix)
+                        4. Fallback to .sparring_sessions in current working directory
         """
-        self.storage_dir = Path(storage_dir) if storage_dir else Path(self.DEFAULT_DIR)
+        self.storage_dir = Path(self._resolve_storage_dir(storage_dir))
         self._ensure_storage_dir()
         logger.info(f"SessionStore initialized at {self.storage_dir.absolute()}")
+    
+    def _resolve_storage_dir(self, storage_dir: Optional[str]) -> str:
+        """
+        Resolve the storage directory using the following priority:
+        1. Explicit parameter
+        2. Environment variable QWEN_SPARRING_SESSIONS_DIR
+        3. User-level directory (APPDATA on Windows, ~/.qwen-mcp on Unix)
+        4. Default relative directory
+        """
+        # Priority 1: Explicit parameter
+        if storage_dir:
+            return storage_dir
+        
+        # Priority 2: Environment variable
+        env_dir = os.environ.get("QWEN_SPARRING_SESSIONS_DIR")
+        if env_dir:
+            logger.info(f"Using session directory from environment: {env_dir}")
+            return env_dir
+        
+        # Priority 3: User-level directory
+        user_dir = self._get_user_data_dir()
+        if user_dir:
+            logger.info(f"Using user-level session directory: {user_dir}")
+            return user_dir
+        
+        # Priority 4: Fallback to relative directory
+        logger.info("Using default relative session directory: .sparring_sessions")
+        return self.DEFAULT_DIR
+    
+    def _get_user_data_dir(self) -> Optional[str]:
+        """
+        Get the user-level data directory for session storage.
+        
+        Returns:
+            Path to user data directory or None if not determinable
+        """
+        import sys
+        
+        if sys.platform == "win32":
+            # Windows: %APPDATA%\qwen-mcp\sparring_sessions
+            appdata = os.environ.get("APPDATA")
+            if appdata:
+                return os.path.join(appdata, "qwen-mcp", "sparring_sessions")
+        elif sys.platform == "darwin":
+            # macOS: ~/Library/Application Support/qwen-mcp/sparring_sessions
+            home = os.environ.get("HOME")
+            if home:
+                return os.path.join(home, "Library", "Application Support", "qwen-mcp", "sparring_sessions")
+        else:
+            # Linux/Unix: ~/.local/share/qwen-mcp/sparring_sessions or ~/.qwen-mcp/sparring_sessions
+            home = os.environ.get("HOME")
+            if home:
+                # Try XDG data directory first
+                xdg_data = os.environ.get("XDG_DATA_HOME")
+                if xdg_data:
+                    return os.path.join(xdg_data, "qwen-mcp", "sparring_sessions")
+                # Fallback to ~/.qwen-mcp/sparring_sessions
+                return os.path.join(home, ".qwen-mcp", "sparring_sessions")
+        
+        return None
     
     def _ensure_storage_dir(self) -> None:
         """Create storage directory if it doesn't exist."""

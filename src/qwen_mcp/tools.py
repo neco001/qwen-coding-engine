@@ -32,7 +32,67 @@ def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
             pass
     return None
 
-async def generate_audit(content: str, context: Optional[str] = None, ctx: Optional[Context] = None) -> str:
+async def generate_audit(
+    content: str,
+    context: Optional[str] = None,
+    ctx: Optional[Context] = None,
+    use_swarm: bool = True
+) -> str:
+    """
+    Audits the provided code or terminal logs using Qwen models.
+    
+    For multi-file content, automatically uses Swarm for parallel analysis.
+    Set use_swarm=False to disable parallel processing.
+    
+    Args:
+        content: The code or logs to audit
+        context: Additional context for the audit
+        ctx: MCP context for progress reporting
+        use_swarm: Enable automatic parallel file analysis (default: True)
+    
+    Returns:
+        Audit report with findings and recommendations
+    """
+    import re
+    from qwen_mcp.orchestrator import SwarmOrchestrator
+    
+    # Detect multi-file content (common patterns)
+    file_patterns = [
+        r'^---\s*([^\s]+)\s*---',  # --- filename ---
+        r'^```[a-zA-Z]*\n# ([^\n]+)',  # ```python\n# filename.py
+        r'^FILE:\s*([^\n]+)',  # FILE: src/main.py
+        r'^//\s*([a-zA-Z0-9_/.-]+\.[a-zA-Z]+)$',  # // filename.py
+    ]
+    
+    has_multiple_files = False
+    for pattern in file_patterns:
+        matches = re.findall(pattern, content, re.MULTILINE)
+        if len(matches) > 1:
+            has_multiple_files = True
+            break
+    
+    # Use Swarm for multi-file analysis
+    if use_swarm and has_multiple_files:
+        client = DashScopeClient()
+        orchestrator = SwarmOrchestrator(completion_handler=client)
+        
+        # Let Swarm decompose and execute in parallel
+        swarm_prompt = f"""Audit the following code files for issues, bugs, security vulnerabilities, and improvements.
+
+Context: {context or 'General code audit'}
+
+Content to audit:
+{content}
+
+Provide a comprehensive audit report with:
+1. Summary of findings per file
+2. Critical issues (security, bugs)
+3. Warnings (code smell, performance)
+4. Recommendations for improvement"""
+        
+        return await orchestrator.run_swarm(swarm_prompt, task_type="audit")
+    
+    # Single file or swarm disabled - use standard completion
     client = DashScopeClient()
     messages = [
         {"role": "system", "content": AUDIT_SYSTEM_PROMPT},
@@ -208,3 +268,36 @@ async def generate_sparring(
 async def heal_registry() -> str:
     client = DashScopeClient()
     return await client.heal_registry()
+
+
+async def generate_swarm(
+    prompt: str,
+    task_type: str = "general",
+    ctx: Optional[Context] = None
+) -> str:
+    """
+    Executes the Swarm Orchestrator for parallel task decomposition and execution.
+    
+    The Swarm decomposes complex prompts into atomic sub-tasks, executes them
+    in parallel, and synthesizes the results into a coherent response.
+    
+    Use cases:
+    - Multi-file analysis (decompose into per-file tasks)
+    - Multi-expert review (QA, Security, ROI in parallel)
+    - Complex implementations (analyze, plan, implement phases)
+    
+    Args:
+        prompt: The complex prompt to decompose and execute
+        task_type: Type hint for decomposition (e.g., "coding", "audit", "general")
+        ctx: MCP context for progress reporting
+    
+    Returns:
+        Synthesized response from all parallel sub-tasks
+    """
+    from qwen_mcp.orchestrator import SwarmOrchestrator
+    
+    client = DashScopeClient()
+    orchestrator = SwarmOrchestrator(completion_handler=client)
+    
+    result = await orchestrator.run_swarm(prompt, task_type=task_type)
+    return result

@@ -45,6 +45,13 @@ TIMEOUTS = {
     "white_cell": 90.0,          # Reduced from 300s
 }
 
+# Default models for each cell role
+DEFAULT_MODELS = {
+    "red_model": "glm-5",
+    "blue_model": "qwen3.5-plus",
+    "white_model": "qwen3.5-plus",
+}
+
 # =============================================================================
 # Response Schema for Guided UX
 # =============================================================================
@@ -52,14 +59,34 @@ TIMEOUTS = {
 @dataclass
 class SparringResponse:
     """Structured response for guided sparring UX."""
-    success: bool
-    session_id: Optional[str]
-    step_completed: Optional[str]
-    next_step: Optional[str]
-    next_command: Optional[str]
-    result: Any
-    message: str
+    success: bool = False
+    message: str = ""
+    session_id: Optional[str] = None
+    step_completed: Optional[str] = None
+    next_step: Optional[str] = None
+    next_command: Optional[str] = None
+    result: Any = None
     error: Optional[str] = None
+    
+    @classmethod
+    def error(cls, message: str, error: str, session_id: Optional[str] = None,
+              step: Optional[str] = None) -> "SparringResponse":
+        """Factory for error responses."""
+        return cls(
+            success=False, message=message, session_id=session_id,
+            step_completed=step, next_step=None, next_command=None,
+            result=None, error=error
+        )
+    
+    @classmethod
+    def success(cls, session_id: str, step: str, next_step: Optional[str],
+                next_command: Optional[str], result: Any, message: str) -> "SparringResponse":
+        """Factory for success responses."""
+        return cls(
+            success=True, message=message, session_id=session_id,
+            step_completed=step, next_step=next_step, next_command=next_command,
+            result=result, error=None
+        )
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -145,10 +172,43 @@ class SparringEngineV2:
     - white: White Cell synthesis only
     """
     
-    def __init__(self, client: Optional[DashScopeClient] = None, 
+    def __init__(self, client: Optional[DashScopeClient] = None,
                  session_store: Optional[SessionStore] = None):
         self.client = client or DashScopeClient()
         self.session_store = session_store or SessionStore()
+    
+    # -------------------------------------------------------------------------
+    # Helper Methods
+    # -------------------------------------------------------------------------
+    
+    def _validate_session(self, session_id: Optional[str],
+                          step_name: str) -> Tuple[Optional[SessionCheckpoint], Optional[SparringResponse]]:
+        """Validate session exists and return it, or return error response."""
+        if not session_id:
+            return None, SparringResponse.error(
+                message=f"session_id required for {step_name} mode",
+                error="Missing session_id"
+            )
+        session = self.session_store.load(session_id)
+        if not session:
+            return None, SparringResponse.error(
+                message=f"Session not found: {session_id}",
+                error="Session not found",
+                session_id=session_id
+            )
+        return session, None
+    
+    def _get_model(self, session: Optional[SessionCheckpoint], key: str) -> str:
+        """Get model from session or return default."""
+        if session and session.models:
+            return session.models.get(key, DEFAULT_MODELS.get(key, "qwen3.5-plus"))
+        return DEFAULT_MODELS.get(key, "qwen3.5-plus")
+    
+    def _get_step_result(self, session: SessionCheckpoint, step: str,
+                         primary_field: str) -> Optional[str]:
+        """Safely extract result from previous step."""
+        result = session.results.get(step, {})
+        return result.get(primary_field, result.get("raw", "")) or None
     
     # -------------------------------------------------------------------------
     # Public API
@@ -368,57 +428,25 @@ class SparringEngineV2:
     async def _execute_red(self, session_id: Optional[str],
                           ctx: Optional[Context]) -> SparringResponse:
         """Execute Red Cell critique."""
-        if not session_id:
-            return SparringResponse(
-                success=False,
-                session_id=None,
-                step_completed=None,
-                next_step=None,
-                next_command=None,
-                result=None,
-                message="session_id required for red mode",
-                error="Missing session_id"
-            )
+        # Validate session
+        session, error_response = self._validate_session(session_id, "red")
+        if error_response:
+            return error_response
         
-        session = self.session_store.load(session_id)
-        if not session:
-            return SparringResponse(
-                success=False,
-                session_id=session_id,
-                step_completed=None,
-                next_step=None,
-                next_command=None,
-                result=None,
-                message=f"Session not found: {session_id}",
-                error="Session not found"
-            )
-        
-        # Checkpoint: Mark step as in-progress BEFORE long-running operation
+        # Checkpoint: Mark step as in-progress
         session.current_step = "red"
         self.session_store.save(session)
         
-        # TIMING: Log checkpoint save time
-        checkpoint_time = time.time()
-        logger.info(f"[TIMING Red] Checkpoint saved at {checkpoint_time:.2f}")
-        
         await self._report_progress(ctx, 0.0, f"[Red Cell] {session.roles.get('red_role', 'Red')} auditing...")
         
-        # TIMING: Log progress report time
-        progress_time = time.time()
-        logger.info(f"[TIMING Red] Progress reported at {progress_time:.2f} (delta: {progress_time - checkpoint_time:.2f}s)")
-        
+        # Build messages
         red_messages = [
             {"role": "system", "content": f"Jesteś {session.roles.get('red_role', 'Red Cell')}. Profil: {session.roles.get('red_profile', '')}\n\nZADANIE:\n{RED_CELL_PROMPT}"},
             {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}"},
         ]
         
-        # TIMING: Log before API call
-        api_start = time.time()
-        logger.info(f"[TIMING Red] API call starting at {api_start:.2f} (delta: {api_start - progress_time:.2f}s)")
-        
-        # Get model from session or use default
-        red_model = session.models.get("red_model", "glm-5") if session.models else "glm-5"
-        
+        # Execute API call
+        red_model = self._get_model(session, "red_model")
         red_critique = await self.client.generate_completion(
             messages=red_messages,
             temperature=0.8,
@@ -427,33 +455,21 @@ class SparringEngineV2:
             complexity="high",
             tags=["sparring", "red-cell"],
             include_reasoning=True,
-            model_override=red_model
+            model_override=red_model,
+            enable_thinking=True
         )
-        
-        # TIMING: Log after API call
-        api_end = time.time()
-        logger.info(f"[TIMING Red] API call completed at {api_end:.2f} (elapsed: {api_end - api_start:.2f}s)")
         red_critique = ContentValidator.validate_response(red_critique)
         
         # Update session
-        update_start = time.time()
-        logger.info(f"[TIMING Red] Session update starting at {update_start:.2f} (delta: {update_start - api_end:.2f}s)")
-        
         self.session_store.update_step(
             session_id, "red",
             {"critique": red_critique, "raw": red_critique},
             next_step="blue"
         )
         
-        # TIMING: Log after session update
-        update_end = time.time()
-        logger.info(f"[TIMING Red] Session update completed at {update_end:.2f} (elapsed: {update_end - update_start:.2f}s)")
-        logger.info(f"[TIMING Red] TOTAL STEP TIME: {update_end - checkpoint_time:.2f}s")
-        
-        return SparringResponse(
-            success=True,
+        return SparringResponse.success(
             session_id=session_id,
-            step_completed="red",
+            step="red",
             next_step="blue",
             next_command=f"sparring(session_id='{session_id}', mode='blue')",
             result={"critique": red_critique},
@@ -467,60 +483,34 @@ class SparringEngineV2:
     async def _execute_blue(self, session_id: Optional[str],
                            ctx: Optional[Context]) -> SparringResponse:
         """Execute Blue Cell defense."""
-        if not session_id:
-            return SparringResponse(
-                success=False,
-                session_id=None,
-                step_completed=None,
-                next_step=None,
-                next_command=None,
-                result=None,
-                message="session_id required for blue mode",
-                error="Missing session_id"
-            )
+        # Validate session
+        session, error_response = self._validate_session(session_id, "blue")
+        if error_response:
+            return error_response
         
-        session = self.session_store.load(session_id)
-        if not session:
-            return SparringResponse(
-                success=False,
-                session_id=session_id,
-                step_completed=None,
-                next_step=None,
-                next_command=None,
-                result=None,
-                message=f"Session not found: {session_id}",
-                error="Session not found"
-            )
-        
-        # Get red critique
-        red_result = session.results.get("red", {})
-        red_critique = red_result.get("critique", red_result.get("raw", ""))
+        # Get red critique prerequisite
+        red_critique = self._get_step_result(session, "red", "critique")
         if not red_critique:
-            return SparringResponse(
-                success=False,
-                session_id=session_id,
-                step_completed=None,
-                next_step=None,
-                next_command=None,
-                result=None,
+            return SparringResponse.error(
                 message="Red Cell critique not found. Run discovery and red first.",
-                error="Missing red critique"
+                error="Missing red critique",
+                session_id=session_id
             )
         
-        # Checkpoint: Mark step as in-progress BEFORE long-running operation
+        # Checkpoint: Mark step as in-progress
         session.current_step = "blue"
         self.session_store.save(session)
         
         await self._report_progress(ctx, 0.0, f"[Blue Cell] {session.roles.get('blue_role', 'Blue')} defending...")
         
+        # Build messages
         blue_messages = [
             {"role": "system", "content": f"Jesteś {session.roles.get('blue_role', 'Blue Cell')}. Profil: {session.roles.get('blue_profile', '')}\n\nZADANIE:\n{BLUE_CELL_PROMPT}"},
             {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}\n\nRed Critique:\n{red_critique}"},
         ]
         
-        # Get model from session or use default
-        blue_model = session.models.get("blue_model", "qwen3.5-plus") if session.models else "qwen3.5-plus"
-        
+        # Execute API call
+        blue_model = self._get_model(session, "blue_model")
         blue_defense = await self.client.generate_completion(
             messages=blue_messages,
             temperature=0.5,
@@ -529,7 +519,8 @@ class SparringEngineV2:
             complexity="high",
             tags=["sparring", "blue-cell"],
             include_reasoning=True,
-            model_override=blue_model
+            model_override=blue_model,
+            enable_thinking=True
         )
         blue_defense = ContentValidator.validate_response(blue_defense)
         
@@ -540,10 +531,9 @@ class SparringEngineV2:
             next_step="white"
         )
         
-        return SparringResponse(
-            success=True,
+        return SparringResponse.success(
             session_id=session_id,
-            step_completed="blue",
+            step="blue",
             next_step="white",
             next_command=f"sparring(session_id='{session_id}', mode='white')",
             result={"defense": blue_defense},
@@ -557,50 +547,23 @@ class SparringEngineV2:
     async def _execute_white(self, session_id: Optional[str],
                             ctx: Optional[Context]) -> SparringResponse:
         """Execute White Cell synthesis with regeneration loop."""
-        if not session_id:
-            return SparringResponse(
-                success=False,
-                session_id=None,
-                step_completed=None,
-                next_step=None,
-                next_command=None,
-                result=None,
-                message="session_id required for white mode",
-                error="Missing session_id"
-            )
-        
-        session = self.session_store.load(session_id)
-        if not session:
-            return SparringResponse(
-                success=False,
-                session_id=session_id,
-                step_completed=None,
-                next_step=None,
-                next_command=None,
-                result=None,
-                message=f"Session not found: {session_id}",
-                error="Session not found"
-            )
+        # Validate session
+        session, error_response = self._validate_session(session_id, "white")
+        if error_response:
+            return error_response
         
         # Get prerequisites
-        red_result = session.results.get("red", {})
-        blue_result = session.results.get("blue", {})
-        red_critique = red_result.get("critique", red_result.get("raw", ""))
-        blue_defense = blue_result.get("defense", blue_result.get("raw", ""))
+        red_critique = self._get_step_result(session, "red", "critique")
+        blue_defense = self._get_step_result(session, "blue", "defense")
         
         if not red_critique or not blue_defense:
-            return SparringResponse(
-                success=False,
-                session_id=session_id,
-                step_completed=None,
-                next_step=None,
-                next_command=None,
-                result=None,
+            return SparringResponse.error(
                 message="Red/Blue results not found. Complete previous steps first.",
-                error="Missing prerequisites"
+                error="Missing prerequisites",
+                session_id=session_id
             )
         
-        # Checkpoint: Mark step as in-progress BEFORE long-running operation
+        # Checkpoint: Mark step as in-progress
         session.current_step = "white"
         self.session_store.save(session)
         
@@ -618,9 +581,8 @@ class SparringEngineV2:
                 {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}\n\nRed Audit:\n{red_critique}\n\nBlue Defense:\n{blue_defense}"},
             ]
             
-            # Get model from session or use default
-            white_model = session.models.get("white_model", "qwen3.5-plus") if session.models else "qwen3.5-plus"
-            
+            # Execute API call
+            white_model = self._get_model(session, "white_model")
             white_consensus = await self.client.generate_completion(
                 messages=white_messages,
                 temperature=0.1,
@@ -629,7 +591,8 @@ class SparringEngineV2:
                 complexity="critical",
                 tags=["sparring", "white-cell", f"loop-{loop_count}"],
                 include_reasoning=True,
-                model_override=white_model
+                model_override=white_model,
+                enable_thinking=True
             )
             white_consensus = ContentValidator.validate_response(white_consensus)
             
@@ -649,7 +612,8 @@ class SparringEngineV2:
                 {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}\n\nRed Critique:\n{red_critique}"},
             ]
             
-            # Use blue model for regeneration as well
+            # Execute regeneration API call
+            regen_blue_model = self._get_model(session, "blue_model")
             blue_defense = await self.client.generate_completion(
                 messages=blue_messages,
                 temperature=0.5,
@@ -658,7 +622,8 @@ class SparringEngineV2:
                 complexity="high",
                 tags=["sparring", "blue-cell", "regen"],
                 include_reasoning=True,
-                model_override=blue_model
+                model_override=regen_blue_model,
+                enable_thinking=True
             )
             blue_defense = ContentValidator.validate_response(blue_defense)
             
@@ -676,10 +641,9 @@ class SparringEngineV2:
         # Assemble final report
         report = self._assemble_report(session, red_critique, blue_defense, white_consensus, loop_count)
         
-        return SparringResponse(
-            success=True,
+        return SparringResponse.success(
             session_id=session_id,
-            step_completed="white",
+            step="white",
             next_step=None,
             next_command=None,
             result={"consensus": white_consensus, "report": report, "loops": loop_count},

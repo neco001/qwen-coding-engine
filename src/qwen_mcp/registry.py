@@ -28,30 +28,35 @@ class ModelEntitlementRegistry:
     """
     
     # Models available in Alibaba Coding Plan (as of 2026-01)
+    # Speed ratings: "fast" (<30s), "medium" (30-60s), "slow" (60-120s), "very_slow" (>120s)
     CODING_PLAN_MODELS = {
         # Qwen Family
         "qwen3.5-plus": {
             "brand": "Qwen",
             "capabilities": ["text-generation", "deep-thinking", "visual-understanding"],
             "priority": 10,
-            "description": "Best for strategic analysis, balanced reasoning"
+            "speed": "fast",
+            "description": "Best for strategic analysis, balanced reasoning. Fast and reliable."
         },
         "qwen3-max-2026-01-23": {
             "brand": "Qwen",
             "capabilities": ["text-generation", "deep-thinking"],
             "priority": 11,
-            "description": "Highest capability Qwen model"
+            "speed": "medium",
+            "description": "Highest capability Qwen model. Use for complex tasks."
         },
         "qwen3-coder-next": {
             "brand": "Qwen",
             "capabilities": ["text-generation"],
             "priority": 8,
+            "speed": "fast",
             "description": "Fast code generation, inline tasks"
         },
         "qwen3-coder-plus": {
             "brand": "Qwen",
             "capabilities": ["text-generation"],
             "priority": 9,
+            "speed": "medium",
             "description": "Heavy-duty code generation, large context"
         },
         # Zhipu Family
@@ -59,12 +64,14 @@ class ModelEntitlementRegistry:
             "brand": "Zhipu",
             "capabilities": ["text-generation", "deep-thinking"],
             "priority": 9,
-            "description": "Best for deep analytical audits"
+            "speed": "medium",
+            "description": "Deep analytical audits, strong reasoning. Excellent for complex analysis."
         },
         "glm-4.7": {
             "brand": "Zhipu",
             "capabilities": ["text-generation", "deep-thinking"],
             "priority": 8,
+            "speed": "medium",
             "description": "Strong reasoning capabilities"
         },
         # Kimi Family
@@ -72,6 +79,7 @@ class ModelEntitlementRegistry:
             "brand": "Kimi",
             "capabilities": ["text-generation", "deep-thinking", "visual-understanding"],
             "priority": 8,
+            "speed": "fast",
             "description": "Best for discovery and fast analysis"
         },
         # MiniMax Family
@@ -79,6 +87,7 @@ class ModelEntitlementRegistry:
             "brand": "MiniMax",
             "capabilities": ["text-generation", "deep-thinking"],
             "priority": 7,
+            "speed": "medium",
             "description": "Alternative reasoning model"
         },
     }
@@ -232,7 +241,10 @@ class ModelEntitlementRegistry:
         for model_id, info in sorted(available.items(), key=lambda x: -x[1]["priority"]):
             brand = info["brand"]
             desc = info["description"]
-            lines.append(f"- {model_id}: {desc} ({brand})")
+            speed = info.get("speed", "medium")
+            # Add speed indicator for slow models
+            speed_warning = f" [SPEED: {speed.upper()}]" if speed in ["slow", "very_slow"] else ""
+            lines.append(f"- {model_id}: {desc} ({brand}){speed_warning}")
         
         return "\n".join(lines)
 

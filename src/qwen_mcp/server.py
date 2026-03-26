@@ -10,6 +10,7 @@ from qwen_mcp.tools import (
     list_available_models,
     set_model_in_registry,
     generate_sparring,
+    generate_swarm,
     heal_registry,
     set_billing_mode,
     get_current_billing_mode,
@@ -41,10 +42,25 @@ mcp = FastMCP("Qwen MCP Server (DashScope)")
 
 @mcp.tool()
 async def qwen_audit(
-    content: str, context: Optional[str] = None, ctx: Context = None
+    content: str,
+    context: Optional[str] = None,
+    use_swarm: bool = True,
+    ctx: Context = None
 ) -> str:
     """
     Audits the provided code or terminal logs using Qwen models.
+    
+    For multi-file content, automatically uses Swarm for parallel analysis.
+    Set use_swarm=False to disable parallel processing.
+    
+    Args:
+        content: The code or logs to audit
+        context: Additional context for the audit
+        use_swarm: Enable automatic parallel file analysis (default: True)
+        ctx: MCP context for progress reporting
+    
+    Returns:
+        Audit report with findings and recommendations
     """
     project_id = get_current_project_id()
     await get_broadcaster().broadcast_state({
@@ -52,7 +68,7 @@ async def qwen_audit(
         "role_mapping": registry.models,
         "is_live": True
     }, project_id=project_id)
-    return await generate_audit(content, context, ctx)
+    return await generate_audit(content, context, ctx, use_swarm=use_swarm)
 
 
 @mcp.tool()
@@ -144,6 +160,40 @@ async def qwen_sparring(
         "is_live": True
     }, project_id=project_id)
     return await generate_sparring(topic, context, mode, session_id, ctx)
+
+
+@mcp.tool()
+async def qwen_swarm(
+    prompt: str,
+    task_type: str = "general",
+    ctx: Context = None
+) -> str:
+    """
+    Executes the Swarm Orchestrator for parallel task decomposition and execution.
+    
+    The Swarm decomposes complex prompts into atomic sub-tasks, executes them
+    in parallel, and synthesizes the results into a coherent response.
+    
+    Use cases:
+    - Multi-file analysis (decompose into per-file tasks)
+    - Multi-expert review (QA, Security, ROI in parallel)
+    - Complex implementations (analyze, plan, implement phases)
+    
+    Args:
+        prompt: The complex prompt to decompose and execute
+        task_type: Type hint for decomposition (e.g., "coding", "audit", "general")
+        ctx: MCP context for progress reporting
+    
+    Returns:
+        Synthesized response from all parallel sub-tasks
+    """
+    project_id = get_current_project_id()
+    await get_broadcaster().broadcast_state({
+        "active_model": "swarm-orchestrator",
+        "role_mapping": {"swarm": "parallel"},
+        "is_live": True
+    }, project_id=project_id)
+    return await generate_swarm(prompt, task_type, ctx)
 
 
 @mcp.tool()

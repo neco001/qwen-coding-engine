@@ -48,8 +48,15 @@ class CompletionHandler(BaseDashScopeClient):
         tags: Optional[List[str]] = None,
         include_reasoning: bool = False,
         model_override: Optional[str] = None,
+        enable_thinking: Optional[bool] = None,
+        max_thinking_tokens: Optional[int] = None,
     ) -> str:
-        """Generate common chat completion with financial circuit breakers and retries."""
+        """Generate common chat completion with financial circuit breakers and retries.
+        
+        Args:
+            enable_thinking: Override thinking mode. None = auto-detect for reasoning models.
+            max_thinking_tokens: Limit thinking tokens for deep-thinking models (default: 2048).
+        """
         request_timeout = timeout or self.default_timeout
         force_max_tokens = max_tokens or self.max_output_tokens
 
@@ -88,10 +95,31 @@ class CompletionHandler(BaseDashScopeClient):
                 "request_tokens": {"prompt": estimated_input, "completion": 0}
             }, project_id=project_id)
 
-            # Auto-detect reasoning models
+            # Auto-detect reasoning/deep-thinking models
+            # Models with deep thinking capabilities that may need budget limits
+            deep_thinking_models = ["glm-5", "glm-4.7", "qwen3-max", "qwen3.5-plus", "qwq"]
+            is_deep_thinking = any(m in target_model.lower() for m in deep_thinking_models)
             is_reasoning_model = "qwq" in target_model.lower() or task_type == "analyst"
-            use_streaming = bool(progress_callback) or is_reasoning_model
-            extra_body = {"enable_thinking": True} if is_reasoning_model else {}
+            use_streaming = bool(progress_callback) or is_reasoning_model or is_deep_thinking
+            
+            # Build extra_body for thinking mode control
+            extra_body = {}
+            if enable_thinking is True or (enable_thinking is None and is_deep_thinking):
+                extra_body["enable_thinking"] = True
+                # Dynamic thinking budget based on complexity
+                # - low/medium: 1024 tokens (fast, focused)
+                # - high: 2048 tokens (balanced)
+                # - critical: 4096 tokens (deep analysis)
+                if max_thinking_tokens:
+                    thinking_budget = max_thinking_tokens
+                elif complexity == "critical":
+                    thinking_budget = 4096
+                elif complexity == "high":
+                    thinking_budget = 2048
+                else:  # low, medium, auto
+                    thinking_budget = 1024
+                extra_body["max_thinking_tokens"] = thinking_budget
+                logger.info(f"Thinking mode enabled for {target_model} with budget {thinking_budget} tokens (complexity: {complexity})")
 
             try:
                 if use_streaming:

@@ -22,13 +22,18 @@ Twoim zadaniem jest optymalne obsadzenie 3 ról do debaty War Game Protocol ORAZ
 Dostępne modele:
 {models_str}
 
+💡 WSKAZÓWKI DOBORU MODELI:
+- Modele "fast" (qwen3.5-plus, kimi-k2.5): szybkie, niezawodne, dobre do wszystkich ról
+- Modele "medium" (glm-5, qwen3-max, qwen3-coder-plus): głębsza analiza, mogą potrzebować więcej czasu
+- Dla złożonych tematów rozważ modele z "deep-thinking" dla ról analitycznych
+
 Wybierz role i modele, które zagwarantują najwyższą precyzję i ROI dla konkretnego problemu.
 
 Zwróć WYŁĄCZNIE JSON:
 {{
   "red_role": "Red Team (Audytor)",
   "red_profile": "Opis profilu (szuka dziur w logice i niuansach persony)",
-  "red_model": "glm-5",
+  "red_model": "qwen3.5-plus",
   "blue_role": "Blue Team (Obrońca)",
   "blue_profile": "Opis profilu (broni wizji i autentyczności tonu)",
   "blue_model": "qwen3.5-plus",
