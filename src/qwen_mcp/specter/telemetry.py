@@ -108,24 +108,33 @@ class TelemetryBroadcaster:
     async def broadcast_state(self, payload: dict, project_id: str = "default") -> None:
         """
         Broadcasts the current state to ALL connected clients (HUD compatibility).
-        Updates the state for the specific project_id, but sends to every client.
+        CRITICAL: Updates ALL project states to ensure consistent data across all clients.
         """
-        state = self.get_state(project_id)
-        state.update(payload)
-
-        # CRITICAL FIX: Send to ALL clients across ALL projects (HUD uses "default", code uses hashed IDs)
-        all_clients = []
+        # Step 1: Update states and prepare message under lock
         async with self._lock:
+            # Ensure the specified project_id exists
+            if project_id not in self._project_states:
+                self._project_states[project_id] = self._get_init_state()
+            
+            # Update ALL project states with the payload
+            for proj_id in self._project_states:
+                state = self._project_states[proj_id]
+                state.update(payload)
+            
+            # Collect all clients across all projects
+            all_clients = []
             for proj_clients in self._clients.values():
                 all_clients.extend(list(proj_clients))
 
-        if not all_clients:
-            return
+            if not all_clients:
+                return
 
-        message = json.dumps(state, ensure_ascii=False)
+            # Get state and prepare message while holding lock
+            state = self._project_states[project_id]
+            message = json.dumps(state, ensure_ascii=False)
+
+        # Step 2: Send messages OUTSIDE lock to avoid blocking other operations
         disconnected = set()
-
-        # Send to all clients in parallel
         tasks = [client.send_text(message) for client in all_clients]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -133,6 +142,7 @@ class TelemetryBroadcaster:
             if isinstance(result, (ConnectionClosed, Exception)):
                 disconnected.add(client)
 
+        # Step 3: Remove disconnected clients under lock
         if disconnected:
             async with self._lock:
                 for proj_id in self._clients:
@@ -143,7 +153,7 @@ class TelemetryBroadcaster:
         state = self.get_state(project_id)
         state["request_prompt_total"] = 0
         state["request_completion_total"] = 0
-        state["thinking_buffer"] = 0
+        state["thinking_buffer"] = ""  # FIX: Must be string (concatenated in update_stream)
         state["content_buffer"] = ""
         state["request_images_total"] = 0
         state["status"] = "live"
@@ -172,13 +182,15 @@ class TelemetryBroadcaster:
             # Update status to live when content is streaming
             state["status"] = "live"
             state["operation"] = "Generating response..."
-            
-        await self.broadcast_state({
+        
+        # Fire-and-forget broadcast to avoid blocking streaming
+        # Use create_task to avoid waiting for WebSocket sends
+        asyncio.create_task(self.broadcast_state({
             "thinking": state["thinking_buffer"],
             "streaming_content": state["content_buffer"],
             "status": state["status"],
             "operation": state["operation"]
-        }, project_id=project_id)
+        }, project_id=project_id))
 
     async def update_progress(self, percent: int, operation: str = "", project_id: str = "default"):
         """Update progress for long operations (0-100%)."""

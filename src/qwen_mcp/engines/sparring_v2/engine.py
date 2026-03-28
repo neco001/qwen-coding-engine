@@ -123,10 +123,11 @@ class SparringEngineV2:
     # Flash Mode
     # -------------------------------------------------------------------------
     
-    async def _execute_flash(self, topic: str, context: str, 
+    async def _execute_flash(self, topic: str, context: str,
                             ctx: Optional[Context]) -> SparringResponse:
         """Execute flash mode: Analyst → Drafter (single call, no checkpoint)."""
-        await self._report_progress(ctx, 0.0, "[Flash] Turn 1: Analyst via QwQ-Plus...")
+        # Immediate heartbeat to prevent client timeout during model initialization
+        await self._report_progress(ctx, 0.0, "[Flash] Initializing Analysis...")
         
         # Step 1: Analyst
         analyst_messages = [
@@ -139,8 +140,10 @@ class SparringEngineV2:
             temperature=0.7,
             task_type="audit",
             timeout=TIMEOUTS["flash_analyst"],
-            complexity="high",
-            tags=["sparring", "flash-analyst"]
+            complexity="medium",
+            tags=["sparring", "flash-analyst"],
+            # enable_thinking=True is default - restoring full reasoning power
+            progress_callback=ctx.report_progress if ctx else None  # CRITICAL: Keep MCP connection alive
         )
         
         await self._report_progress(ctx, 50.0, "[Flash] Turn 2: Drafting Strategy...")
@@ -156,9 +159,10 @@ class SparringEngineV2:
             temperature=0.1,
             task_type="strategist",
             timeout=TIMEOUTS["flash_drafter"],
-            complexity="critical",
+            complexity="medium",
             tags=["sparring", "flash-drafter"],
-            include_reasoning=True
+            include_reasoning=False,
+            progress_callback=ctx.report_progress if ctx else None  # CRITICAL: Keep MCP connection alive
         )
         
         # Format output
@@ -294,6 +298,7 @@ class SparringEngineV2:
         
         # Execute API call
         red_model = get_model(session, "red_model")
+        logger.debug(f"[Red Cell] red_model: {red_model}, roles type: {type(session.roles)}, roles: {session.roles}")
         red_critique = await self.client.generate_completion(
             messages=red_messages,
             temperature=0.8,
@@ -421,6 +426,10 @@ class SparringEngineV2:
         max_loops = 1 if not allow_regeneration else 2
         loop_count = session.loop_count
         white_consensus = ""
+        
+        # DEBUG: Log loop_count type
+        logger.debug(f"[White Cell] loop_count type: {type(loop_count)}, value: {loop_count}")
+        logger.debug(f"[White Cell] max_loops type: {type(max_loops)}, value: {max_loops}")
         
         while loop_count < max_loops:
             loop_count += 1
@@ -700,6 +709,10 @@ class SparringEngineV2:
     
     def _format_output(self, raw: str, label: str) -> str:
         """Format output with reasoning hidden in details."""
+        # Ensure raw is a string (handle None, int, or other types gracefully)
+        if not isinstance(raw, str):
+            raw = str(raw) if raw is not None else ""
+        
         if "<thought>" in raw:
             parts = raw.split("</thought>")
             thought = parts[0].replace("<thought>", "").strip()
@@ -707,7 +720,7 @@ class SparringEngineV2:
             return f"<details>\n<summary>🧠 Proces Myślowy ({label})</summary>\n\n{thought}\n</details>\n\n{content}"
         return ContentValidator.validate_response(raw)
     
-    def _assemble_report(self, session: SessionCheckpoint, red: str, blue: str, 
+    def _assemble_report(self, session: SessionCheckpoint, red: str, blue: str,
                         white: str, loops: int) -> str:
         """Assemble final war game report."""
         report = f"# 🛡️ War Game Report: {session.topic}\n\n"
@@ -717,8 +730,10 @@ class SparringEngineV2:
         report += f"## 🥊 Turn 2: {session.roles.get('red_role', 'Red')}\n\n{self._format_output(red, session.roles.get('red_role', 'Red'))}\n\n---\n\n"
         report += f"## 🛡️ Turn 3: {session.roles.get('blue_role', 'Blue')}\n\n{self._format_output(blue, session.roles.get('blue_role', 'Blue'))}\n\n---\n\n"
         report += f"## ⚖️ Turn 4: {session.roles.get('white_role', 'White')}\n\n{self._format_output(white, session.roles.get('white_role', 'White'))}\n\n"
-        if loops > 1:
-            report += f"\n\n*(Note: This report underwent {loops} optimization cycles)*"
+        # Ensure loops is an int (handle JSON deserialization edge cases)
+        loops_int = int(loops) if not isinstance(loops, int) else loops
+        if loops_int > 1:
+            report += f"\n\n*(Note: This report underwent {loops_int} optimization cycles)*"
         return report
     
     async def _report_progress(self, ctx: Optional[Context], 

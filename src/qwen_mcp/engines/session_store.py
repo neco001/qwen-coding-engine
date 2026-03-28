@@ -74,6 +74,9 @@ class SessionCheckpoint:
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'SessionCheckpoint':
+        # Ensure loop_count is int (handle JSON deserialization edge cases)
+        if 'loop_count' in data and isinstance(data['loop_count'], str):
+            data['loop_count'] = int(data['loop_count'])
         return cls(**data)
 
 

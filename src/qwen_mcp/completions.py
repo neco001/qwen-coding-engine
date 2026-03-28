@@ -135,12 +135,13 @@ class CompletionHandler(BaseDashScopeClient):
             try:
                 if use_streaming:
                     return await self._stream_completion(
-                        target_model, messages, temperature, force_max_tokens, 
-                        request_timeout, extra_body, include_reasoning, project_id=project_id
+                        target_model, messages, temperature, force_max_tokens,
+                        request_timeout, extra_body, include_reasoning, project_id=project_id,
+                        progress_callback=progress_callback
                     )
                 else:
                     return await self._standard_completion(
-                        target_model, messages, temperature, force_max_tokens, 
+                        target_model, messages, temperature, force_max_tokens,
                         request_timeout, include_reasoning, project_id=project_id
                     )
             except Exception as e:
@@ -151,37 +152,90 @@ class CompletionHandler(BaseDashScopeClient):
                     continue
                 return await self._handle_error(e, request_timeout)
 
-    async def _stream_completion(self, model, messages, temp, max_t, timeout, extra, include_reasoning, project_id="default"):
+    async def _stream_completion(self, model, messages, temp, max_t, timeout, extra, include_reasoning, project_id="default", progress_callback=None):
         client_to_use = self.get_client_for_model(model)
+        
+        if progress_callback:
+            try:
+                await progress_callback(progress=5.0, message=f"Connecting to {model}...")
+            except Exception:
+                pass
+
         response = await client_to_use.chat.completions.create(
             model=model, messages=messages, temperature=temp, max_tokens=max_t,
             timeout=timeout, stream=True, stream_options={"include_usage": True},
             extra_body=extra if extra else None,
         )
 
+        if progress_callback:
+            try:
+                await progress_callback(progress=10.0, message=f"Connection established, waiting for model...")
+            except Exception:
+                pass
+
         full_response = ""
         reasoning_log = ""
         usage_reported = False
-        
-        async for chunk in response:
-            # Report usage if present in chunk (some APIs send it mid-stream)
-            if hasattr(chunk, "usage") and chunk.usage:
-                # Actual usage from API
-                await self._log_usage(model, chunk.usage.prompt_tokens, chunk.usage.completion_tokens, project_id=project_id)
-                usage_reported = True
+        chunk_count = 0
 
-            if hasattr(chunk, "choices") and chunk.choices:
-                delta = chunk.choices[0].delta
-                # Support both reasoning_content and legacy thought/reasoning attributes
-                reasoning = getattr(delta, "reasoning_content", None) or getattr(delta, "thought", None)
-                if reasoning:
-                    reasoning_log += reasoning
-                    await get_broadcaster().update_stream(thinking=reasoning, project_id=project_id)
+        # Create event to control heartbeat
+        first_chunk_received = asyncio.Event()
 
-                content = getattr(delta, "content", None)
-                if content:
-                    full_response += content
-                    await get_broadcaster().update_stream(content=content, project_id=project_id)
+        # Heartbeat task to prevent MCP client timeout during model 'thinking' phase
+        async def heartbeat_loop():
+            # Wait a few seconds before starting heartbeats
+            await asyncio.sleep(15)
+            while not first_chunk_received.is_set():
+                if progress_callback:
+                    try:
+                        await progress_callback(progress=15.0, message="Model is deep-thinking (reasoning phase)...")
+                    except Exception:
+                        pass
+                await asyncio.sleep(15)
+
+        heartbeat_task = asyncio.create_task(heartbeat_loop())
+
+        try:
+            async for chunk in response:
+                if not first_chunk_received.is_set():
+                    first_chunk_received.set()
+                
+                chunk_count += 1
+                
+                # CRITICAL: Call progress_callback every 10 chunks to keep MCP connection alive
+                # This prevents MCP timeout -32001 during long streaming operations
+                if progress_callback and chunk_count % 10 == 0:
+                    try:
+                        await progress_callback(progress=50.0, message=f"Streaming... ({chunk_count} chunks)")
+                    except Exception:
+                        pass  # Ignore callback errors
+                
+                # Report usage if present in chunk (some APIs send it mid-stream)
+                if hasattr(chunk, "usage") and chunk.usage:
+                    # Actual usage from API
+                    await self._log_usage(model, chunk.usage.prompt_tokens, chunk.usage.completion_tokens, project_id=project_id)
+                    usage_reported = True
+
+                if hasattr(chunk, "choices") and chunk.choices:
+                    delta = chunk.choices[0].delta
+                    # Support both reasoning_content and legacy thought/reasoning attributes
+                    reasoning = getattr(delta, "reasoning_content", None) or getattr(delta, "thought", None)
+                    if reasoning:
+                        reasoning_log += reasoning
+                        await get_broadcaster().update_stream(thinking=reasoning, project_id=project_id)
+
+                    content = getattr(delta, "content", None)
+                    if content:
+                        full_response += content
+                        await get_broadcaster().update_stream(content=content, project_id=project_id)
+        finally:
+            # Ensure heartbeat task is stopped
+            first_chunk_received.set()
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
 
         # CRITICAL FIX: Report usage at END of stream if not already reported
         # Coding Plan API and some other providers only send usage in the final chunk
@@ -238,16 +292,31 @@ class CompletionHandler(BaseDashScopeClient):
         return content
 
     async def _log_usage(self, model, prompt, completion, project_id: str = "default"):
-        """Standardized billing and HUD telemetry logging."""
+        """Standardized billing and HUD telemetry logging.
+        
+        Args:
+            prompt: Prompt tokens (int) or prompt text (str) - will be estimated if string
+            completion: Completion tokens (int) or completion text (str) - will be estimated if string
+        """
+        # DEBUG: Log input types
+        logger.info(f"[DEBUG _log_usage] model={model}, prompt type={type(prompt)}, completion type={type(completion)}")
+        
+        # Convert to token counts (handle both int tokens and str content)
+        prompt_tokens = prompt if isinstance(prompt, int) else self.estimate_tokens([{"role": "user", "content": str(prompt)}]) if prompt else 0
+        completion_tokens = completion if isinstance(completion, int) else self.estimate_tokens([{"role": "assistant", "content": str(completion)}]) if completion else 0
+        
+        # DEBUG: Log converted types
+        logger.info(f"[DEBUG _log_usage] prompt_tokens={prompt_tokens} (type={type(prompt_tokens)}), completion_tokens={completion_tokens} (type={type(completion_tokens)})")
+        
         if model not in self.session_usage:
             self.session_usage[model] = {"prompt": 0, "completion": 0}
-        self.session_usage[model]["prompt"] += prompt
-        self.session_usage[model]["completion"] += completion
+        self.session_usage[model]["prompt"] += prompt_tokens
+        self.session_usage[model]["completion"] += completion_tokens
 
         project_name = project_id
         try:
-            billing_tracker.log_usage(project_name, model, prompt, completion)
-            await get_broadcaster().report_usage(model, prompt, completion, project_id=project_id)
+            billing_tracker.log_usage(project_name, model, prompt_tokens, completion_tokens)
+            await get_broadcaster().report_usage(model, prompt_tokens, completion_tokens, project_id=project_id)
         except Exception as e:
             logger.error(f"Telemetry logging failed: {e}")
 
