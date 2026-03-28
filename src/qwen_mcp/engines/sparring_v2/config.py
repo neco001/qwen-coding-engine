@@ -9,12 +9,12 @@ This module provides timeout and default model configuration for the sparring en
 # =============================================================================
 
 TIMEOUTS = {
-    "flash_analyst": 90.0,      # Reduced from 300s
-    "flash_drafter": 90.0,       # Reduced from 300s
-    "discovery": 60.0,           # Keep as is (already low)
-    "red_cell": 90.0,            # Reduced from 300s
-    "blue_cell": 90.0,           # Reduced from 300s
-    "white_cell": 90.0,          # Reduced from 300s
+    "flash_analyst": 60.0,       # Reduced for MCP 300s limit
+    "flash_drafter": 60.0,       # Reduced for MCP 300s limit
+    "discovery": 45.0,           # Reduced for full mode
+    "red_cell": 60.0,            # Reduced for full mode
+    "blue_cell": 60.0,           # Reduced for full mode
+    "white_cell": 60.0,          # Reduced for full mode (max 2 loops = 120s)
 }
 
 # Default models for each cell role

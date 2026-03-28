@@ -299,7 +299,7 @@ class SparringEngineV2:
             temperature=0.8,
             task_type="audit",
             timeout=TIMEOUTS["red_cell"],
-            complexity="high",
+            complexity="high",  # Dynamic max_tokens: 1800
             tags=["sparring", "red-cell"],
             include_reasoning=True,
             model_override=red_model,
@@ -364,7 +364,7 @@ class SparringEngineV2:
             temperature=0.5,
             task_type="audit",
             timeout=TIMEOUTS["blue_cell"],
-            complexity="high",
+            complexity="high",  # Dynamic max_tokens: 1800
             tags=["sparring", "blue-cell"],
             include_reasoning=True,
             model_override=blue_model,
@@ -393,8 +393,9 @@ class SparringEngineV2:
     # -------------------------------------------------------------------------
     
     async def _execute_white(self, session_id: Optional[str],
-                            ctx: Optional[Context]) -> SparringResponse:
-        """Execute White Cell synthesis with regeneration loop."""
+                            ctx: Optional[Context],
+                            allow_regeneration: bool = True) -> SparringResponse:
+        """Execute White Cell synthesis with optional regeneration loop."""
         # Validate session
         loaded_session = self.session_store.load(session_id) if session_id else None
         session, error_response = validate_session(loaded_session, session_id, "white")
@@ -416,8 +417,8 @@ class SparringEngineV2:
         session.current_step = "white"
         self.session_store.save(session)
         
-        # Regeneration loop
-        max_loops = 2
+        # Regeneration loop (disabled in full mode to avoid MCP 300s timeout)
+        max_loops = 1 if not allow_regeneration else 2
         loop_count = session.loop_count
         white_consensus = ""
         
@@ -437,7 +438,7 @@ class SparringEngineV2:
                 temperature=0.1,
                 task_type="audit",
                 timeout=TIMEOUTS["white_cell"],
-                complexity="critical",
+                complexity="critical",  # Dynamic max_tokens: 2500
                 tags=["sparring", "white-cell", f"loop-{loop_count}"],
                 include_reasoning=True,
                 model_override=white_model,
@@ -468,7 +469,7 @@ class SparringEngineV2:
                 temperature=0.5,
                 task_type="audit",
                 timeout=TIMEOUTS["blue_cell"],
-                complexity="high",
+                complexity="high",  # Dynamic max_tokens: 1800
                 tags=["sparring", "blue-cell", "regen"],
                 include_reasoning=True,
                 model_override=regen_blue_model,
@@ -558,9 +559,9 @@ class SparringEngineV2:
                     error=blue_result.error
                 )
             
-            # Krok 4: White Cell (100%)
-            await self._report_progress(ctx, 100.0, "[Full] 4/4: White Cell - Synthesizing...")
-            white_result = await self._execute_white(session_id, ctx)
+            # Krok 4: White Cell (100%) - disable regeneration to avoid MCP 300s timeout
+            await self._report_progress(ctx, 100.0, "[Full] 4/4: White Cell - Synthesizing (no regen)...")
+            white_result = await self._execute_white(session_id, ctx, allow_regeneration=False)
             
             if not white_result.success:
                 return SparringResponse(

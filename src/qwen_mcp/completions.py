@@ -58,7 +58,18 @@ class CompletionHandler(BaseDashScopeClient):
             max_thinking_tokens: Limit thinking tokens for deep-thinking models (default: 2048).
         """
         request_timeout = timeout or self.default_timeout
-        force_max_tokens = max_tokens or self.max_output_tokens
+        
+        # Dynamic max_tokens based on complexity (controls response length & time)
+        if max_tokens:
+            force_max_tokens = max_tokens
+        elif complexity == "critical":
+            force_max_tokens = 2500  # Deep analysis, long responses
+        elif complexity == "high":
+            force_max_tokens = 1800  # Standard complex tasks
+        elif complexity == "medium":
+            force_max_tokens = 1200  # Moderate responses
+        else:  # low/auto
+            force_max_tokens = 800   # Fast, focused responses
 
         # Check circuit breaker
         try:
