@@ -53,47 +53,32 @@ async def generate_audit(
     Returns:
         Audit report with findings and recommendations
     """
-    import re
+    from qwen_mcp.engines.scout import ScoutEngine
     from qwen_mcp.orchestrator import SwarmOrchestrator
     
-    # Detect multi-file content (common patterns)
-    file_patterns = [
-        r'^---\s*([^\s]+)\s*---',  # --- filename ---
-        r'^```[a-zA-Z]*\n# ([^\n]+)',  # ```python\n# filename.py
-        r'^FILE:\s*([^\n]+)',  # FILE: src/main.py
-        r'^//\s*([a-zA-Z0-9_/.-]+\.[a-zA-Z]+)$',  # // filename.py
-    ]
+    client = DashScopeClient()
+    scout = ScoutEngine(client)
     
-    has_multiple_files = False
-    for pattern in file_patterns:
-        matches = re.findall(pattern, content, re.MULTILINE)
-        if len(matches) > 1:
-            has_multiple_files = True
-            break
+    # 1. Scout Analysis
+    scout_res = await scout.analyze_task(content, context, task_hint="audit")
+    use_swarm_recommendation = scout_res.get("use_swarm", False)
+    complexity = scout_res.get("complexity", "high")
+    reason = scout_res.get("reason", "Standard audit")
     
-    # Use Swarm for multi-file analysis
-    if use_swarm and has_multiple_files:
-        client = DashScopeClient()
+    # 2. Execution Choice
+    if use_swarm and use_swarm_recommendation:
         orchestrator = SwarmOrchestrator(completion_handler=client)
         
-        # Let Swarm decompose and execute in parallel
-        swarm_prompt = f"""Audit the following code files for issues, bugs, security vulnerabilities, and improvements.
-
+        swarm_prompt = f"""Audit the following code or logs for issues, bugs, and improvements.
 Context: {context or 'General code audit'}
-
 Content to audit:
 {content}
 
-Provide a comprehensive audit report with:
-1. Summary of findings per file
-2. Critical issues (security, bugs)
-3. Warnings (code smell, performance)
-4. Recommendations for improvement"""
+Provide a comprehensive audit report with summary, critical issues, and recommendations."""
         
         return await orchestrator.run_swarm(swarm_prompt, task_type="audit")
     
-    # Single file or swarm disabled - use standard completion
-    client = DashScopeClient()
+    # Standard completion with intelligent complexity limit
     messages = [
         {"role": "system", "content": AUDIT_SYSTEM_PROMPT},
         {"role": "user", "content": f"Context: {context or 'None'}\n\nContent to audit:\n{content}"}
@@ -101,7 +86,7 @@ Provide a comprehensive audit report with:
     return await client.generate_completion(
         messages=messages,
         task_type="audit",
-        complexity="high",
+        complexity=complexity,
         tags=["audit"],
         progress_callback=ctx.report_progress if ctx else None
     )
@@ -159,14 +144,21 @@ async def generate_code_unified(
 
 async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: Optional[Context] = None) -> str:
     # This remains complex, but keeps the modular structure
+    from qwen_mcp.engines.scout import ScoutEngine
+    
     client = DashScopeClient()
+    scout = ScoutEngine(client)
+    
+    # 0. Scout for Sizing (Architect blueprints are often large)
+    scout_res = await scout.analyze_task(goal, context, task_hint="strategy/architecture")
+    complexity = scout_res.get("complexity", "high")
     
     # 1. Discovery
     discovery_msg = [
         {"role": "system", "content": LP_DISCOVERY_PROMPT},
         {"role": "user", "content": f"Goal: {goal}\nContext: {context or ''}"}
     ]
-    discovery_raw = await client.generate_completion(messages=discovery_msg)
+    discovery_raw = await client.generate_completion(messages=discovery_msg, complexity="medium")
     discovery = extract_json_from_text(discovery_raw) or {"hired_squad": []}
     squad_str = ", ".join([s.get("role", "Expert") for s in discovery.get("hired_squad", [])])
 
@@ -175,7 +167,13 @@ async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: O
         {"role": "system", "content": LP_ARCHITECT_PROMPT.format(squad=squad_str)},
         {"role": "user", "content": f"Goal: {goal}"}
     ]
-    blueprint = await client.generate_completion(messages=arch_msg, task_type="strategist")
+    # Blueprints use scouted complexity (often high/critical) to unlock 4k/8k tokens
+    blueprint = await client.generate_completion(
+        messages=arch_msg, 
+        task_type="strategist",
+        complexity=complexity,
+        progress_callback=ctx.report_progress if ctx else None
+    )
     return blueprint
 
 async def read_repo_file(path: str) -> str:

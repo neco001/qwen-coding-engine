@@ -106,6 +106,8 @@ class CoderEngineV2:
     
     def __init__(self, client: Optional[DashScopeClient] = None):
         self.client = client or DashScopeClient()
+        from qwen_mcp.engines.scout import ScoutEngine
+        self.scout_engine = ScoutEngine(self.client)
     
     # -------------------------------------------------------------------------
     # Public API
@@ -145,24 +147,31 @@ class CoderEngineV2:
                     error=f"Unknown mode: {mode}. Use: {', '.join(MODE_ROUTING.keys())}"
                 )
             
-            # Intelligent Scout: Analyze task complexity and routing (only for AUTO)
-            if mode == "auto":
-                scout_res = await self._scout_task(prompt, context)
-                use_swarm = scout_res.get("use_swarm", False)
-                complexity = scout_res.get("complexity", "medium")
-                routing_reason = scout_res.get("reason", "Standard complexity routing")
-                logger.info(f"Scout Result: complexity={complexity}, use_swarm={use_swarm}, reason={routing_reason}")
+            # Intelligent Scout: Analyze task complexity and routing
+            scout_res = await self.scout_engine.analyze_task(prompt, context, task_hint="coding")
+            scout_complexity = scout_res.get("complexity", "medium")
+            scout_use_swarm = scout_res.get("use_swarm", False)
+            routing_reason = scout_res.get("reason", "Standard routing")
+            
+            # Decision Matrix:
+            # - mode 'auto': follow scout recommendation (single or swarm)
+            # - modes 'pro/expert/standard': single model (use scout's complexity for sizing)
+            
+            if mode == "auto" and scout_use_swarm:
+                use_swarm = True
             else:
-                use_swarm = False # Explicit modes skip scout
-                complexity = self._estimate_complexity(prompt, context) # Fallback heuristic
-                routing_reason = f"Explicit mode selection: {mode}"
+                use_swarm = False
+                
+            complexity = scout_complexity # Always use scout for sizing to prevent truncation
+            
+            logger.info(f"Coder Scouting: mode={mode}, complexity={complexity}, use_swarm={use_swarm}")
 
             # Determine task type and model
             task_type, model_used = self._resolve_mode(mode, prompt, context, complexity)
             
             await self._report_progress(ctx, 5.0, f"[Coder] Scout: {complexity} complexity. Model: {model_used}")
             
-            # Delegate to Swarm if recommended
+            # Delegate to Swarm if recommended and in auto mode
             if use_swarm:
                 from qwen_mcp.orchestrator import SwarmOrchestrator
                 await self._report_progress(ctx, 10.0, "[Coder] Task too complex for single agent - Launching Swarm Orchestrator...")
@@ -242,47 +251,6 @@ class CoderEngineV2:
         
         return task_type, model_used
 
-    async def _scout_task(self, prompt: str, context: str) -> Dict[str, Any]:
-        """
-        Ask LLM to assess complexity and suggest routing.
-        """
-        scout_prompt = f"""Analyze this coding request and categorize it:
-TASK: {prompt[:2000]}
-CONTEXT: {context[:1000]}
-
-Categorize by size:
-- low: single function, snippet, shell command
-- medium: full script, single file refactor
-- high: complex feature, multi-file changes (>2-3 files)
-- critical: architecture redesign, entire server boilerplate, complex integration
-
-Rules:
-1. Recommend use_swarm=true IF task requires more than 300 lines of code or touches more than 3 distinct files/modules.
-2. Output ONLY JSON:
-{{
-  "complexity": "low|medium|high|critical",
-  "score": 1, 10,
-  "use_swarm": true|false,
-  "reason": "short explanation"
-}}
-"""
-        try:
-            # Use the most capable but standard model for scouting (usually qwen3-coder-next or max)
-            model = registry.get_best_model("strategist")
-            messages = [{"role": "user", "content": scout_prompt}]
-            raw = await self.client.generate_completion(messages, model_override=model, complexity="low")
-            
-            # Use regex to find JSON in case model outputs text around it
-            import re
-            import json
-            match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if match:
-                return json.loads(match.group(0))
-            return {"complexity": "medium", "use_swarm": False, "reason": "Scout failed to follow JSON format"}
-        except Exception as e:
-            logger.warning(f"Scout failed: {e}")
-            return {"complexity": "medium", "use_swarm": False, "reason": "Scout error"}
-    
     def _estimate_complexity(self, prompt: str, context: str) -> str:
         """
         Estimate task complexity based on prompt analysis.
