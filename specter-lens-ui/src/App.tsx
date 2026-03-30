@@ -16,6 +16,8 @@ interface TelemetryState {
     thinking: string;
     streaming_content: string;
     is_live: boolean;
+    session_display_id?: number;
+    session_display_name?: string;
 }
 
 const DEFAULT_STATE: TelemetryState = {
@@ -30,6 +32,8 @@ const DEFAULT_STATE: TelemetryState = {
     thinking: '',
     streaming_content: '',
     is_live: false,
+    session_display_id: 1,
+    session_display_name: 'Sesja 1',
 };
 
 // Session type for multi-session support
@@ -68,13 +72,13 @@ function App() {
                 setActiveSessionId(initialSessions[0].id);
             }
         } else {
-            // Fallback: Default sessions
+            // Fallback: Default sessions with generic names
             const defaultSessions: Session[] = [
-                { id: 'gemini', name: 'Gemini', projectId: 'gemini', telemetry: DEFAULT_STATE, isConnected: false, ws: null },
-                { id: 'roocode', name: 'Roo Code', projectId: 'roocode', telemetry: DEFAULT_STATE, isConnected: false, ws: null }
+                { id: 'session_1', name: 'Sesja 1', projectId: 'default_1', telemetry: { ...DEFAULT_STATE, session_display_id: 1, session_display_name: 'Sesja 1' }, isConnected: false, ws: null },
+                { id: 'session_2', name: 'Sesja 2', projectId: 'default_2', telemetry: { ...DEFAULT_STATE, session_display_id: 2, session_display_name: 'Sesja 2' }, isConnected: false, ws: null }
             ];
             setSessions(defaultSessions);
-            setActiveSessionId('gemini');
+            setActiveSessionId('session_1');
         }
     }, []);
 
@@ -188,7 +192,7 @@ function App() {
                                 : 'bg-white/5 text-white/40 border border-transparent hover:bg-white/10'
                         }`}
                     >
-                        {session.name}
+                        {session.telemetry.session_display_name || session.name}
                         {session.isConnected && (
                             <span className="ml-1.5 w-1.5 h-1.5 inline-block rounded-full bg-green-500 animate-pulse" />
                         )}

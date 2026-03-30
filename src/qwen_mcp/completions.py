@@ -63,13 +63,13 @@ class CompletionHandler(BaseDashScopeClient):
         if max_tokens:
             force_max_tokens = max_tokens
         elif complexity == "critical":
-            force_max_tokens = 2500  # Deep analysis, long responses
+            force_max_tokens = 8192  # Deep architecture/multi-file
         elif complexity == "high":
-            force_max_tokens = 1800  # Standard complex tasks
+            force_max_tokens = 4096  # Standard features
         elif complexity == "medium":
-            force_max_tokens = 1200  # Moderate responses
+            force_max_tokens = 2048  # Quick fixes
         else:  # low/auto
-            force_max_tokens = 800   # Fast, focused responses
+            force_max_tokens = 1024   # Fast, focused responses
 
         # Check circuit breaker
         try:

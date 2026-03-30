@@ -71,7 +71,7 @@ class BaseDashScopeClient:
 
         # Financial Guardrails
         self.max_input_tokens = int(os.getenv("MAX_INPUT_TOKENS", "32000"))
-        self.max_output_tokens = int(os.getenv("MAX_OUTPUT_TOKENS", "4000"))
+        self.max_output_tokens = int(os.getenv("MAX_OUTPUT_TOKENS", "8192"))
 
         # Initialize the OpenAI async clients
         self.client_payg = AsyncOpenAI(api_key=self.api_key_payg, base_url=base_url_payg, max_retries=2) if self.api_key_payg else None

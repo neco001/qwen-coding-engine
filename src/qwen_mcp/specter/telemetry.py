@@ -1,11 +1,48 @@
 import asyncio
 import json
 import time
+import threading
 from typing import Set, Dict, Any, Optional
 from dataclasses import dataclass, field
 
 from fastapi import WebSocket
 from websockets.exceptions import ConnectionClosed
+
+
+class SessionMapper:
+    """
+    Maps project_id to sequential session numbers for display.
+    Provides "Sesja 1", "Sesja 2" etc. naming without client source detection.
+    """
+    
+    def __init__(self):
+        self._project_to_session: Dict[str, int] = {}
+        self._next_session_number: int = 1
+        self._lock = threading.Lock()
+    
+    def get_or_create_session_number(self, project_id: str) -> int:
+        """Get existing session number or assign a new one."""
+        with self._lock:
+            if project_id not in self._project_to_session:
+                self._project_to_session[project_id] = self._next_session_number
+                self._next_session_number += 1
+            return self._project_to_session[project_id]
+    
+    def get_session_count(self) -> int:
+        """Return number of active sessions."""
+        with self._lock:
+            return len(self._project_to_session)
+    
+    def get_display_name(self, session_number: int) -> str:
+        """Return formatted display name like 'Sesja 1'."""
+        return f"Sesja {session_number}"
+    
+    def remove_session(self, project_id: str) -> None:
+        """Remove session when client disconnects."""
+        with self._lock:
+            if project_id in self._project_to_session:
+                del self._project_to_session[project_id]
+
 
 # Global instance for easy access across the package
 _global_broadcaster: Optional["TelemetryBroadcaster"] = None
@@ -50,8 +87,9 @@ class TelemetryBroadcaster:
         self._lock = asyncio.Lock()
         self._project_states: Dict[str, Dict[str, Any]] = {}
         self._heartbeat_counter = 0
+        self._session_mapper = SessionMapper()
 
-    def _get_init_state(self) -> Dict[str, Any]:
+    def _get_init_state(self, session_display_id: int = 1) -> Dict[str, Any]:
         return {
             "active_model": "Standby...",
             "status": "idle",  # "idle", "live", "processing"
@@ -74,12 +112,15 @@ class TelemetryBroadcaster:
             "thinking_buffer": "",
             "content_buffer": "",
             "last_interaction_time": time.time(),
-            "heartbeat": 0
+            "heartbeat": 0,
+            "session_display_id": session_display_id,
+            "session_display_name": f"Sesja {session_display_id}"
         }
 
     def get_state(self, project_id: str = "default") -> Dict[str, Any]:
         if project_id not in self._project_states:
-            self._project_states[project_id] = self._get_init_state()
+            session_num = self._session_mapper.get_or_create_session_number(project_id)
+            self._project_states[project_id] = self._get_init_state(session_num)
         return self._project_states[project_id]
 
     async def add_client(self, websocket: WebSocket, project_id: str = "default") -> None:
@@ -107,46 +148,44 @@ class TelemetryBroadcaster:
 
     async def broadcast_state(self, payload: dict, project_id: str = "default") -> None:
         """
-        Broadcasts the current state to ALL connected clients (HUD compatibility).
-        CRITICAL: Updates ALL project states to ensure consistent data across all clients.
+        Broadcasts state ONLY to clients of the specified project_id.
+        State isolation ensures different sessions don't interfere with each other.
         """
-        # Step 1: Update states and prepare message under lock
+        # Step 1: Update state and prepare message under lock
         async with self._lock:
             # Ensure the specified project_id exists
             if project_id not in self._project_states:
                 self._project_states[project_id] = self._get_init_state()
             
-            # Update ALL project states with the payload
-            for proj_id in self._project_states:
-                state = self._project_states[proj_id]
-                state.update(payload)
+            # Update ONLY the specified project state (scoped broadcast)
+            state = self._project_states[project_id]
+            state.update(payload)
             
-            # Collect all clients across all projects
-            all_clients = []
-            for proj_clients in self._clients.values():
-                all_clients.extend(list(proj_clients))
+            # Collect ONLY clients of this project (scoped delivery)
+            if project_id not in self._clients:
+                return
+            clients = list(self._clients[project_id])
 
-            if not all_clients:
+            if not clients:
                 return
 
-            # Get state and prepare message while holding lock
-            state = self._project_states[project_id]
+            # Prepare message while holding lock
             message = json.dumps(state, ensure_ascii=False)
 
         # Step 2: Send messages OUTSIDE lock to avoid blocking other operations
         disconnected = set()
-        tasks = [client.send_text(message) for client in all_clients]
+        tasks = [client.send_text(message) for client in clients]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for client, result in zip(all_clients, results):
+        for client, result in zip(clients, results):
             if isinstance(result, (ConnectionClosed, Exception)):
                 disconnected.add(client)
 
         # Step 3: Remove disconnected clients under lock
         if disconnected:
             async with self._lock:
-                for proj_id in self._clients:
-                    self._clients[proj_id] -= disconnected
+                if project_id in self._clients:
+                    self._clients[project_id] -= disconnected
 
     async def start_request(self, project_id: str = "default"):
         """Resets counters and buffers for a new high-level user request."""
@@ -220,14 +259,39 @@ class TelemetryBroadcaster:
         }, project_id=project_id)
 
     async def _send_heartbeat(self):
-        """Internal method to send heartbeat to all clients."""
-        self._heartbeat_counter += 1
-        for project_id in list(self._project_states.keys()):
-            state = self.get_state(project_id)
-            state["heartbeat"] = self._heartbeat_counter
-            # Only send if clients are connected
-            if project_id in self._clients and self._clients[project_id]:
-                await self.broadcast_state({"heartbeat": self._heartbeat_counter}, project_id=project_id)
+        """Internal method to send heartbeat to all clients.
+        
+        Sends a lightweight heartbeat message with type field for UI filtering.
+        Does NOT call broadcast_state() to avoid triggering full state updates.
+        """
+        # Atomic counter increment under lock
+        async with self._lock:
+            self._heartbeat_counter += 1
+            counter = self._heartbeat_counter
+        
+        heartbeat_msg = json.dumps({"type": "heartbeat", "count": counter}, ensure_ascii=False)
+        
+        # Send directly to clients without broadcast_state()
+        # Copy client structure under lock to avoid race conditions
+        async with self._lock:
+            clients_snapshot = {
+                proj_id: list(clients) for proj_id, clients in self._clients.items() if clients
+            }
+        
+        disconnected = set()
+        for project_id, clients in clients_snapshot.items():
+            for client in clients:
+                try:
+                    await client.send_text(heartbeat_msg)
+                except (RuntimeError, ConnectionError):
+                    # Only catch connection-related exceptions, not system exits
+                    disconnected.add(client)
+        
+        # Remove disconnected clients under lock
+        if disconnected:
+            async with self._lock:
+                for project_id in self._clients:
+                    self._clients[project_id] -= disconnected
 
     async def report_usage(
         self, model: str, prompt_tokens: int, completion_tokens: int, 

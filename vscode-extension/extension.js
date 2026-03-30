@@ -4,16 +4,25 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 function activate(context) {
-    const provider = new SpecterViewProvider(context.extensionUri);
+    // Generate unique instance ID for this VSCode window
+    const instanceId = generateInstanceId();
+    
+    const provider = new SpecterViewProvider(context.extensionUri, instanceId);
 
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider('specter-qwen-cockpit-v1', provider)
     );
 }
 
+function generateInstanceId() {
+    // Use VSCode's sessionId if available, otherwise generate UUID
+    return crypto.randomBytes(4).toString('hex');
+}
+
 class SpecterViewProvider {
-    constructor(extensionUri) {
+    constructor(extensionUri, instanceId) {
         this._extensionUri = extensionUri;
+        this._instanceId = instanceId;
     }
 
     resolveWebviewView(webviewView) {
@@ -43,6 +52,8 @@ class SpecterViewProvider {
     _detectMcpSessions() {
         // Detect MCP server configurations from Antigravity/Gemini config files
         const sessions = [];
+        const workspaceName = vscode.workspace.workspaceFolders?.[0]?.name || 'default';
+        const workspaceHash = this._hashWorkspace(workspaceName);
         
         // Path to Gemini/Antigravity MCP config
         const geminiConfigPath = 'c:/Users/pawel/.gemini/antigravity/mcp_config.json';
@@ -61,10 +72,12 @@ class SpecterViewProvider {
                 );
                 
                 if (hasQwenServer) {
+                    // Session ID format: {instanceId}_{clientSource}_{workspaceHash}
                     sessions.push({
                         id: 'gemini',
                         name: 'Gemini',
-                        projectId: this._hashProjectId('gemini-' + vscode.workspace.workspaceFolders?.[0]?.name || 'default')
+                        projectId: `${this._instanceId}_gemini_${workspaceHash}`,
+                        clientSource: 'gemini'
                     });
                 }
             }
@@ -84,10 +97,12 @@ class SpecterViewProvider {
                 );
                 
                 if (hasRooQwenServer) {
+                    // Session ID format: {instanceId}_{clientSource}_{workspaceHash}
                     sessions.push({
                         id: 'roocode',
                         name: 'Roo Code',
-                        projectId: this._hashProjectId('roocode-' + vscode.workspace.workspaceFolders?.[0]?.name || 'default')
+                        projectId: `${this._instanceId}_roocode_${workspaceHash}`,
+                        clientSource: 'roocode'
                     });
                 }
             }
@@ -100,15 +115,16 @@ class SpecterViewProvider {
             sessions.push({
                 id: 'default',
                 name: 'Default',
-                projectId: this._hashProjectId('default-' + vscode.workspace.workspaceFolders?.[0]?.name || 'default')
+                projectId: `${this._instanceId}_default_${workspaceHash}`,
+                clientSource: 'default'
             });
         }
         
         return sessions;
     }
 
-    _hashProjectId(input) {
-        return crypto.createHash('sha256').update(input).digest('hex').substring(0, 8);
+    _hashWorkspace(input) {
+        return crypto.createHash('sha256').update(input.toLowerCase()).digest('hex').substring(0, 8);
     }
 
     _getHtmlForWebview(webview) {

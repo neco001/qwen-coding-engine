@@ -9,12 +9,12 @@ This module provides timeout and default model configuration for the sparring en
 # =============================================================================
 
 TIMEOUTS = {
-    "flash_analyst": 25.0,       # Increased to allow for 'Deep Thinking' (Heartbeat will prevent timeout)
-    "flash_drafter": 25.0,
-    "discovery": 30.0,
-    "red_cell": 45.0,            # High complexity audit
-    "blue_cell": 45.0,
-    "white_cell": 45.0,
+    "flash_analyst": 30.0,       # Deep thinking models need more time
+    "flash_drafter": 30.0,       # Flash total: ~60s (acceptable for single call)
+    "discovery": 20.0,           # JSON extraction with thinking buffer
+    "red_cell": 45.0,            # Deep analysis with full thinking budget
+    "blue_cell": 45.0,           # Strategic defense needs space
+    "white_cell": 45.0,          # Synthesis requires complete context
 }
 
 # Default models for each cell role

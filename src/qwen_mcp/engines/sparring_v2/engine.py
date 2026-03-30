@@ -140,7 +140,7 @@ class SparringEngineV2:
             temperature=0.7,
             task_type="audit",
             timeout=TIMEOUTS["flash_analyst"],
-            complexity="medium",
+            complexity="high",  # Dynamic max_tokens: 1800 + thinking 2048
             tags=["sparring", "flash-analyst"],
             # enable_thinking=True is default - restoring full reasoning power
             progress_callback=ctx.report_progress if ctx else None  # CRITICAL: Keep MCP connection alive
@@ -304,7 +304,7 @@ class SparringEngineV2:
             temperature=0.8,
             task_type="audit",
             timeout=TIMEOUTS["red_cell"],
-            complexity="high",  # Dynamic max_tokens: 1800
+            complexity="critical",  # Dynamic max_tokens: 2500 + thinking 4096
             tags=["sparring", "red-cell"],
             include_reasoning=True,
             model_override=red_model,
@@ -369,7 +369,7 @@ class SparringEngineV2:
             temperature=0.5,
             task_type="audit",
             timeout=TIMEOUTS["blue_cell"],
-            complexity="high",  # Dynamic max_tokens: 1800
+            complexity="critical",  # Dynamic max_tokens: 2500 + thinking 4096
             tags=["sparring", "blue-cell"],
             include_reasoning=True,
             model_override=blue_model,
