@@ -293,10 +293,10 @@ class ModelRegistry:
         self.models = {
             "strategist": "qwen3.5-plus",
             "coder": "qwen3-coder-plus",
-            "coder_pro": "qwen2.5-72b-instruct",
-            "specialist": "qwen2.5-coder-32b-instruct",
-            "analyst": "qwq-plus",
-            "scout": "qwen-turbo",
+            "coder_pro": "qwen3-coder-plus",
+            "specialist": "qwen3-coder-plus",
+            "analyst": "qwen3.5-plus",
+            "scout": "qwen3.5-plus",
         }
         self.metadata = {}  # Store HF metadata: {model_id: {tags, params, levels}}
         self.last_updated = datetime.min
@@ -532,7 +532,7 @@ class ModelRegistry:
         # 1. Ensure metadata is not empty
         if not self.metadata:
             role = mapping.get(task_type, "strategist")
-            return self.models.get(role, "qwen-plus")
+            return self.models.get(role, "qwen3.5-plus")
 
         # 2. Map hints to target level
         hint_map = {"low": 1, "medium": 2, "high": 3, "critical": 4, "scout": 0}
@@ -616,7 +616,7 @@ class ModelRegistry:
             "strategist": "strategist",
         }
         role = mapping.get(task_type, "strategist")
-        return self.models.get(role, "qwen-plus")
+        return self.models.get(role, "qwen3.5-plus")
 
     @property
     def STRATEGIST(self):
@@ -624,7 +624,7 @@ class ModelRegistry:
 
     @property
     def SCOUT(self):
-        return self.models.get("scout", "qwen-turbo")
+        return self.models.get("scout", "qwen3.5-plus")
 
     @property
     def CODER_SPECIALIST(self):

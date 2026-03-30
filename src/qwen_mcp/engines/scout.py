@@ -15,7 +15,7 @@ class ScoutEngine:
     def __init__(self, client: Optional[DashScopeClient] = None):
         self.client = client or DashScopeClient()
 
-    async def analyze_task(self, prompt: str, context: str = "", task_hint: str = "general") -> Dict[str, Any]:
+    async def analyze_task(self, prompt: str, context: str = "", task_hint: str = "general", progress_callback=None) -> Dict[str, Any]:
         """
         Intelligently analyzes a task to determine complexity and recommended swarm usage.
         """
@@ -41,13 +41,17 @@ Rules:
 }}
 """
         try:
+            if progress_callback:
+                await progress_callback(progress=2.0, message=f"[Scout] Analyzing {task_hint} complexity...")
+                
             # Use strategist model (highest reasoning)
             messages = [{"role": "user", "content": scout_prompt}]
             raw = await self.client.generate_completion(
                 messages, 
                 task_type="strategist", 
                 complexity="low",
-                tags=["scout"]
+                tags=["scout"],
+                progress_callback=progress_callback
             )
             
             match = re.search(r"\{.*\}", raw, re.DOTALL)

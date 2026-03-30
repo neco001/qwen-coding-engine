@@ -36,7 +36,9 @@ class DashScopeClient(CompletionHandler):
                 logger.info(
                     f"Probing candidate model: {model_id} (Attempt {attempt + 1}/{retries + 1})..."
                 )
-                await self.client.chat.completions.create(
+                # Select the right client for this specific model probe
+                client_to_use = self.get_client_for_model(model_id)
+                await client_to_use.chat.completions.create(
                     model=model_id,
                     messages=[{"role": "user", "content": "ping"}],
                     max_tokens=1,
@@ -73,7 +75,7 @@ class DashScopeClient(CompletionHandler):
         if get_billing_mode() == "coding_plan":
             return "Self-healing disabled in Strict Coding Plan mode. Roles are hardcoded to plan models."
             
-        logger.info("Initiating Self-Healing Meta-Analysis via Qwen-Turbo...")
+        logger.info("Initiating Self-Healing Meta-Analysis via Qwen3.5-Plus...")
         all_models = await self.list_models()
         if not all_models:
             return "Self-healing failed: Could not fetch model list from API."
@@ -103,10 +105,10 @@ class DashScopeClient(CompletionHandler):
             Return ONLY a JSON object: {{"strategist": "id", "coder": "id", "specialist": "id", "analyst": "id", "scout": "id"}}""")
 
         try:
-            # We use the known stable 'qwen-turbo' for the meta-analysis itself
-            client_to_use = self.get_client_for_model("qwen-turbo")
+            # We use the known stable 'qwen3.5-plus' for the meta-analysis itself
+            client_to_use = self.get_client_for_model("qwen3.5-plus")
             response = await client_to_use.chat.completions.create(
-                model="qwen-turbo",
+                model="qwen3.5-plus",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0,
                 max_tokens=300,

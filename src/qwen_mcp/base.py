@@ -56,7 +56,7 @@ class BaseDashScopeClient:
         else:
             self.api_key_payg = os.getenv("DASHSCOPE_API_KEY") or os.getenv("ALIBABA_AI_KEY")
             base_url_payg = DASHSCOPE_BASE_URL
-            self.model_name = os.getenv("QWEN_MODEL_NAME", "qwen-plus")
+            self.model_name = os.getenv("QWEN_MODEL_NAME", "qwen3.5-plus")
 
         self.api_key_plan = os.getenv("CODING_PLAN_API_KEY") or os.getenv("BAILIAN_CODING_PLAN_API_KEY")
         if self.api_key_plan:

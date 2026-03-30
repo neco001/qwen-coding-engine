@@ -60,7 +60,10 @@ async def generate_audit(
     scout = ScoutEngine(client)
     
     # 1. Scout Analysis
-    scout_res = await scout.analyze_task(content, context, task_hint="audit")
+    scout_res = await scout.analyze_task(
+        content, context, task_hint="audit",
+        progress_callback=ctx.report_progress if ctx else None
+    )
     use_swarm_recommendation = scout_res.get("use_swarm", False)
     complexity = scout_res.get("complexity", "high")
     reason = scout_res.get("reason", "Standard audit")
@@ -150,7 +153,10 @@ async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: O
     scout = ScoutEngine(client)
     
     # 0. Scout for Sizing (Architect blueprints are often large)
-    scout_res = await scout.analyze_task(goal, context, task_hint="strategy/architecture")
+    scout_res = await scout.analyze_task(
+        goal, context, task_hint="strategy/architecture",
+        progress_callback=ctx.report_progress if ctx else None
+    )
     complexity = scout_res.get("complexity", "high")
     
     # 1. Discovery

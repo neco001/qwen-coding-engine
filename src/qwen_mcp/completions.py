@@ -63,9 +63,9 @@ class CompletionHandler(BaseDashScopeClient):
         if max_tokens:
             force_max_tokens = max_tokens
         elif complexity == "critical":
-            force_max_tokens = 8192  # Deep architecture/multi-file
+            force_max_tokens = 4096  # Deep architecture/multi-file (Safe limit)
         elif complexity == "high":
-            force_max_tokens = 4096  # Standard features
+            force_max_tokens = 3072  # Standard features
         elif complexity == "medium":
             force_max_tokens = 2048  # Quick fixes
         else:  # low/auto

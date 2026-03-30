@@ -148,7 +148,10 @@ class CoderEngineV2:
                 )
             
             # Intelligent Scout: Analyze task complexity and routing
-            scout_res = await self.scout_engine.analyze_task(prompt, context, task_hint="coding")
+            scout_res = await self.scout_engine.analyze_task(
+                prompt, context, task_hint="coding", 
+                progress_callback=ctx.report_progress if ctx else None
+            )
             scout_complexity = scout_res.get("complexity", "medium")
             scout_use_swarm = scout_res.get("use_swarm", False)
             routing_reason = scout_res.get("reason", "Standard routing")
