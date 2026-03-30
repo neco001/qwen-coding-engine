@@ -105,6 +105,11 @@ function App() {
                             const newTelemetry = { ...s.telemetry, ...data };
                             // Update is_live based on status
                             newTelemetry.is_live = data.status === 'live' || data.status === 'processing';
+                            
+                            // P2-1 FIX: Skip update if nothing meaningful changed (prevents UI flickering)
+                            if (JSON.stringify(newTelemetry) === JSON.stringify(s.telemetry)) {
+                                return s;
+                            }
                             return { ...s, telemetry: newTelemetry };
                         }
                         return s;
@@ -152,7 +157,9 @@ function App() {
 
         return () => {
             sessions.forEach(s => s.ws?.close());
+            // P2-2 FIX: Clear all timers and clear the map to prevent memory leak
             fadeTimers.current.forEach((timer) => clearTimeout(timer));
+            fadeTimers.current.clear();
         };
     }, [sessions.length]);
 
@@ -192,7 +199,9 @@ function App() {
                                 : 'bg-white/5 text-white/40 border border-transparent hover:bg-white/10'
                         }`}
                     >
-                        {session.telemetry.session_display_name || session.name}
+                        {/* P3-2 FIX: Compute display name dynamically from session_display_id */}
+                        {session.telemetry.session_display_name ||
+                         (session.telemetry.session_display_id ? `Sesja ${session.telemetry.session_display_id}` : session.name)}
                         {session.isConnected && (
                             <span className="ml-1.5 w-1.5 h-1.5 inline-block rounded-full bg-green-500 animate-pulse" />
                         )}

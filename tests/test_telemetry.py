@@ -35,10 +35,10 @@ async def test_telemetry_broadcaster_pushes_updates_to_websocket():
     received_messages = []
 
     with client.websocket_connect("/ws/telemetry") as websocket:
-        # We need to simulate the rest of the app broadcasting a message.
-        # Since client.websocket_connect is synchronous and holds the thread, we have to broadcast from the same thread
-        # but since broadcast_state is async, we need a small async loop or use an event loop run_until_complete.
-
+        # First, receive and discard the initial state sent by add_client
+        initial_msg = websocket.receive_json()
+        assert initial_msg["active_model"] == "Standby..."  # Initial state
+        
         # We simulate the broadcast that would come from the MCP server.
         payload = {
             "session_tokens": {"test": 123},

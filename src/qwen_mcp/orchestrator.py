@@ -77,6 +77,17 @@ class SwarmOrchestrator:
         
         # Robust JSON extraction using regex
         clean_json = response_text.strip()
+        
+        # FIX: Check for empty/whitespace response before parsing
+        if not clean_json:
+            logger.error("Swarm decomposition returned empty response")
+            # Fallback: return single task with original prompt
+            return SwarmResult(
+                intent_validation=False,
+                sub_tasks=[SubTask(id="1", task=prompt, priority=5)],
+                estimated_total_tokens=100
+            )
+        
         json_match = re.search(r'```json\s*(.*?)\s*```', clean_json, re.DOTALL)
         if json_match:
             clean_json = json_match.group(1).strip()
@@ -85,12 +96,26 @@ class SwarmOrchestrator:
             if code_block_match:
                 clean_json = code_block_match.group(1).strip()
 
+        # FIX: Check again after extraction
+        if not clean_json:
+            logger.error("Swarm decomposition: JSON extraction yielded empty content")
+            return SwarmResult(
+                intent_validation=False,
+                sub_tasks=[SubTask(id="1", task=prompt, priority=5)],
+                estimated_total_tokens=100
+            )
+
         try:
             parsed_data = json.loads(clean_json)
             return SwarmResult(**parsed_data)
         except (json.JSONDecodeError, ValueError) as e:
-            # Fallback or re-raise with better context
-            raise ValueError(f"Failed to parse swarm decomposition: {str(e)}") from e
+            logger.error(f"Swarm decomposition JSON parse error: {e}. Raw response: {response_text[:200]}")
+            # FIX: Graceful fallback instead of crash
+            return SwarmResult(
+                intent_validation=False,
+                sub_tasks=[SubTask(id="1", task=prompt, priority=5)],
+                estimated_total_tokens=100
+            )
 
     async def synthesize(self, original_prompt: str, subtask_results: Dict[str, str]) -> str:
         """

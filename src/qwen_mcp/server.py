@@ -16,12 +16,13 @@ from qwen_mcp.tools import (
     get_current_billing_mode,
 )
 from qwen_mcp.specter.telemetry import get_broadcaster
-from qwen_mcp.specter.identity import get_current_project_id
+from qwen_mcp.specter.identity import get_current_project_id, get_session_id, get_or_create_instance_id
 from qwen_mcp.registry import registry
 import asyncio
 import sys
 import threading
 import socket
+import os
 import uvicorn
 from fastapi import FastAPI, WebSocket
 
@@ -38,6 +39,36 @@ if sys.platform == "win32":
 
 # Initialize FastMCP Server
 mcp = FastMCP("Qwen MCP Server (DashScope)")
+
+
+def _get_tool_session_id(ctx: Context = None, default_source: str = "mcp") -> str:
+    """
+    Extract client_source from MCP context and generate proper session ID.
+    
+    This ensures Gemini and Roo Code sessions are properly isolated.
+    
+    Args:
+        ctx: MCP context (may contain X-Client-Source header)
+        default_source: Fallback client source if not detected
+    
+    Returns:
+        Session ID in format: {instanceId}_{clientSource}_{workspaceHash}
+    """
+    client_source = default_source
+    
+    # Try to extract client_source from MCP context headers
+    if ctx is not None:
+        try:
+            if hasattr(ctx, 'request_context') and ctx.request_context:
+                headers = getattr(ctx.request_context, 'headers', {})
+                if headers:
+                    client_source = headers.get('X-Client-Source', default_source)
+        except (AttributeError, KeyError):
+            pass
+    
+    instance_id = get_or_create_instance_id()
+    cwd = os.getcwd()
+    return get_session_id(instance_id, client_source, cwd)
 
 
 @mcp.tool()
@@ -62,7 +93,7 @@ async def qwen_audit(
     Returns:
         Audit report with findings and recommendations
     """
-    project_id = get_current_project_id()
+    project_id = _get_tool_session_id(ctx, default_source="audit")
     await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("strategist"),
         "role_mapping": registry.models,
@@ -96,7 +127,7 @@ async def qwen_coder(
     - qwen_coder (old) → now calls qwen_coder(mode="standard")
     - qwen_coder_pro (old) → now calls qwen_coder(mode="pro")
     """
-    project_id = get_current_project_id()
+    project_id = _get_tool_session_id(ctx, default_source="coder")
     await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("coding"),
         "role_mapping": registry.models,
@@ -113,7 +144,7 @@ async def qwen_architect(
     Initiates 'The Lachman Protocol' (LP).
     The server hires a dynamic expert squad to audit your goal and generate a high-precision Blueprint.
     """
-    project_id = get_current_project_id()
+    project_id = _get_tool_session_id(ctx, default_source="architect")
     await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("strategist"),
         "role_mapping": registry.models,
@@ -153,7 +184,7 @@ async def qwen_sparring(
     5. qwen_sparring(mode="white", session_id="sp_abc123")
     6. qwen_sparring(mode="full", topic="Decyzja architektoniczna")
     """
-    project_id = get_current_project_id()
+    project_id = _get_tool_session_id(ctx, default_source="sparring")
     await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("strategist"),
         "role_mapping": registry.models,
@@ -187,7 +218,7 @@ async def qwen_swarm(
     Returns:
         Synthesized response from all parallel sub-tasks
     """
-    project_id = get_current_project_id()
+    project_id = _get_tool_session_id(ctx, default_source="swarm")
     await get_broadcaster().broadcast_state({
         "active_model": "swarm-orchestrator",
         "role_mapping": {"swarm": "parallel"},
@@ -308,8 +339,10 @@ def run_telemetry_server():
         }
 
     @app.websocket("/ws/telemetry")
-    async def websocket_endpoint(websocket: WebSocket, project_id: str = "default"):
+    async def websocket_endpoint(websocket: WebSocket):
         await websocket.accept()
+        # FIX: Extract project_id from query string manually (FastAPI doesn't auto-parse WebSocket query params)
+        project_id = websocket.query_params.get("project_id", "default")
         await broadcaster.add_client(websocket, project_id=project_id)
         try:
             while True:
@@ -373,14 +406,14 @@ def main():
 
 
 @mcp.tool()
-async def qwen_init_request() -> str:
+async def qwen_init_request(ctx: Context = None) -> str:
     """
     ⚡ INITIALIZE NEW REQUEST: Resets 'This Prompt' token counter and buffers in the HUD.
     MANDATORY: Call this as your FIRST tool at the start of EVERY new user prompt/task.
     Failure to call this results in incorrect token accumulation in telemetry.
     """
     broadcaster = get_broadcaster()
-    project_id = get_current_project_id()
+    project_id = _get_tool_session_id(ctx, default_source="init")
     await broadcaster.start_request(project_id=project_id)
     return f"✅ Specter HUD: 'This Prompt' counters reset for {project_id}. Ready for new engagement."
 

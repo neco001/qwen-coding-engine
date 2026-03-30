@@ -2,11 +2,14 @@ import asyncio
 import json
 import time
 import threading
+import logging
 from typing import Set, Dict, Any, Optional
 from dataclasses import dataclass, field
 
 from fastapi import WebSocket
 from websockets.exceptions import ConnectionClosed
+
+logger = logging.getLogger(__name__)
 
 
 class SessionMapper:
@@ -18,28 +21,35 @@ class SessionMapper:
     def __init__(self):
         self._project_to_session: Dict[str, int] = {}
         self._next_session_number: int = 1
-        self._lock = threading.Lock()
+        # P3-1 FIX: Use asyncio.Lock for async code (will be created lazily)
+        self._lock: Optional[asyncio.Lock] = None
     
-    def get_or_create_session_number(self, project_id: str) -> int:
+    def _get_lock(self) -> asyncio.Lock:
+        """Get or create the asyncio lock (lazy initialization)."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+    
+    async def get_or_create_session_number(self, project_id: str) -> int:
         """Get existing session number or assign a new one."""
-        with self._lock:
+        async with self._get_lock():
             if project_id not in self._project_to_session:
                 self._project_to_session[project_id] = self._next_session_number
                 self._next_session_number += 1
             return self._project_to_session[project_id]
     
-    def get_session_count(self) -> int:
+    async def get_session_count(self) -> int:
         """Return number of active sessions."""
-        with self._lock:
+        async with self._get_lock():
             return len(self._project_to_session)
     
     def get_display_name(self, session_number: int) -> str:
         """Return formatted display name like 'Sesja 1'."""
         return f"Sesja {session_number}"
     
-    def remove_session(self, project_id: str) -> None:
+    async def remove_session(self, project_id: str) -> None:
         """Remove session when client disconnects."""
-        with self._lock:
+        async with self._get_lock():
             if project_id in self._project_to_session:
                 del self._project_to_session[project_id]
 
@@ -117,9 +127,9 @@ class TelemetryBroadcaster:
             "session_display_name": f"Sesja {session_display_id}"
         }
 
-    def get_state(self, project_id: str = "default") -> Dict[str, Any]:
+    async def get_state(self, project_id: str = "default") -> Dict[str, Any]:
         if project_id not in self._project_states:
-            session_num = self._session_mapper.get_or_create_session_number(project_id)
+            session_num = await self._session_mapper.get_or_create_session_number(project_id)
             self._project_states[project_id] = self._get_init_state(session_num)
         return self._project_states[project_id]
 
@@ -131,7 +141,7 @@ class TelemetryBroadcaster:
             self._clients[project_id].add(websocket)
         
         # CRITICAL: Send state immediately on connect (outside lock to avoid deadlock)
-        state = self.get_state(project_id)
+        state = await self.get_state(project_id)
         try:
             await websocket.send_text(json.dumps(state, ensure_ascii=False))
         except Exception:
@@ -155,7 +165,8 @@ class TelemetryBroadcaster:
         async with self._lock:
             # Ensure the specified project_id exists
             if project_id not in self._project_states:
-                self._project_states[project_id] = self._get_init_state()
+                session_num = await self._session_mapper.get_or_create_session_number(project_id)
+                self._project_states[project_id] = self._get_init_state(session_num)
             
             # Update ONLY the specified project state (scoped broadcast)
             state = self._project_states[project_id]
@@ -164,13 +175,14 @@ class TelemetryBroadcaster:
             # Collect ONLY clients of this project (scoped delivery)
             if project_id not in self._clients:
                 return
-            clients = list(self._clients[project_id])
+            # P1-1 FIX: Re-verify client membership under lock before sending
+            clients = set(self._clients[project_id])
 
-            if not clients:
-                return
+        if not clients:
+            return
 
-            # Prepare message while holding lock
-            message = json.dumps(state, ensure_ascii=False)
+        # Prepare message while holding lock
+        message = json.dumps(state, ensure_ascii=False)
 
         # Step 2: Send messages OUTSIDE lock to avoid blocking other operations
         disconnected = set()
@@ -189,7 +201,7 @@ class TelemetryBroadcaster:
 
     async def start_request(self, project_id: str = "default"):
         """Resets counters and buffers for a new high-level user request."""
-        state = self.get_state(project_id)
+        state = await self.get_state(project_id)
         state["request_prompt_total"] = 0
         state["request_completion_total"] = 0
         state["thinking_buffer"] = ""  # FIX: Must be string (concatenated in update_stream)
@@ -198,6 +210,10 @@ class TelemetryBroadcaster:
         state["status"] = "live"
         state["operation"] = "Processing request..."
         state["progress_percent"] = 0
+        
+        # P1-2 FIX: Reset heartbeat counter on new request
+        async with self._lock:
+            self._heartbeat_counter = 0
         
         await self.broadcast_state({
             "request_tokens": {"prompt": 0, "completion": 0},
@@ -212,7 +228,7 @@ class TelemetryBroadcaster:
 
     async def update_stream(self, thinking: str = "", content: str = "", project_id: str = "default"):
         """Appends to the current stream buffers and broadcasts."""
-        state = self.get_state(project_id)
+        state = await self.get_state(project_id)
         
         if thinking:
             state["thinking_buffer"] += thinking
@@ -222,18 +238,23 @@ class TelemetryBroadcaster:
             state["status"] = "live"
             state["operation"] = "Generating response..."
         
-        # Fire-and-forget broadcast to avoid blocking streaming
-        # Use create_task to avoid waiting for WebSocket sends
-        asyncio.create_task(self.broadcast_state({
-            "thinking": state["thinking_buffer"],
-            "streaming_content": state["content_buffer"],
-            "status": state["status"],
-            "operation": state["operation"]
-        }, project_id=project_id))
+        # P2-3 FIX: Track fire-and-forget task with exception logging
+        async def broadcast_with_logging():
+            try:
+                await self.broadcast_state({
+                    "thinking": state["thinking_buffer"],
+                    "streaming_content": state["content_buffer"],
+                    "status": state["status"],
+                    "operation": state["operation"]
+                }, project_id=project_id)
+            except Exception as e:
+                logger.warning(f"Stream broadcast failed for {project_id}: {e}")
+        
+        asyncio.create_task(broadcast_with_logging())
 
     async def update_progress(self, percent: int, operation: str = "", project_id: str = "default"):
         """Update progress for long operations (0-100%)."""
-        state = self.get_state(project_id)
+        state = await self.get_state(project_id)
         state["progress_percent"] = min(100, max(0, percent))
         if operation:
             state["operation"] = operation
@@ -247,7 +268,7 @@ class TelemetryBroadcaster:
 
     async def end_request(self, project_id: str = "default"):
         """Mark request as complete and reset status."""
-        state = self.get_state(project_id)
+        state = await self.get_state(project_id)
         state["status"] = "idle"
         state["operation"] = ""
         state["progress_percent"] = 100
@@ -294,12 +315,12 @@ class TelemetryBroadcaster:
                     self._clients[project_id] -= disconnected
 
     async def report_usage(
-        self, model: str, prompt_tokens: int, completion_tokens: int, 
+        self, model: str, prompt_tokens: int, completion_tokens: int,
         is_image: bool = False, project_id: str = "default"
     ):
         """Accumulates token usage. Resets 'Request' level if inactivity > 60s."""
         now = time.time()
-        state = self.get_state(project_id)
+        state = await self.get_state(project_id)
         
         # SMART RESET: If more than 60s passed since last LLM activity
         if state["last_interaction_time"] > 0 and (now - state["last_interaction_time"] > 60):

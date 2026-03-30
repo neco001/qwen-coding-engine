@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const os = require('os');
 
 function activate(context) {
     // Generate unique instance ID for this VSCode window
@@ -55,10 +56,13 @@ class SpecterViewProvider {
         const workspaceName = vscode.workspace.workspaceFolders?.[0]?.name || 'default';
         const workspaceHash = this._hashWorkspace(workspaceName);
         
+        // P1-3 FIX: Use environment variables for portable paths (not hardcoded username)
+        const userHome = process.env.USERPROFILE || process.env.HOME || os.homedir();
+        
         // Path to Gemini/Antigravity MCP config
-        const geminiConfigPath = 'c:/Users/pawel/.gemini/antigravity/mcp_config.json';
+        const geminiConfigPath = path.join(userHome, '.gemini/antigravity/mcp_config.json');
         // Path to Roo Code MCP settings
-        const rooConfigPath = 'c:/Users/pawel/AppData/Roaming/Antigravity/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json';
+        const rooConfigPath = path.join(userHome, 'AppData/Roaming/Antigravity/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json');
         
         // Check Gemini config
         try {

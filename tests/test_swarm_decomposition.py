@@ -37,11 +37,44 @@ async def test_swarm_orchestrator_decompose_success():
 
 @pytest.mark.asyncio
 async def test_swarm_orchestrator_decompose_invalid_json():
+    """Invalid JSON should gracefully fallback to single-task result instead of crash."""
     mock_handler = AsyncMock()
     mock_handler.generate_completion.return_value = "Invalid JSON string"
     
     orchestrator = SwarmOrchestrator(completion_handler=mock_handler)
     
-    # Should handle parsing error gracefully by raising ValueError with context
-    with pytest.raises(ValueError, match="Failed to parse swarm decomposition"):
-        await orchestrator.decompose("blah")
+    # FIX: Should return fallback SwarmResult instead of raising
+    result = await orchestrator.decompose("blah")
+    assert isinstance(result, SwarmResult)
+    assert result.intent_validation is False  # Fallback mode
+    assert len(result.sub_tasks) == 1
+    assert result.sub_tasks[0].task == "blah"
+
+
+@pytest.mark.asyncio
+async def test_swarm_orchestrator_decompose_empty_response():
+    """Empty model response should gracefully fallback to single-task result."""
+    mock_handler = AsyncMock()
+    mock_handler.generate_completion.return_value = ""
+    
+    orchestrator = SwarmOrchestrator(completion_handler=mock_handler)
+    
+    result = await orchestrator.decompose("test prompt")
+    assert isinstance(result, SwarmResult)
+    assert result.intent_validation is False
+    assert len(result.sub_tasks) == 1
+    assert result.sub_tasks[0].task == "test prompt"
+
+
+@pytest.mark.asyncio
+async def test_swarm_orchestrator_decompose_whitespace_only():
+    """Whitespace-only response should gracefully fallback."""
+    mock_handler = AsyncMock()
+    mock_handler.generate_completion.return_value = "   \n\t  "
+    
+    orchestrator = SwarmOrchestrator(completion_handler=mock_handler)
+    
+    result = await orchestrator.decompose("another test")
+    assert isinstance(result, SwarmResult)
+    assert result.intent_validation is False
+    assert result.sub_tasks[0].task == "another test"

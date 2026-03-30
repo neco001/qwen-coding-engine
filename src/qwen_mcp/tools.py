@@ -168,13 +168,36 @@ async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: O
         {"role": "user", "content": f"Goal: {goal}"}
     ]
     # Blueprints use scouted complexity (often high/critical) to unlock 4k/8k tokens
-    blueprint = await client.generate_completion(
-        messages=arch_msg, 
+    blueprint_raw = await client.generate_completion(
+        messages=arch_msg,
         task_type="strategist",
         complexity=complexity,
         progress_callback=ctx.report_progress if ctx else None
     )
-    return blueprint
+    
+    # 3. Parse and enhance blueprint with swarm-ready task formatting
+    blueprint_data = extract_json_from_text(blueprint_raw)
+    if blueprint_data and "swarm_tasks" in blueprint_data:
+        # Format swarm_tasks for downstream execution
+        swarm_section = "\n\n## 🎯 Swarm Execution Tasks\n\n"
+        swarm_section += "The following atomic tasks are ready for parallel execution:\n\n"
+        
+        for task in blueprint_data.get("swarm_tasks", []):
+            task_id = task.get("id", "unknown")
+            task_desc = task.get("task", "")
+            priority = task.get("priority", 5)
+            target_files = task.get("target_files", [])
+            exec_hint = task.get("execution_hint", "qwen_coder")
+            
+            swarm_section += f"### {task_id} (Priority: {priority})\n"
+            swarm_section += f"- **Task**: {task_desc}\n"
+            swarm_section += f"- **Target Files**: {', '.join(target_files) if target_files else 'N/A'}\n"
+            swarm_section += f"- **Execution**: `{exec_hint}`\n\n"
+        
+        # Append swarm section to raw blueprint
+        return blueprint_raw + swarm_section
+    
+    return blueprint_raw
 
 async def read_repo_file(path: str) -> str:
     import os

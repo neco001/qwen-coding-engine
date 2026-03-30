@@ -9,85 +9,91 @@ from qwen_mcp.specter.telemetry import SessionMapper
 class TestSessionMapper:
     """Test suite for SessionMapper class."""
 
-    def test_first_project_gets_session_1(self):
+    @pytest.mark.asyncio
+    async def test_first_project_gets_session_1(self):
         """First unique project_id should get session number 1."""
         mapper = SessionMapper()
-        result = mapper.get_or_create_session_number("project_abc123")
+        result = await mapper.get_or_create_session_number("project_abc123")
         assert result == 1
 
-    def test_second_project_gets_session_2(self):
+    @pytest.mark.asyncio
+    async def test_second_project_gets_session_2(self):
         """Second unique project_id should get session number 2."""
         mapper = SessionMapper()
-        mapper.get_or_create_session_number("project_abc123")
-        result = mapper.get_or_create_session_number("project_xyz789")
+        await mapper.get_or_create_session_number("project_abc123")
+        result = await mapper.get_or_create_session_number("project_xyz789")
         assert result == 2
 
-    def test_same_project_returns_same_number(self):
+    @pytest.mark.asyncio
+    async def test_same_project_returns_same_number(self):
         """Same project_id should always return the same session number."""
         mapper = SessionMapper()
-        first = mapper.get_or_create_session_number("project_abc123")
-        second = mapper.get_or_create_session_number("project_abc123")
+        first = await mapper.get_or_create_session_number("project_abc123")
+        second = await mapper.get_or_create_session_number("project_abc123")
         assert first == second == 1
 
-    def test_session_count_increments(self):
+    @pytest.mark.asyncio
+    async def test_session_count_increments(self):
         """Session count should match number of unique projects."""
         mapper = SessionMapper()
-        mapper.get_or_create_session_number("project_1")
-        mapper.get_or_create_session_number("project_2")
-        mapper.get_or_create_session_number("project_3")
-        assert mapper.get_session_count() == 3
+        await mapper.get_or_create_session_number("project_1")
+        await mapper.get_or_create_session_number("project_2")
+        await mapper.get_or_create_session_number("project_3")
+        count = await mapper.get_session_count()
+        assert count == 3
 
-    def test_thread_safety(self):
+    @pytest.mark.asyncio
+    async def test_thread_safety(self):
         """Concurrent calls should not produce duplicate session numbers."""
         mapper = SessionMapper()
-        results = []
 
         async def assign_session(project_id: str):
             # Simulate concurrent access
             await asyncio.sleep(0.001)
-            return mapper.get_or_create_session_number(project_id)
+            return await mapper.get_or_create_session_number(project_id)
 
-        async def run_concurrent():
-            tasks = [
-                assign_session(f"project_{i}")
-                for i in range(10)
-            ]
-            return await asyncio.gather(*tasks)
-
-        results = asyncio.run(run_concurrent())
+        tasks = [
+            assign_session(f"project_{i}")
+            for i in range(10)
+        ]
+        results = await asyncio.gather(*tasks)
         
         # All results should be unique (no duplicates)
         assert len(results) == 10
         assert len(set(results)) == 10  # All unique
         assert set(results) == set(range(1, 11))  # 1 through 10
 
-    def test_get_display_name(self):
+    @pytest.mark.asyncio
+    async def test_get_display_name(self):
         """Should return formatted display name like 'Sesja 1'."""
         mapper = SessionMapper()
-        session_num = mapper.get_or_create_session_number("project_abc")
+        session_num = await mapper.get_or_create_session_number("project_abc")
         display_name = mapper.get_display_name(session_num)
         assert display_name == "Sesja 1"
 
-    def test_get_display_name_polish(self):
+    @pytest.mark.asyncio
+    async def test_get_display_name_polish(self):
         """Display name should use Polish 'Sesja' prefix."""
         mapper = SessionMapper()
-        mapper.get_or_create_session_number("project_1")
-        mapper.get_or_create_session_number("project_2")
+        await mapper.get_or_create_session_number("project_1")
+        await mapper.get_or_create_session_number("project_2")
         assert mapper.get_display_name(1) == "Sesja 1"
         assert mapper.get_display_name(2) == "Sesja 2"
 
-    def test_remove_session(self):
+    @pytest.mark.asyncio
+    async def test_remove_session(self):
         """Should be able to remove a session when client disconnects."""
         mapper = SessionMapper()
-        mapper.get_or_create_session_number("project_1")
-        mapper.get_or_create_session_number("project_2")
+        await mapper.get_or_create_session_number("project_1")
+        await mapper.get_or_create_session_number("project_2")
         
         # Remove first session
-        mapper.remove_session("project_1")
+        await mapper.remove_session("project_1")
         
         # Count should decrease
-        assert mapper.get_session_count() == 1
+        count = await mapper.get_session_count()
+        assert count == 1
         
         # New project should still get next number (3, not reuse 1)
-        result = mapper.get_or_create_session_number("project_3")
+        result = await mapper.get_or_create_session_number("project_3")
         assert result == 3
