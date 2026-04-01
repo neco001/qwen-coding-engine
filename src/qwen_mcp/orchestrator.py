@@ -1,10 +1,12 @@
 import asyncio
 import json
 import logging
+import os
 import re
 from typing import List, Optional, Dict
 from pydantic import BaseModel, Field, field_validator
 from qwen_mcp.prompts.swarm import DECOMPOSE_SYSTEM_PROMPT, SYNTHESIZE_SYSTEM_PROMPT
+from qwen_mcp.io_utils import resolve_context_keys
 
 logger = logging.getLogger("qwen_mcp.swarm")
 
@@ -57,11 +59,32 @@ class SwarmOrchestrator:
     async def _execute_single_task(self, sub_task: SubTask) -> str:
         """
         Executes a single sub-task with semaphore protection.
+        
+        Now resolves context_keys to actual file contents before execution.
+        This fixes the root cause of template code generation - agents now
+        receive actual file content instead of just task descriptions.
         """
         async with self._semaphore:
-            # For the Swarm, we pass the task description as the main prompt
-            # Future expansion: incorporate context_keys here
-            messages = [{"role": "user", "content": sub_task.task}]
+            # Build the prompt
+            prompt_content = sub_task.task
+            
+            # RESOLVE CONTEXT KEYS - THIS IS THE FIX!
+            if sub_task.context_keys:
+                logger.info(f"Resolving context_keys for task {sub_task.id}: {sub_task.context_keys}")
+                
+                context_contents = await resolve_context_keys(
+                    sub_task.context_keys,
+                    project_root=os.getcwd()
+                )
+                
+                # Inject file contents into prompt
+                if context_contents:
+                    prompt_content += "\n\n### CONTEXT FILES:\n\n"
+                    for file_path, content in context_contents.items():
+                        prompt_content += f"--- {file_path} ---\n"
+                        prompt_content += f"```\n{content}\n```\n\n"
+            
+            messages = [{"role": "user", "content": prompt_content}]
             result = await self.completion_handler.generate_completion(messages)
             return result
 
