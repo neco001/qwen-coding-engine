@@ -94,40 +94,35 @@ class ContextBuilderEngine:
         self.orchestrator = SwarmOrchestrator(completion_handler=client) if client else None
     
     async def generate_project_context(
-        self, 
+        self,
         workspace_root: str = "."
     ) -> Tuple[str, str]:
         """
         Generate _PROJECT_CONTEXT.md and _DATA_CONTEXT.md.
         
-        Uses Scout analysis to determine if Swarm parallel execution is warranted.
+        NOTE: Scout analysis is SKIPPED for context generation to avoid timeout.
+        Uses heuristic complexity based on file count instead.
         
         Returns:
             Tuple of (project_context_content, data_context_content)
         """
-        from qwen_mcp.engines.scout import ScoutEngine
-        
         # Ensure context directory exists
         self.context_dir.mkdir(exist_ok=True, parents=True)
         
-        # SCOUT ANALYSIS: Determine complexity and Swarm usage
-        scout = ScoutEngine(self.client)
-        scout_prompt = f"Analyze codebase at {workspace_root} for context documentation scope."
-        scout_result = await scout.analyze_task(
-            scout_prompt,
-            context="Context file generation for project documentation",
-            task_hint="context_analysis"
-        )
+        # SKIP ScoutEngine - it causes timeout on API call
+        # Use heuristic complexity based on scanned files
+        scanned_files = self._scan_project_files(workspace_root)
+        file_count = len(scanned_files)
         
-        use_swarm = scout_result.get("use_swarm", False)
-        complexity = scout_result.get("complexity", "medium")
+        # Heuristic: more files = higher complexity
+        if file_count > 20:
+            complexity = "high"
+        elif file_count > 10:
+            complexity = "medium"
+        else:
+            complexity = "low"
         
-        logger.info(f"Scout result: complexity={complexity}, use_swarm={use_swarm}")
-        
-        if use_swarm and self.orchestrator:
-            # Swarm prompt for parallel context analysis
-            swarm_prompt = self._build_context_swarm_prompt(workspace_root)
-            await self.orchestrator.run_swarm(swarm_prompt, task_type="context_analysis")
+        logger.info(f"Context generation: {file_count} files, complexity={complexity}")
         
         # Generate each context type separately for quality
         project_context = await self._generate_single_context(
