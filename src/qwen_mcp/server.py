@@ -14,6 +14,8 @@ from qwen_mcp.tools import (
     heal_registry,
     set_billing_mode,
     get_current_billing_mode,
+    qwen_init_context,
+    qwen_update_session_context,
 )
 from qwen_mcp.specter.telemetry import get_broadcaster
 from qwen_mcp.specter.identity import get_current_project_id, get_session_id, get_or_create_instance_id
@@ -427,6 +429,81 @@ async def qwen_heal_registry() -> str:
     from qwen_mcp.api import DashScopeClient
     client = DashScopeClient()
     return await client.heal_registry()
+
+
+@mcp.tool()
+async def qwen_init_context_tool(
+    workspace_root: str = ".",
+    ctx: Context = None
+) -> str:
+    """
+    Initialize project context files using Swarm analysis.
+    
+    Generates:
+    - .context/_PROJECT_CONTEXT.md: Tech stack, structure, conventions
+    - .context/_DATA_CONTEXT.md: Data sources, schemas, pipelines
+    
+    Uses Swarm Orchestrator for parallel analysis of:
+    1. Tech Stack (runtime, frameworks, libraries)
+    2. Structure Mapping (directories, entry points, configs)
+    3. Data Sources (databases, files, APIs)
+    4. Documentation (conventions, workflows)
+    
+    Args:
+        workspace_root: Path to workspace root (default: current directory)
+        ctx: MCP context for progress reporting
+    
+    Returns:
+        Summary of generated files with paths
+    
+    Example:
+        qwen_init_context_tool(workspace_root=".")
+    """
+    project_id = _get_tool_session_id(ctx, default_source="context_init")
+    await get_broadcaster().broadcast_state({
+        "active_model": registry.get_best_model("scout"),
+        "role_mapping": registry.models,
+        "is_live": True
+    }, project_id=project_id)
+    return await qwen_init_context(workspace_root, ctx)
+
+
+@mcp.tool()
+async def qwen_update_session_context_tool(
+    session_summary: str,
+    workspace_root: str = ".",
+    ctx: Context = None
+) -> str:
+    """
+    Update session supplement with current session insights.
+    
+    Call this at the END of each session to capture:
+    - Key decisions made
+    - Changes implemented
+    - Open questions
+    - Recommendations for next session
+    
+    Args:
+        session_summary: Summary of work done in this session
+        workspace_root: Path to workspace root
+        ctx: MCP context for progress reporting
+    
+    Returns:
+        Confirmation of update with session highlights
+    
+    Example:
+        qwen_update_session_context_tool(
+            session_summary="Implemented user auth with JWT",
+            workspace_root="."
+        )
+    """
+    project_id = _get_tool_session_id(ctx, default_source="context_update")
+    await get_broadcaster().broadcast_state({
+        "active_model": registry.get_best_model("scout"),
+        "role_mapping": registry.models,
+        "is_live": True
+    }, project_id=project_id)
+    return await qwen_update_session_context(session_summary, workspace_root, ctx)
 
 
 if __name__ == "__main__":

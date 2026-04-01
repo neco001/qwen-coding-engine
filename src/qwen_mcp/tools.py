@@ -328,3 +328,162 @@ async def generate_swarm(
     
     result = await orchestrator.run_swarm(prompt, task_type=task_type)
     return result
+
+
+async def qwen_init_context(
+    workspace_root: str = ".",
+    ctx: Context = None
+) -> str:
+    """
+    Initialize project context files using Swarm analysis.
+    
+    Generates:
+    - .context/_PROJECT_CONTEXT.md: Tech stack, structure, conventions
+    - .context/_DATA_CONTEXT.md: Data sources, schemas, pipelines
+    
+    Args:
+        workspace_root: Path to workspace root (default: current directory)
+        ctx: MCP context for progress reporting
+    
+    Returns:
+        Summary of generated files with paths
+    """
+    from pathlib import Path
+    from qwen_mcp.engines.context_builder import ContextBuilderEngine
+    
+    # Input validation
+    if workspace_root and not Path(workspace_root).exists():
+        logger.error(f"Invalid workspace_root: {workspace_root} does not exist")
+        return f"## Error\n\nWorkspace path does not exist: {workspace_root}"
+    
+    try:
+        if ctx:
+            await ctx.report_progress(
+                progress=0,
+                total=3,
+                message="Initializing context builder..."
+            )
+        
+        client = DashScopeClient()
+        engine = ContextBuilderEngine(client=client)
+        
+        if ctx:
+            await ctx.report_progress(
+                progress=1,
+                total=3,
+                message="Analyzing tech stack and data sources..."
+            )
+        
+        # Generate both contexts
+        project_context, data_context = await engine.generate_project_context(
+            workspace_root
+        )
+        
+        if ctx:
+            await ctx.report_progress(
+                progress=2,
+                total=3,
+                message="Saving context files..."
+            )
+        
+        # Save files
+        saved = engine.save_context_files(
+            project_context,
+            data_context,
+            workspace_root
+        )
+        
+        result = f"## Context Files Generated\n\n"
+        result += f"Successfully created {len(saved)} context files:\n\n"
+        
+        for ctx_type, path in saved.items():
+            result += f"- **{ctx_type}**: `{path}`\n"
+        
+        result += f"\n### Next Steps\n\n"
+        result += f"1. Review `_PROJECT_CONTEXT.md` for tech stack summary\n"
+        result += f"2. Review `_DATA_CONTEXT.md` for data infrastructure\n"
+        result += f"3. Use `qwen_update_session_context` at end of session\n"
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"qwen_init_context failed: {e}", exc_info=True)
+        return f"## Error\n\nFailed to initialize context: {str(e)}"
+
+
+async def qwen_update_session_context(
+    session_summary: str,
+    workspace_root: str = ".",
+    ctx: Context = None
+) -> str:
+    """
+    Update session supplement with current session insights.
+    
+    Args:
+        session_summary: Summary of work done in this session
+        workspace_root: Path to workspace root
+        ctx: MCP context for progress reporting
+    
+    Returns:
+        Confirmation of update with session highlights
+    """
+    from pathlib import Path
+    from qwen_mcp.engines.context_builder import ContextBuilderEngine
+    
+    # Input validation
+    if not session_summary or not session_summary.strip():
+        logger.error("Empty session_summary provided")
+        return "## Error\n\nSession summary cannot be empty"
+    
+    if workspace_root and not Path(workspace_root).exists():
+        logger.error(f"Invalid workspace_root: {workspace_root} does not exist")
+        return f"## Error\n\nWorkspace path does not exist: {workspace_root}"
+    
+    try:
+        if ctx:
+            await ctx.report_progress(
+                progress=0,
+                total=2,
+                message="Processing session summary..."
+            )
+        
+        client = DashScopeClient()
+        engine = ContextBuilderEngine(client=client)
+        
+        if ctx:
+            await ctx.report_progress(
+                progress=1,
+                total=2,
+                message="Updating session supplement..."
+            )
+        
+        # Generate/update session context
+        session_content = await engine.update_session_context(
+            session_summary,
+            workspace_root
+        )
+        
+        # Save file
+        saved_path = engine.save_session_context(
+            session_content,
+            workspace_root
+        )
+        
+        # Extract key highlights from session summary
+        highlights = session_summary.split("\n")[:5]  # First 5 lines as highlights
+        
+        result = f"## Session Context Updated\n\n"
+        result += f"**File**: `{saved_path}`\n\n"
+        result += f"### Session Highlights\n\n"
+        for highlight in highlights:
+            if highlight.strip():
+                result += f"- {highlight.strip()}\n"
+        
+        result += f"\n### Recommendation\n\n"
+        result += f"Review `_SESSION_SUPPLEMENT.md` before next session for continuity.\n"
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"qwen_update_session_context failed: {e}", exc_info=True)
+        return f"## Error\n\nFailed to update session context: {str(e)}"
