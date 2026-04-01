@@ -36,7 +36,8 @@ async def generate_audit(
     content: str,
     context: Optional[str] = None,
     ctx: Optional[Context] = None,
-    use_swarm: bool = True
+    use_swarm: bool = True,
+    project_id: str = "default"
 ) -> str:
     """
     Audits the provided code or terminal logs using Qwen models.
@@ -49,6 +50,7 @@ async def generate_audit(
         context: Additional context for the audit
         ctx: MCP context for progress reporting
         use_swarm: Enable automatic parallel file analysis (default: True)
+        project_id: Project/session ID for telemetry isolation (format: {instance}_{source}_{hash})
     
     Returns:
         Audit report with findings and recommendations
@@ -91,27 +93,47 @@ Provide a comprehensive audit report with summary, critical issues, and recommen
         task_type="audit",
         complexity=complexity,
         tags=["audit"],
-        progress_callback=ctx.report_progress if ctx else None
+        progress_callback=ctx.report_progress if ctx else None,
+        project_id=project_id
     )
 
-async def generate_code(prompt: str, context: Optional[str] = None, ctx: Optional[Context] = None) -> str:
+async def generate_code(
+    prompt: str,
+    context: Optional[str] = None,
+    ctx: Optional[Context] = None,
+    project_id: str = "default"
+) -> str:
+    """
+    Simple code generation using standard coder model.
+    
+    Args:
+        prompt: The code generation request
+        context: Additional context (optional)
+        ctx: MCP context for progress reporting
+        project_id: Project/session ID for telemetry isolation (format: {instance}_{source}_{hash})
+    
+    Returns:
+        Generated code as markdown text
+    """
     client = DashScopeClient()
     messages = [
         {"role": "system", "content": CODER_SYSTEM_PROMPT},
         {"role": "user", "content": f"Context: {context or 'None'}\n\nPrompt: {prompt}"}
     ]
     return await client.generate_completion(
-        messages=messages, 
-        task_type="coding", 
+        messages=messages,
+        task_type="coding",
         tags=["coder"],
-        progress_callback=ctx.report_progress if ctx else None
+        progress_callback=ctx.report_progress if ctx else None,
+        project_id=project_id
     )
 
 async def generate_code_unified(
     prompt: str,
     mode: str = "auto",
     context: Optional[str] = None,
-    ctx: Optional[Context] = None
+    ctx: Optional[Context] = None,
+    project_id: str = "default"
 ) -> str:
     """
     Unified code generation with mode-based routing.
@@ -127,6 +149,7 @@ async def generate_code_unified(
         mode: One of 'auto', 'standard', 'pro', 'expert'
         context: Additional context (optional)
         ctx: MCP context for progress reporting
+        project_id: Project/session ID for telemetry isolation (format: {instance}_{source}_{hash})
     
     Returns:
         Markdown-formatted response with generated code
@@ -140,7 +163,8 @@ async def generate_code_unified(
         prompt=prompt,
         mode=mode,
         context=context or "",
-        ctx=ctx
+        ctx=ctx,
+        project_id=project_id
     )
     
     return response.to_markdown()

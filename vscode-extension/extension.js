@@ -5,25 +5,49 @@ const crypto = require('crypto');
 const os = require('os');
 
 function activate(context) {
-    // Generate unique instance ID for this VSCode window
-    const instanceId = generateInstanceId();
-    
-    const provider = new SpecterViewProvider(context.extensionUri, instanceId);
+    // Query server's HTTP endpoint to get the server's project_id (ensures instanceId sync)
+    const provider = new SpecterViewProvider(context.extensionUri);
 
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider('specter-qwen-cockpit-v1', provider)
     );
 }
 
-function generateInstanceId() {
-    // Use VSCode's sessionId if available, otherwise generate UUID
-    return crypto.randomBytes(4).toString('hex');
+async function fetchServerProjectId() {
+    // Query the telemetry server's HTTP endpoint to get its project_id
+    // This ensures the extension uses the same instanceId as the server
+    const http = require('http');
+    
+    return new Promise((resolve) => {
+        const req = http.get('http://127.0.0.1:8878/', (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(data);
+                    if (json.project_id) {
+                        resolve(json.project_id);
+                    } else {
+                        resolve(null);
+                    }
+                } catch (e) {
+                    resolve(null);
+                }
+            });
+        });
+        
+        req.on('error', () => resolve(null));
+        req.setTimeout(2000, () => {
+            req.destroy();
+            resolve(null);
+        });
+    });
 }
 
 class SpecterViewProvider {
-    constructor(extensionUri, instanceId) {
+    constructor(extensionUri) {
         this._extensionUri = extensionUri;
-        this._instanceId = instanceId;
+        this._serverProjectId = null;  // Will be fetched from server HTTP endpoint
     }
 
     resolveWebviewView(webviewView) {
@@ -36,9 +60,9 @@ class SpecterViewProvider {
             webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
             
             // Set up message handling for session updates
-            webviewView.webview.onDidReceiveMessage(message => {
+            webviewView.webview.onDidReceiveMessage(async (message) => {
                 if (message.type === 'getSessionConfig') {
-                    const sessions = this._detectMcpSessions();
+                    const sessions = await this._detectMcpSessions();
                     webviewView.webview.postMessage({
                         type: 'sessionConfig',
                         sessions: sessions
@@ -50,8 +74,31 @@ class SpecterViewProvider {
         }
     }
 
-    _detectMcpSessions() {
-        // Detect MCP server configurations from Antigravity/Gemini config files
+    async _detectMcpSessions() {
+        // CRITICAL FIX: Fetch server's project_id from HTTP endpoint to ensure instanceId sync
+        // The server generates instanceId from PID, extension cannot know it otherwise
+        if (!this._serverProjectId) {
+            this._serverProjectId = await fetchServerProjectId();
+        }
+        
+        // If we got server's project_id, use it directly (server knows best)
+        if (this._serverProjectId) {
+            // Parse server's project_id to extract clientSource
+            // Format: {instanceId}_{clientSource}_{workspaceHash}
+            const parts = this._serverProjectId.split('_');
+            const clientSource = parts.length >= 2 ? parts[1] : 'default';
+            
+            return [{
+                id: clientSource,
+                name: clientSource === 'roocode' ? 'Roo Code' :
+                      clientSource === 'gemini' ? 'Gemini' : 'Default',
+                projectId: this._serverProjectId,
+                clientSource: clientSource
+            }];
+        }
+        
+        // Fallback: Detect MCP server configurations from Antigravity/Gemini config files
+        // This is used when server is not running yet
         const sessions = [];
         const workspaceName = vscode.workspace.workspaceFolders?.[0]?.name || 'default';
         const workspaceHash = this._hashWorkspace(workspaceName);
@@ -63,6 +110,30 @@ class SpecterViewProvider {
         const geminiConfigPath = path.join(userHome, '.gemini/antigravity/mcp_config.json');
         // Path to Roo Code MCP settings
         const rooConfigPath = path.join(userHome, 'AppData/Roaming/Antigravity/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json');
+        
+        // Check Roo Code config first (more likely to be active)
+        try {
+            if (fs.existsSync(rooConfigPath)) {
+                const rooConfig = JSON.parse(fs.readFileSync(rooConfigPath, 'utf8'));
+                const servers = rooConfig.mcpServers || {};
+                
+                // Check for any qwen-coding_roo or roo-specific server
+                const hasRooQwenServer = Object.keys(servers).some(key =>
+                    key.toLowerCase().includes('qwen') && key.toLowerCase().includes('_roo')
+                );
+                
+                if (hasRooQwenServer) {
+                    sessions.push({
+                        id: 'roocode',
+                        name: 'Roo Code',
+                        projectId: `roocode_${workspaceHash}`,  // Will be updated when server starts
+                        clientSource: 'roocode'
+                    });
+                }
+            }
+        } catch (e) {
+            console.log('[SPECTER] Failed to read Roo config:', e.message);
+        }
         
         // Check Gemini config
         try {
@@ -76,11 +147,10 @@ class SpecterViewProvider {
                 );
                 
                 if (hasQwenServer) {
-                    // Session ID format: {instanceId}_{clientSource}_{workspaceHash}
                     sessions.push({
                         id: 'gemini',
                         name: 'Gemini',
-                        projectId: `${this._instanceId}_gemini_${workspaceHash}`,
+                        projectId: `gemini_${workspaceHash}`,  // Will be updated when server starts
                         clientSource: 'gemini'
                     });
                 }
@@ -89,37 +159,12 @@ class SpecterViewProvider {
             console.log('[SPECTER] Failed to read Gemini config:', e.message);
         }
         
-        // Check Roo Code config
-        try {
-            if (fs.existsSync(rooConfigPath)) {
-                const rooConfig = JSON.parse(fs.readFileSync(rooConfigPath, 'utf8'));
-                const servers = rooConfig.mcpServers || {};
-                
-                // Check for any qwen-coding_roo or roo-specific server
-                const hasRooQwenServer = Object.keys(servers).some(key =>
-                    key.toLowerCase().includes('qwen') && key.toLowerCase().includes('_roo')
-                );
-                
-                if (hasRooQwenServer) {
-                    // Session ID format: {instanceId}_{clientSource}_{workspaceHash}
-                    sessions.push({
-                        id: 'roocode',
-                        name: 'Roo Code',
-                        projectId: `${this._instanceId}_roocode_${workspaceHash}`,
-                        clientSource: 'roocode'
-                    });
-                }
-            }
-        } catch (e) {
-            console.log('[SPECTER] Failed to read Roo config:', e.message);
-        }
-        
         // Fallback: always provide at least one default session
         if (sessions.length === 0) {
             sessions.push({
                 id: 'default',
                 name: 'Default',
-                projectId: `${this._instanceId}_default_${workspaceHash}`,
+                projectId: `default_${workspaceHash}`,  // Will be updated when server starts
                 clientSource: 'default'
             });
         }

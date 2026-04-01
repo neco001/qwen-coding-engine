@@ -20,7 +20,6 @@ from tenacity import (
 
 from .base import BaseDashScopeClient, get_billing_mode
 from .specter.telemetry import get_broadcaster
-from .specter.identity import get_current_project_id
 from .billing import billing_tracker
 
 logger = logging.getLogger(__name__)
@@ -50,12 +49,14 @@ class CompletionHandler(BaseDashScopeClient):
         model_override: Optional[str] = None,
         enable_thinking: Optional[bool] = None,
         max_thinking_tokens: Optional[int] = None,
+        project_id: str = "default",
     ) -> str:
         """Generate common chat completion with financial circuit breakers and retries.
         
         Args:
             enable_thinking: Override thinking mode. None = auto-detect for reasoning models.
             max_thinking_tokens: Limit thinking tokens for deep-thinking models (default: 2048).
+            project_id: Project/session ID for telemetry isolation (format: {instance}_{source}_{hash}).
         """
         request_timeout = timeout or self.default_timeout
         
@@ -97,7 +98,7 @@ class CompletionHandler(BaseDashScopeClient):
                 else self.model_name
             )
             
-            project_id = get_current_project_id()
+            # Use provided project_id (passed from caller with client_source already resolved)
             logger.info(f"Completion Request | Model: {target_model} | Attempt: {attempt+1} | Project: {project_id}")
 
             # Telemetry: Update total tokens in HUD with estimated plan tokens

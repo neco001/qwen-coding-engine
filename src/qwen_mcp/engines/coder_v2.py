@@ -114,11 +114,12 @@ class CoderEngineV2:
     # -------------------------------------------------------------------------
     
     async def execute(
-        self, 
+        self,
         prompt: str,
         mode: str = "auto",
         context: str = "",
-        ctx: Optional[Context] = None
+        ctx: Optional[Context] = None,
+        project_id: str = "default"
     ) -> CoderResponse:
         """
         Execute code generation with specified mode.
@@ -128,6 +129,7 @@ class CoderEngineV2:
             mode: One of 'auto', 'standard', 'pro', 'expert'
             context: Additional context (existing code, requirements, etc.)
             ctx: MCP context for progress reporting
+            project_id: Project/session ID for telemetry isolation (format: {instance}_{source}_{hash})
             
         Returns:
             CoderResponse with generated code and metadata
@@ -201,7 +203,8 @@ class CoderEngineV2:
                 task_type=task_type,
                 complexity=complexity,
                 tags=["coder", mode],
-                progress_callback=ctx.report_progress if ctx else None
+                progress_callback=ctx.report_progress if ctx else None,
+                project_id=project_id
             )
             
             # Validate response

@@ -101,7 +101,7 @@ async def qwen_audit(
         "role_mapping": registry.models,
         "is_live": True
     }, project_id=project_id)
-    return await generate_audit(content, context, ctx, use_swarm=use_swarm)
+    return await generate_audit(content, context, ctx, use_swarm=use_swarm, project_id=project_id)
 
 
 @mcp.tool()
@@ -135,7 +135,7 @@ async def qwen_coder(
         "role_mapping": registry.models,
         "is_live": True
     }, project_id=project_id)
-    return await generate_code_unified(prompt, mode, context, ctx)
+    return await generate_code_unified(prompt, mode, context, ctx, project_id=project_id)
 
 
 @mcp.tool()

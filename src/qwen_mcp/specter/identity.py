@@ -1,6 +1,7 @@
 import os
 import hashlib
 import uuid
+import re
 
 
 def generate_instance_id() -> str:
@@ -63,13 +64,36 @@ def get_or_create_instance_id() -> str:
     return _cached_instance_id
 
 
-def get_current_project_id() -> str:
+def _sanitize_client_source(client_source: str) -> str:
+    """
+    Sanitize client_source to prevent injection and ensure valid format.
+    
+    Only allows alphanumeric, underscore, and hyphen characters.
+    Truncates to 32 characters max.
+    
+    Args:
+        client_source: Raw client source string
+    
+    Returns:
+        Sanitized client source safe for use in project_id
+    """
+    # Remove dangerous characters, keep only safe ones
+    safe_source = re.sub(r'[^a-zA-Z0-9_-]', '', client_source)
+    # Truncate to reasonable length
+    return safe_source[:32] if safe_source else "default"
+
+
+def get_current_project_id(client_source: str = "default") -> str:
     """
     Identifies the unique project ID based on the environment or CWD.
     
     Priority:
     1. QWEN_PROJECT_NAME environment variable (full override)
-    2. Instance ID + workspace hash (auto-generated)
+    2. Instance ID + client_source + workspace hash (auto-generated)
+    
+    Args:
+        client_source: The client source identifier (e.g., 'gemini', 'roocode', 'default')
+                     Will be sanitized to prevent injection attacks.
     
     The display name ("Sesja 1", "Sesja 2") is handled by SessionMapper in telemetry.py.
     """
@@ -78,8 +102,11 @@ def get_current_project_id() -> str:
     if project_name:
         return project_name
     
-    # Auto-generated: {instanceId}_{workspaceHash}
+    # Sanitize client_source for security
+    safe_client_source = _sanitize_client_source(client_source)
+    
+    # Auto-generated: {instanceId}_{clientSource}_{workspaceHash}
     instance_id = get_or_create_instance_id()
     cwd = os.getcwd()
     workspace_hash = _compute_workspace_hash(cwd)
-    return f"{instance_id}_{workspace_hash}"
+    return f"{instance_id}_{safe_client_source}_{workspace_hash}"
