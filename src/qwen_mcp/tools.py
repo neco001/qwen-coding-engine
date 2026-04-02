@@ -13,10 +13,32 @@ from qwen_mcp.specter.telemetry import get_broadcaster
 from qwen_mcp.prompts.system import AUDIT_SYSTEM_PROMPT, CODER_SYSTEM_PROMPT
 from qwen_mcp.prompts.lachman import LP_DISCOVERY_PROMPT, LP_ARCHITECT_PROMPT, LP_VERIFIER_PROMPT
 
-# Sparring mode configuration
-from qwen_mcp.engines.sparring_v2.config import MODE_ALIASES, DEFAULT_SPARRING_MODE
-
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Sparring Mode Configuration (defined here to avoid circular imports)
+# =============================================================================
+
+# Mode aliases: sparring1/2/3 → internal modes
+MODE_ALIASES = {
+    "sparring1": "flash",    # Quick 2-step analysis
+    "sparring2": "full",     # Full session in one call (DEFAULT)
+    "sparring3": "pro",      # Step-by-step with checkpointing
+    # Short aliases
+    "nor": "full",           # "normal" shortcut
+    # Legacy aliases (passthrough)
+    "flash": "flash",
+    "full": "full",
+    "pro": "pro",
+    "discovery": "discovery",
+    "red": "red",
+    "blue": "blue",
+    "white": "white",
+}
+
+# Default sparring level
+DEFAULT_SPARRING_MODE = "sparring2"  # normal/full mode
 
 
 def resolve_sparring_mode(mode: str) -> str:

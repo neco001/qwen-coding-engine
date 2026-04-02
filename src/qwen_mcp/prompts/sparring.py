@@ -2,22 +2,44 @@ from typing import Dict
 
 # --- WAR GAME PROTOCOL v4.0 PROMPTS ---
 
+
 # =============================================================================
 # WORD LIMIT INSTRUCTION (ensures complete responses within timeout)
 # =============================================================================
-# This instruction is appended to all cell prompts to prevent truncated responses.
-# Target: ~800 words per cell step for sparring2 (normal) mode.
-# This ensures streaming completes within 180s timeout.
+# This instruction is appended to cell prompts to prevent truncated responses.
+# For sparring2 (full mode): ~150 words per step = ~35-45s generation time.
+# For sparring3 (pro mode): unlimited - step-by-step with 100s timeout.
 
-WORD_LIMIT_INSTRUCTION = """
+def get_word_limit_instruction(word_count: int = 150) -> str:
+    """
+    Generate word limit instruction for sparring prompts.
+    
+    Args:
+        word_count: Target word count (150 for full mode, higher for pro mode)
+    
+    Returns:
+        Formatted word limit instruction string
+    """
+    return f"""
 ⚠️ KRYTYCZNE: Twoja odpowiedź musi być KOMPLETNA i zwięzła.
 - Nie przerywaj w połowie zdania lub wątku
 - Nie używaj "cd. w następnym..." lub "kontynuacja..."
 - Jeśli brakuje miejsca, zakończ wątek syntetycznie
 - Lepiej krócej ale kompletnie, niż długo ale ucięte
-- Celuj w ~800 słów - to gwarantuje pełną odpowiedź w limicie czasu
+- CELUJ W ~{word_count} SŁÓW - to gwarantuje pełną odpowiedź w limicie czasu
 """
 
+# Default word limits per mode
+WORD_LIMITS = {
+    "full_discovery": 100,   # JSON roles - short
+    "full_red": 150,         # Critique - concise
+    "full_blue": 150,        # Defense - concise
+    "full_white": 200,       # Synthesis - slightly longer
+    "pro": 800,              # Step-by-step mode - unlimited
+}
+
+# Legacy constant for backwards compatibility
+WORD_LIMIT_INSTRUCTION = get_word_limit_instruction(800)
 def get_discovery_prompt(billing_mode: str = "coding_plan") -> str:
     """
     Generate discovery prompt with models available for the current billing mode.

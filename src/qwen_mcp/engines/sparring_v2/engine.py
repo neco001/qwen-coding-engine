@@ -26,11 +26,13 @@ from qwen_mcp.engines.sparring_v2.helpers import (
 )
 from qwen_mcp.prompts.sparring import (
     get_discovery_prompt,
+    get_word_limit_instruction,
+    WORD_LIMITS,
     FLASH_ANALYST_PROMPT,
     FLASH_DRAFTER_PROMPT,
     RED_CELL_PROMPT,
     BLUE_CELL_PROMPT,
-    WHITE_CELL_PROMPT
+    WHITE_CELL_PROMPT,
 )
 from qwen_mcp.tools import extract_json_from_text
 from qwen_mcp.registry import ModelEntitlementRegistry
@@ -92,6 +94,9 @@ class SparringEngineV2:
                 return await self._execute_white(session_id, ctx)
             elif mode == "full":
                 return await self._execute_full(topic, context, ctx)
+            elif mode == "pro":
+                # sparring3: Start step-by-step with discovery
+                return await self._execute_discovery(topic, context, ctx)
             else:
                 return SparringResponse(
                     success=False,
@@ -101,7 +106,7 @@ class SparringEngineV2:
                     next_command=None,
                     result=None,
                     message="Invalid mode",
-                    error=f"Unknown mode: {mode}. Use: flash, discovery, red, blue, white, full"
+                    error=f"Unknown mode: {mode}. Use: flash, discovery, red, blue, white, full, pro"
                 )
         except Exception as e:
             logger.exception(f"Sparring execution failed: {e}")
@@ -183,13 +188,18 @@ class SparringEngineV2:
     # -------------------------------------------------------------------------
     
     async def _execute_discovery(self, topic: str, context: str,
-                                 ctx: Optional[Context]) -> SparringResponse:
+                                 ctx: Optional[Context],
+                                 word_limit: Optional[int] = None) -> SparringResponse:
         """Execute discovery mode: Define roles and create session."""
         await self._report_progress(ctx, 0.0, "[Discovery] Assembling Expert Bench...")
         
         # Get billing mode for model selection
         billing_mode = get_billing_mode()
         discovery_prompt = get_discovery_prompt(billing_mode)
+        
+        # Inject word limit for full mode (shorter responses)
+        if word_limit:
+            discovery_prompt += get_word_limit_instruction(word_limit)
         
         discovery_messages = [
             {"role": "system", "content": discovery_prompt},
@@ -276,7 +286,8 @@ class SparringEngineV2:
     # -------------------------------------------------------------------------
     
     async def _execute_red(self, session_id: Optional[str],
-                          ctx: Optional[Context]) -> SparringResponse:
+                          ctx: Optional[Context],
+                          word_limit: Optional[int] = None) -> SparringResponse:
         """Execute Red Cell critique."""
         # Validate session
         loaded_session = self.session_store.load(session_id) if session_id else None
@@ -290,9 +301,13 @@ class SparringEngineV2:
         
         await self._report_progress(ctx, 0.0, f"[Red Cell] {session.roles.get('red_role', 'Red')} auditing...")
         
-        # Build messages
+        # Build messages with optional word limit
+        red_prompt = RED_CELL_PROMPT
+        if word_limit:
+            red_prompt += get_word_limit_instruction(word_limit)
+        
         red_messages = [
-            {"role": "system", "content": f"Jesteś {session.roles.get('red_role', 'Red Cell')}. Profil: {session.roles.get('red_profile', '')}\n\nZADANIE:\n{RED_CELL_PROMPT}"},
+            {"role": "system", "content": f"Jesteś {session.roles.get('red_role', 'Red Cell')}. Profil: {session.roles.get('red_profile', '')}\n\nZADANIE:\n{red_prompt}"},
             {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}"},
         ]
         
@@ -333,7 +348,8 @@ class SparringEngineV2:
     # -------------------------------------------------------------------------
     
     async def _execute_blue(self, session_id: Optional[str],
-                           ctx: Optional[Context]) -> SparringResponse:
+                           ctx: Optional[Context],
+                           word_limit: Optional[int] = None) -> SparringResponse:
         """Execute Blue Cell defense."""
         # Validate session
         loaded_session = self.session_store.load(session_id) if session_id else None
@@ -356,9 +372,13 @@ class SparringEngineV2:
         
         await self._report_progress(ctx, 0.0, f"[Blue Cell] {session.roles.get('blue_role', 'Blue')} defending...")
         
-        # Build messages
+        # Build messages with optional word limit
+        blue_prompt = BLUE_CELL_PROMPT
+        if word_limit:
+            blue_prompt += get_word_limit_instruction(word_limit)
+        
         blue_messages = [
-            {"role": "system", "content": f"Jesteś {session.roles.get('blue_role', 'Blue Cell')}. Profil: {session.roles.get('blue_profile', '')}\n\nZADANIE:\n{BLUE_CELL_PROMPT}"},
+            {"role": "system", "content": f"Jesteś {session.roles.get('blue_role', 'Blue Cell')}. Profil: {session.roles.get('blue_profile', '')}\n\nZADANIE:\n{blue_prompt}"},
             {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}\n\nRed Critique:\n{red_critique}"},
         ]
         
@@ -399,7 +419,8 @@ class SparringEngineV2:
     
     async def _execute_white(self, session_id: Optional[str],
                             ctx: Optional[Context],
-                            allow_regeneration: bool = True) -> SparringResponse:
+                            allow_regeneration: bool = True,
+                            word_limit: Optional[int] = None) -> SparringResponse:
         """Execute White Cell synthesis with optional regeneration loop."""
         # Validate session
         loaded_session = self.session_store.load(session_id) if session_id else None
@@ -431,12 +452,17 @@ class SparringEngineV2:
         logger.debug(f"[White Cell] loop_count type: {type(loop_count)}, value: {loop_count}")
         logger.debug(f"[White Cell] max_loops type: {type(max_loops)}, value: {max_loops}")
         
+        # Build prompt with optional word limit
+        white_prompt = WHITE_CELL_PROMPT
+        if word_limit:
+            white_prompt += get_word_limit_instruction(word_limit)
+        
         while loop_count < max_loops:
             loop_count += 1
             await self._report_progress(ctx, 0.0, f"[White Cell] {session.roles.get('white_role', 'White')} synthesizing (loop {loop_count})...")
             
             white_messages = [
-                {"role": "system", "content": f"Jesteś {session.roles.get('white_role', 'White Cell')}. Profil: {session.roles.get('white_profile', '')}\n\nZADANIE:\n{WHITE_CELL_PROMPT}"},
+                {"role": "system", "content": f"Jesteś {session.roles.get('white_role', 'White Cell')}. Profil: {session.roles.get('white_profile', '')}\n\nZADANIE:\n{white_prompt}"},
                 {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}\n\nRed Audit:\n{red_critique}\n\nBlue Defense:\n{blue_defense}"},
             ]
             
@@ -515,13 +541,19 @@ class SparringEngineV2:
     
     async def _execute_full(self, topic: str, context: str,
                            ctx: Optional[Context]) -> SparringResponse:
-        """Execute complete sparring session in one call: discovery→red→blue→white."""
+        """Execute complete sparring session in one call: discovery→red→blue→white.
+        
+        Uses shorter word limits (~150 words per step) to ensure completion within
+        MCP 180s timeout. Each step takes ~35-45s with constrained output.
+        """
         session_id = None
         
         try:
-            # Krok 1: Discovery (25%)
+            # Krok 1: Discovery (25%) - 100 words limit (JSON only)
             await self._report_progress(ctx, 25.0, "[Full] 1/4: Discovery - Defining roles...")
-            discovery_result = await self._execute_discovery(topic, context, ctx)
+            discovery_result = await self._execute_discovery(
+                topic, context, ctx, word_limit=WORD_LIMITS["full_discovery"]
+            )
             session_id = discovery_result.session_id
             
             if not session_id:
@@ -536,9 +568,11 @@ class SparringEngineV2:
                     error=discovery_result.error or "No session_id returned"
                 )
             
-            # Krok 2: Red Cell (50%)
+            # Krok 2: Red Cell (50%) - 150 words limit
             await self._report_progress(ctx, 50.0, "[Full] 2/4: Red Cell - Auditing...")
-            red_result = await self._execute_red(session_id, ctx)
+            red_result = await self._execute_red(
+                session_id, ctx, word_limit=WORD_LIMITS["full_red"]
+            )
             
             if not red_result.success:
                 return SparringResponse(
@@ -552,9 +586,11 @@ class SparringEngineV2:
                     error=red_result.error
                 )
             
-            # Krok 3: Blue Cell (75%)
+            # Krok 3: Blue Cell (75%) - 150 words limit
             await self._report_progress(ctx, 75.0, "[Full] 3/4: Blue Cell - Defending...")
-            blue_result = await self._execute_blue(session_id, ctx)
+            blue_result = await self._execute_blue(
+                session_id, ctx, word_limit=WORD_LIMITS["full_blue"]
+            )
             
             if not blue_result.success:
                 return SparringResponse(
@@ -568,9 +604,13 @@ class SparringEngineV2:
                     error=blue_result.error
                 )
             
-            # Krok 4: White Cell (100%) - disable regeneration to avoid MCP 300s timeout
+            # Krok 4: White Cell (100%) - 200 words limit, no regeneration
             await self._report_progress(ctx, 100.0, "[Full] 4/4: White Cell - Synthesizing (no regen)...")
-            white_result = await self._execute_white(session_id, ctx, allow_regeneration=False)
+            white_result = await self._execute_white(
+                session_id, ctx,
+                allow_regeneration=False,
+                word_limit=WORD_LIMITS["full_white"]
+            )
             
             if not white_result.success:
                 return SparringResponse(
