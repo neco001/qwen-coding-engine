@@ -2,7 +2,7 @@
     "name": "specter-qwen-hud",
     "displayName": "SPECTER QWEN HUD",
     "description": "Real-time tactical monitoring for Qwen-MCP",
-    "version": "1.1.5",
+    "version": "1.1.6",
     "publisher": "specter",
     "repository": {
         "type": "git",

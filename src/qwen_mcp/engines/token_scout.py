@@ -20,8 +20,8 @@ logger = logging.getLogger("qwen_mcp.token_scout")
 # Default threshold for decomposition (50K tokens)
 DEFAULT_DECOMPOSITION_THRESHOLD = 50000
 
-# Safety ceiling - maximum tokens we'll ever request
-SAFETY_MAX_TOKENS = 200000
+# Safety ceiling - maximum tokens we'll ever request (buffer below 65536 API limit)
+SAFETY_MAX_TOKENS = 60000
 
 
 class TokenScout:
