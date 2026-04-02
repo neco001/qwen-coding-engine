@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(c:\\Users\\pawel\\.antigravity\\extensions\\qwenlm.qwen-code-vscode-ide-companion-0.14.0-preview.4-win32-x64\\dist\\qwen-cli\\bundled\\qc-helper\\docs\\features/**)"
+    ]
+  },
+  "$version": 3
+}
