@@ -161,7 +161,7 @@ async def qwen_architect(
 
 @mcp.tool()
 async def qwen_sparring(
-    mode: str = "flash",
+    mode: str = "sparring2",  # DEFAULT: normal/full mode (180s timeout)
     topic: str = "",
     context: str = "",
     session_id: str = "",
@@ -170,21 +170,24 @@ async def qwen_sparring(
     """
     Adwersarialna analiza z sesyjnym checkpointingiem.
     
-    MODES:
-    - flash: Szybka analiza + draft (pojedyncze wywołanie, bez sesji)
+    SPARRING LEVELS (use aliases for clarity):
+    - sparring1 (flash): Szybka 2-step analiza (analyst→drafter), 180s timeout
+    - sparring2 (normal): Pełna sesja w jednym wywołaniu, 180s timeout - DEFAULT
+    - sparring3 (pro): Step-by-step z checkpointingiem, 100s/krok
+    
+    STEP-BY-STEP MODES (for sparring3/pro):
     - discovery: Utwórz sesję + zdefiniuj role (zwraca session_id)
     - red: Krytyka Red Cell (wymaga session_id z discovery)
     - blue: Obrona Blue Cell (wymaga session_id + red)
     - white: Synteza White Cell (wymaga session_id + red + blue)
-    - full: Cała sesja (discovery→red→blue→white) w jednym wywołaniu
     
     EXAMPLES:
-    1. qwen_sparring(mode="flash", topic="Czy użyć mikroserwisów?")
-    2. qwen_sparring(mode="discovery", topic="Strategia migracji")
-    3. qwen_sparring(mode="red", session_id="sp_abc123")
-    4. qwen_sparring(mode="blue", session_id="sp_abc123")
-    5. qwen_sparring(mode="white", session_id="sp_abc123")
-    6. qwen_sparring(mode="full", topic="Decyzja architektoniczna")
+    1. qwen_sparring(topic="Czy użyć mikroserwisów?")  # DEFAULT: sparring2
+    2. qwen_sparring(mode="sparring1", topic="Szybka decyzja")
+    3. qwen_sparring(mode="sparring3", topic="Złożona strategia")  # Returns session_id
+    4. qwen_sparring(mode="red", session_id="sp_abc123")
+    5. qwen_sparring(mode="blue", session_id="sp_abc123")
+    6. qwen_sparring(mode="white", session_id="sp_abc123")
     """
     project_id = _get_tool_session_id(ctx, default_source="sparring")
     await get_broadcaster().broadcast_state({

@@ -13,7 +13,38 @@ from qwen_mcp.specter.telemetry import get_broadcaster
 from qwen_mcp.prompts.system import AUDIT_SYSTEM_PROMPT, CODER_SYSTEM_PROMPT
 from qwen_mcp.prompts.lachman import LP_DISCOVERY_PROMPT, LP_ARCHITECT_PROMPT, LP_VERIFIER_PROMPT
 
+# Sparring mode configuration
+from qwen_mcp.engines.sparring_v2.config import MODE_ALIASES, DEFAULT_SPARRING_MODE
+
 logger = logging.getLogger(__name__)
+
+
+def resolve_sparring_mode(mode: str) -> str:
+    """
+    Resolve sparring mode alias to internal mode name.
+    
+    Sparring Levels:
+    - sparring1 (flash): 2 steps (analyst→drafter), 180s total
+    - sparring2 (normal): 4 steps in one call (full), 180s total - DEFAULT
+    - sparring3 (pro): 4 steps separately (step-by-step), 100s per step
+    
+    Args:
+        mode: User-provided mode (sparring1, sparring2, sparring3, flash, full, pro, nor, etc.)
+              Case-insensitive: "SPARRING1", "Sparring1", "sparring1" all work.
+    
+    Returns:
+        Internal mode name (flash, full, pro, discovery, red, blue, white)
+    """
+    # Normalize to lowercase for case-insensitive matching
+    normalized_mode = mode.lower().strip() if mode else ""
+    
+    # Check if mode is in aliases
+    if normalized_mode in MODE_ALIASES:
+        return MODE_ALIASES[normalized_mode]
+    
+    # If not found, return flash as fallback (safest option)
+    logger.warning(f"Unknown sparring mode '{mode}'. Using 'flash' as fallback.")
+    return "flash"
 
 def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
     """Utility to pull JSON blocks from LLM markdown responses."""
@@ -272,26 +303,29 @@ async def get_current_billing_mode() -> str:
 async def generate_sparring(
     topic: str = "",
     context: str = "",
-    mode: str = "flash",
+    mode: str = DEFAULT_SPARRING_MODE,  # Default: sparring2 (normal/full)
     session_id: str = "",
     ctx: Optional[Context] = None
 ) -> str:
     """
     Executes the Sparring Engine v2 with step-by-step execution.
     
-    Modes:
-    - flash: Quick analysis + draft (single call, no session)
+    Sparring Levels (use aliases for clarity):
+    - sparring1 (flash): Quick 2-step analysis (analyst→drafter), 180s timeout
+    - sparring2 (normal): Full session in one call, 180s timeout - DEFAULT
+    - sparring3 (pro): Step-by-step with checkpointing, 100s per step
+    
+    Step-by-step modes (for sparring3/pro):
     - discovery: Create session + define roles (returns session_id)
     - red: Execute Red Cell critique (requires session_id)
     - blue: Execute Blue Cell defense (requires session_id + red critique)
     - white: Execute White Cell synthesis (requires session_id + red + blue)
-    - full: Execute entire session (discovery→red→blue→white) in one call with progress reporting
     
     Args:
-        topic: The topic to analyze (required for flash/discovery/full)
+        topic: The topic to analyze (required for sparring1/2/3/discovery)
         context: Additional context (optional)
-        mode: One of: flash, discovery, red, blue, white, full
-        session_id: Session ID for red/blue/white modes (required for non-flash modes)
+        mode: Sparring level (sparring1, sparring2, sparring3) or step mode (discovery, red, blue, white)
+        session_id: Session ID for step modes (required for red/blue/white)
     
     Returns:
         Markdown-formatted response with guided UX hints
@@ -301,12 +335,15 @@ async def generate_sparring(
     client = DashScopeClient()
     engine = SparringEngineV2(client)
     
+    # Resolve mode alias (sparring1→flash, sparring2→full, sparring3→pro)
+    resolved_mode = resolve_sparring_mode(mode)
+    
     # Handle session_id parameter
-    if mode != "flash" and not session_id:
+    if resolved_mode not in ["flash", "full"] and not session_id:
         session_id = None
     
     response = await engine.execute(
-        mode=mode,
+        mode=resolved_mode,
         topic=topic or None,
         context=context or None,
         session_id=session_id or None,

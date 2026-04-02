@@ -2,6 +2,22 @@ from typing import Dict
 
 # --- WAR GAME PROTOCOL v4.0 PROMPTS ---
 
+# =============================================================================
+# WORD LIMIT INSTRUCTION (ensures complete responses within timeout)
+# =============================================================================
+# This instruction is appended to all cell prompts to prevent truncated responses.
+# Target: ~800 words per cell step for sparring2 (normal) mode.
+# This ensures streaming completes within 180s timeout.
+
+WORD_LIMIT_INSTRUCTION = """
+⚠️ KRYTYCZNE: Twoja odpowiedź musi być KOMPLETNA i zwięzła.
+- Nie przerywaj w połowie zdania lub wątku
+- Nie używaj "cd. w następnym..." lub "kontynuacja..."
+- Jeśli brakuje miejsca, zakończ wątek syntetycznie
+- Lepiej krócej ale kompletnie, niż długo ale ucięte
+- Celuj w ~800 słów - to gwarantuje pełną odpowiedź w limicie czasu
+"""
+
 def get_discovery_prompt(billing_mode: str = "coding_plan") -> str:
     """
     Generate discovery prompt with models available for the current billing mode.
