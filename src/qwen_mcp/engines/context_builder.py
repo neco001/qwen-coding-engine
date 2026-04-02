@@ -1,5 +1,5 @@
 """
-Context Builder Engine - Generates project context files using Swarm analysis.
+Context Builder Engine - Generates project context files using parallel worker pool.
 
 This engine creates and maintains:
 - .context/_PROJECT_CONTEXT.md: Tech stack, structure, conventions
@@ -7,11 +7,13 @@ This engine creates and maintains:
 - .context/_SESSION_SUPPLEMENT.md: Session history and recommendations
 
 Features:
-- Scout analysis for complexity-based Swarm routing
+- ParallelContextBuilder with worker pool (max 4 workers MCP-safe)
+- Token-based file chunking (estimate before process)
+- Checkpoint state machine with atomic JSON writes
+- Progressive result streaming
+- Timeout handling and resume capability
 - Atomic file writes (temp + rename pattern)
 - Session continuity tracking
-- Parallel execution for PROJECT/DATA context generation
-- Automatic chunking for large files (>50K tokens)
 """
 
 import os
@@ -19,6 +21,7 @@ import logging
 import tempfile
 import asyncio
 import fnmatch
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Any, List, Set
 
@@ -29,6 +32,7 @@ from qwen_mcp.prompts.context import (
     SESSION_SUPPLEMENT_SYSTEM_PROMPT,
 )
 from qwen_mcp.engines.token_validator import estimate_tokens_heuristic
+from context_builder import ParallelContextBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -121,16 +125,19 @@ def _should_exclude(filepath: Path, gitignore_patterns: Set[str]) -> bool:
     path_parts = filepath.parts
     
     for pattern in gitignore_patterns:
-        # Check if any path component matches (for directory patterns like .venv/)
-        if pattern.endswith("/"):
-            dir_pattern = pattern.rstrip("/")
-            if dir_pattern in path_parts:
-                return True
-        # Check if path matches the pattern (for file patterns)
-        if fnmatch.fnmatch(path_str, pattern):
+        # Normalize pattern (remove trailing slashes for consistent handling)
+        clean_pattern = pattern.rstrip("/")
+        
+        # Check if any path component matches directory patterns (e.g., .venv, __pycache__)
+        if clean_pattern in path_parts:
             return True
-        # Check if filename matches (for patterns like *.pyc)
-        if fnmatch.fnmatch(filepath.name, pattern):
+        
+        # Check if full path matches the pattern (for patterns like *.egg-info)
+        if fnmatch.fnmatch(path_str, clean_pattern):
+            return True
+        
+        # Check if filename matches (for patterns like *.pyc, debug_*.txt)
+        if fnmatch.fnmatch(filepath.name, clean_pattern):
             return True
     
     return False
@@ -167,13 +174,14 @@ class ContextBuilderEngine:
         workspace_root: str = "."
     ) -> Tuple[str, str]:
         """
-        Generate _PROJECT_CONTEXT.md and _DATA_CONTEXT.md.
+        Generate _PROJECT_CONTEXT.md and _DATA_CONTEXT.md using ParallelContextBuilder.
         
-        NOTE: Scout analysis is SKIPPED for context generation to avoid timeout.
-        Uses heuristic complexity based on file count instead.
-        
-        EXECUTION: PROJECT and DATA contexts are generated in PARALLEL.
-        Large files (>50K tokens) are automatically chunked.
+        NEW: Uses parallel worker pool with token-based chunking and checkpointing.
+        - Max 4 concurrent workers (MCP-safe)
+        - Token-based file chunking (estimate before process)
+        - Checkpoint state machine with atomic JSON writes
+        - Progressive result streaming
+        - Timeout handling and resume capability
         
         Returns:
             Tuple of (project_context_content, data_context_content)
@@ -181,12 +189,103 @@ class ContextBuilderEngine:
         # Ensure context directory exists
         self.context_dir.mkdir(exist_ok=True, parents=True)
         
-        # SKIP ScoutEngine - it causes timeout on API call
-        # Use heuristic complexity based on scanned files
+        # Create analysis handler for LLM-based chunk analysis
+        async def analyze_chunk(chunk: Dict) -> str:
+            """Analyze a code chunk using LLM."""
+            from qwen_mcp.prompts.context import PROJECT_CONTEXT_SYSTEM_PROMPT
+            
+            content = chunk.get("content", "")
+            if not content or len(content.strip()) < 10:
+                return "[No meaningful content]"
+            
+            # Use Scout for fast analysis
+            prompt = f"""Analyze this code snippet and extract key information for project context:
+
+File: {chunk.get('path', 'unknown')}
+Lines: {chunk.get('start_line', 0)}-{chunk.get('end_line', 0)}
+
+Code:
+{content[:4000]}  # Truncate to avoid token limits
+
+Return a concise summary (max 100 words) covering:
+- Purpose/functionality
+- Key dependencies/imports
+- Classes/functions defined
+- Role in the project"""
+            
+            try:
+                if self.client:
+                    response = await self.client.generate_completion(
+                        messages=[
+                            {"role": "system", "content": "You are a code analyst. Provide concise, technical summaries."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        task_type="context_analysis",
+                        complexity="low",
+                        tags=["chunk_analysis"]
+                    )
+                    return response.get("content", "[Analysis unavailable]")[:500]
+                return "[No LLM client available]"
+            except Exception as e:
+                logger.warning(f"Chunk analysis failed: {e}")
+                return f"[Analysis error: {str(e)[:100]}]"
+        
+        # Use ParallelContextBuilder for parallel file processing with LLM analysis
+        parallel_builder = ParallelContextBuilder(
+            max_workers=4,
+            chunk_size_tokens=1000,
+            checkpoint_file=str(self.context_dir / ".parallel_checkpoint.json"),
+            timeout_seconds=240,  # 4 minutes - under MCP 300s limit
+            analysis_handler=analyze_chunk
+        )
+        
+        # Scan files
         scanned_files = self._scan_project_files(workspace_root)
         file_count = len(scanned_files)
         
-        # Heuristic: more files = higher complexity
+        logger.info(f"Context generation: {file_count} files using parallel builder")
+        
+        # Get file paths for parallel processing
+        file_paths = [str(Path(workspace_root) / k) for k in scanned_files.keys() if k != "_directory_structure"]
+        
+        # Process files in parallel with checkpointing
+        async def stream_callback(result):
+            logger.info(f"Progress: {result.get('progress', 0):.1%} - {result.get('chunk_id', 'unknown')}")
+        
+        try:
+            chunk_results = await parallel_builder.build_context(
+                file_paths,
+                stream_callback=stream_callback
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Parallel processing timed out, falling back to sequential generation")
+            # Fallback to original sequential generation
+            return await self._generate_sequential_context(workspace_root)
+        
+        # Aggregate chunk results into project context
+        project_context = self._aggregate_chunk_results(chunk_results, "project")
+        
+        # Generate data context separately (smaller scope)
+        data_scanned = self._scan_data_files(workspace_root)
+        if data_scanned:
+            data_paths = [str(Path(workspace_root) / k) for k in data_scanned.keys()]
+            try:
+                data_results = await parallel_builder.build_context(data_paths)
+                data_context = self._aggregate_chunk_results(data_results, "data")
+            except Exception:
+                data_context = "# Data Context\n\nNo data files found or processing failed."
+        else:
+            data_context = "# Data Context\n\nNo data files detected in workspace."
+        
+        return project_context, data_context
+    
+    async def _generate_sequential_context(
+        self,
+        workspace_root: str = "."
+    ) -> Tuple[str, str]:
+        """Fallback sequential generation using original method."""
+        file_count = len(self._scan_project_files(workspace_root))
+        
         if file_count > 20:
             complexity = "high"
         elif file_count > 10:
@@ -194,9 +293,6 @@ class ContextBuilderEngine:
         else:
             complexity = "low"
         
-        logger.info(f"Context generation: {file_count} files, complexity={complexity}")
-        
-        # Generate both contexts in PARALLEL for speed
         project_context, data_context = await asyncio.gather(
             self._generate_single_context(workspace_root, "project", complexity),
             self._generate_single_context(workspace_root, "data", complexity),
@@ -204,6 +300,52 @@ class ContextBuilderEngine:
         )
         
         return project_context, data_context
+    
+    def _aggregate_chunk_results(self, chunk_results: List[Dict], context_type: str) -> str:
+        """Aggregate chunk results into context file content with LLM analysis."""
+        if not chunk_results:
+            return f"# {context_type.title()} Context\n\nNo content generated."
+        
+        # Group results by file
+        by_file: Dict[str, List[Dict]] = {}
+        for result in chunk_results:
+            if isinstance(result, dict) and "path" in result:
+                path = result["path"]
+                if path not in by_file:
+                    by_file[path] = []
+                by_file[path].append(result)
+        
+        # Build aggregated content with analysis
+        lines = [f"# {context_type.title()} Context\n"]
+        lines.append(f"Generated: {datetime.now().isoformat()}\n")
+        lines.append(f"Files processed: {len(by_file)}\n")
+        lines.append("---\n\n")
+        
+        for file_path, chunks in by_file.items():
+            file_name = Path(file_path).name
+            lines.append(f"## {file_name}\n")
+            
+            # Combine all analyses for this file
+            analyses = []
+            for chunk in sorted(chunks, key=lambda c: c.get("lines", "0-0")):
+                analysis = chunk.get("analysis", "")
+                if analysis and not analysis.startswith("["):
+                    analyses.append(analysis.strip())
+            
+            if analyses:
+                # Merge and deduplicate analyses
+                merged_analysis = "\n\n".join(analyses)
+                lines.append(f"**Analysis:**\n{merged_analysis}\n\n")
+            else:
+                # Fallback to basic info if no analysis
+                lines.append("**Structure:**\n")
+                for chunk in sorted(chunks, key=lambda c: c.get("lines", "0-0")):
+                    lines.append(f"- Lines {chunk.get('lines', 'N/A')}: {chunk.get('tokens', 0)} tokens")
+                lines.append("\n")
+            
+            lines.append("\n")
+        
+        return "\n".join(lines)
     
     def _build_context_swarm_prompt(self, workspace_root: str) -> str:
         """Build the swarm decomposition prompt for context analysis."""
@@ -233,8 +375,8 @@ Output should be structured for two files:
         root = Path(workspace_root)
         scanned = {}
         
-        # Directories to exclude (dependencies, virtual environments, etc.)
-        EXCLUDE_DIRS = {".venv", "venv", "node_modules", "__pycache__", ".git", ".tox", "dist", "build", "eggs"}
+        # Load .gitignore patterns for exclusion
+        gitignore_patterns = _load_gitignore_patterns(workspace_root)
         
         # Scan specific files
         for filename in PROJECT_SCAN_FILES:
@@ -251,15 +393,15 @@ Output should be structured for two files:
                 # Find key files in this directory
                 for pattern in ["*.py", "*.ts", "*.js", "*.go", "*.rs"]:
                     for filepath in dirpath.glob(pattern):
-                        # Skip files in excluded directories
-                        if any(exclude in filepath.parts for exclude in EXCLUDE_DIRS):
+                        rel_path = filepath.relative_to(root)
+                        # Skip files matching .gitignore patterns
+                        if _should_exclude(rel_path, gitignore_patterns):
                             continue
                         # Only include entry-point-like files
                         name = filepath.name.lower()
                         if any(kw in name for kw in ["main", "server", "app", "init", "index", "entry", "cli", "api", "tools", "registry", "base", "engine", "orchestrator"]):
                             content = self._read_file_safe(filepath)
                             if content:
-                                rel_path = filepath.relative_to(root)
                                 scanned[str(rel_path)] = content
         
         # Get directory structure
@@ -278,16 +420,16 @@ Output should be structured for two files:
         root = Path(workspace_root)
         scanned = {}
         
-        # Directories to exclude (dependencies, virtual environments, etc.)
-        EXCLUDE_DIRS = {".venv", "venv", "node_modules", "__pycache__", ".git", ".tox", "dist", "build", "eggs"}
+        # Load .gitignore patterns for exclusion
+        gitignore_patterns = _load_gitignore_patterns(workspace_root)
         
         # Check for database files (don't read content, just note existence)
         for pattern in DATA_SCAN_FILES:
             for filepath in root.glob(f"**/{pattern}"):
-                # Skip files in excluded directories
-                if any(exclude in filepath.parts for exclude in EXCLUDE_DIRS):
-                    continue
                 rel_path = filepath.relative_to(root)
+                # Skip files matching .gitignore patterns
+                if _should_exclude(rel_path, gitignore_patterns):
+                    continue
                 size = filepath.stat().st_size if filepath.exists() else 0
                 scanned[str(rel_path)] = f"[{filepath.suffix} file, {size} bytes]"
         

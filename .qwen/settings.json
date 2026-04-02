@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Read(c:\\Users\\pawel\\.antigravity\\extensions\\qwenlm.qwen-code-vscode-ide-companion-0.14.0-preview.4-win32-x64\\dist\\qwen-cli\\bundled\\qc-helper\\docs\\features/**)"
+      "Read(c:\\Users\\pawel\\.antigravity\\extensions\\qwenlm.qwen-code-vscode-ide-companion-0.14.0-preview.4-win32-x64\\dist\\qwen-cli\\bundled\\qc-helper\\docs\\features/**)",
+      "Bash(code *)",
+      "Bash(findstr *)",
+      "Bash(npx *)",
+      "Bash(powershell *)",
+      "Bash(tar *)",
+      "Bash(dir *)",
+      "Read(c:\\Users\\pawel\\.vscode\\extensions\\specter.specter-qwen-hud-1.1.6/**)",
+      "Read(c:\\Users\\pawel\\.vscode\\extensions\\specter.specter-qwen-hud-1.1.6\\dist\\assets/**)",
+      "Read(c:\\Users\\pawel\\.vscode\\extensions\\specter.specter-qwen-hud-1.1.6\\dist/**)"
     ]
   },
   "$version": 3
