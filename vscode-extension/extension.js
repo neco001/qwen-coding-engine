@@ -66,55 +66,32 @@ class SpecterViewProvider {
     constructor(extensionUri, instanceId) {
         this._extensionUri = extensionUri;
         this._instanceId = instanceId;  // P3-2 FIX: Store instance ID for session generation
+        this._sessions = null;  // P3-9 FIX: Cache sessions to avoid async issues
         console.log(`[SPECTER] Provider initialized with instanceId: ${instanceId}`);
+        
+        // P3-10 FIX: Pre-detect sessions synchronously at construction time
+        this._sessions = this._detectMcpSessionsSync();
     }
 
-    resolveWebviewView(webviewView) {
-        webviewView.webview.options = {
-            enableScripts: true,
-            localResourceRoots: [this._extensionUri]
-        };
-
-        try {
-            webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
-            
-            // Set up message handling for session updates
-            webviewView.webview.onDidReceiveMessage(async (message) => {
-                if (message.type === 'getSessionConfig') {
-                    const sessions = await this._detectMcpSessions();
-                    webviewView.webview.postMessage({
-                        type: 'sessionConfig',
-                        sessions: sessions
-                    });
-                }
-            });
-        } catch (e) {
-            webviewView.webview.html = `<html><body><pre>FAILED TO LOAD HUD: ${e.message}</pre></body></html>`;
-        }
-    }
-
-    async _detectMcpSessions() {
-        // P3-3 FIX: Generate session IDs using local instanceId
-        // Format: {instanceId}_{clientSource}_{workspaceHash}
+    _detectMcpSessionsSync() {
+        // P3-11 FIX: Synchronous version for use in HTML generation
         const sessions = [];
         const workspaceName = vscode.workspace.workspaceFolders?.[0]?.name || 'default';
         const workspaceHash = this._hashWorkspace(workspaceName);
         const userHome = process.env.USERPROFILE || process.env.HOME || os.homedir();
 
-        console.log(`[SPECTER] Detecting MCP sessions for instance: ${this._instanceId}`);
+        console.log(`[SPECTER] Detecting MCP sessions (sync) for instance: ${this._instanceId}`);
 
         // Path to Roo Code MCP settings
         const rooConfigPath = path.join(userHome, 'AppData/Roaming/Antigravity/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json');
         // Path to Gemini/Antigravity MCP config
         const geminiConfigPath = path.join(userHome, '.gemini/antigravity/mcp_config.json');
 
-        // Check Roo Code config first (more likely to be active)
+        // Check Roo Code config first
         try {
             if (fs.existsSync(rooConfigPath)) {
                 const rooConfig = JSON.parse(fs.readFileSync(rooConfigPath, 'utf8'));
                 const servers = rooConfig.mcpServers || {};
-
-                // Check for any qwen-coding_roo or roo-specific server
                 const hasRooQwenServer = Object.keys(servers).some(key =>
                     key.toLowerCase().includes('qwen') && key.toLowerCase().includes('_roo')
                 );
@@ -139,8 +116,6 @@ class SpecterViewProvider {
             if (fs.existsSync(geminiConfigPath)) {
                 const geminiConfig = JSON.parse(fs.readFileSync(geminiConfigPath, 'utf8'));
                 const servers = geminiConfig.mcpServers || {};
-
-                // Check for any qwen-coding server in Gemini config
                 const hasQwenServer = Object.keys(servers).some(key =>
                     key.toLowerCase().includes('qwen') && !key.toLowerCase().includes('_roo')
                 );
@@ -160,7 +135,7 @@ class SpecterViewProvider {
             console.log('[SPECTER] Failed to read Gemini config:', e.message);
         }
 
-        // Fallback: always provide at least one default session
+        // Fallback
         if (sessions.length === 0) {
             const projectId = `${this._instanceId}_default_${workspaceHash}`;
             console.log(`[SPECTER] No MCP config found, using default session: ${projectId}`);
@@ -174,6 +149,30 @@ class SpecterViewProvider {
 
         console.log(`[SPECTER] Detected ${sessions.length} session(s):`, sessions.map(s => s.id).join(', '));
         return sessions;
+    }
+
+    resolveWebviewView(webviewView) {
+        webviewView.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [this._extensionUri]
+        };
+
+        try {
+            webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
+            
+            // Set up message handling for session updates
+            webviewView.webview.onDidReceiveMessage(async (message) => {
+                if (message.type === 'getSessionConfig') {
+                    const sessions = await this._detectMcpSessions();
+                    webviewView.webview.postMessage({
+                        type: 'sessionConfig',
+                        sessions: sessions
+                    });
+                }
+            });
+        } catch (e) {
+            webviewView.webview.html = `<html><body><pre>FAILED TO LOAD HUD: ${e.message}</pre></body></html>`;
+        }
     }
 
     _hashWorkspace(input) {
@@ -207,9 +206,11 @@ class SpecterViewProvider {
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(assetsUri, jsFile));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(assetsUri, cssFile));
 
-        // Get detected sessions
-        const sessions = this._detectMcpSessions();
-        const sessionsJson = JSON.stringify(sessions).replace(/"/g, '"');
+        // P3-12 FIX: Use cached sessions (computed synchronously in constructor)
+        const sessions = this._sessions || [];
+        const sessionsJson = JSON.stringify(sessions);
+
+        console.log(`[SPECTER] Injecting sessions into HTML: ${sessionsJson}`);
 
         return `<!DOCTYPE html>
             <html lang="en">
@@ -220,6 +221,7 @@ class SpecterViewProvider {
                 <link href="${styleUri}" rel="stylesheet">
                 <title>Specter Cockpit</title>
                 <script>
+                    console.log('[HUD] Setting INITIAL_SESSIONS:', ${sessionsJson});
                     window.INITIAL_SESSIONS = ${sessionsJson};
                 </script>
                 <style>

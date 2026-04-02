@@ -71,14 +71,14 @@ class ApprovalHandler {
         // If this is the last attempt, throw the error
         if (attempt === this.maxRetries) {
           console.error(`Batch approval failed after ${this.maxRetries + 1} attempts:`, error);
-          
+
           // Create failure results for all changes
           const failureResults = request.changes.map(change => ({
             changeId: change.id,
-            status: 'failed',
+            status: 'failed' as 'failed',
             message: error instanceof Error ? error.message : 'Unknown error occurred'
           }));
-          
+
           return {
             success: false,
             results: failureResults

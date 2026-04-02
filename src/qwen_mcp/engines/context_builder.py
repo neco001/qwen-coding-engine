@@ -174,14 +174,10 @@ class ContextBuilderEngine:
         workspace_root: str = "."
     ) -> Tuple[str, str]:
         """
-        Generate _PROJECT_CONTEXT.md and _DATA_CONTEXT.md using ParallelContextBuilder.
+        Generate _PROJECT_CONTEXT.md and _DATA_CONTEXT.md.
         
-        NEW: Uses parallel worker pool with token-based chunking and checkpointing.
-        - Max 4 concurrent workers (MCP-safe)
-        - Token-based file chunking (estimate before process)
-        - Checkpoint state machine with atomic JSON writes
-        - Progressive result streaming
-        - Timeout handling and resume capability
+        OPTIMIZED: Uses existing _PROJECT_CONTEXT.md if available, otherwise generates
+        using static analysis only (NO LLM calls per chunk - too slow for large projects).
         
         Returns:
             Tuple of (project_context_content, data_context_content)
@@ -189,95 +185,54 @@ class ContextBuilderEngine:
         # Ensure context directory exists
         self.context_dir.mkdir(exist_ok=True, parents=True)
         
-        # Create analysis handler for LLM-based chunk analysis
-        async def analyze_chunk(chunk: Dict) -> str:
-            """Analyze a code chunk using LLM."""
-            from qwen_mcp.prompts.context import PROJECT_CONTEXT_SYSTEM_PROMPT
-            
-            content = chunk.get("content", "")
-            if not content or len(content.strip()) < 10:
-                return "[No meaningful content]"
-            
-            # Use Scout for fast analysis
-            prompt = f"""Analyze this code snippet and extract key information for project context:
-
-File: {chunk.get('path', 'unknown')}
-Lines: {chunk.get('start_line', 0)}-{chunk.get('end_line', 0)}
-
-Code:
-{content[:4000]}  # Truncate to avoid token limits
-
-Return a concise summary (max 100 words) covering:
-- Purpose/functionality
-- Key dependencies/imports
-- Classes/functions defined
-- Role in the project"""
-            
-            try:
-                if self.client:
-                    response = await self.client.generate_completion(
-                        messages=[
-                            {"role": "system", "content": "You are a code analyst. Provide concise, technical summaries."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        task_type="context_analysis",
-                        complexity="low",
-                        tags=["chunk_analysis"]
-                    )
-                    return response.get("content", "[Analysis unavailable]")[:500]
-                return "[No LLM client available]"
-            except Exception as e:
-                logger.warning(f"Chunk analysis failed: {e}")
-                return f"[Analysis error: {str(e)[:100]}]"
+        # OPTIMIZATION: Check if _PROJECT_CONTEXT.md exists at root - use it directly
+        root_project_context = Path(workspace_root) / "_PROJECT_CONTEXT.md"
+        if root_project_context.exists():
+            logger.info("Using existing _PROJECT_CONTEXT.md from project root")
+            project_context = root_project_context.read_text(encoding="utf-8")
+        else:
+            # Generate using static analysis only (no LLM)
+            project_context = await self._generate_static_project_context(workspace_root)
         
-        # Use ParallelContextBuilder for parallel file processing with LLM analysis
-        parallel_builder = ParallelContextBuilder(
-            max_workers=4,
-            chunk_size_tokens=1000,
-            checkpoint_file=str(self.context_dir / ".parallel_checkpoint.json"),
-            timeout_seconds=240,  # 4 minutes - under MCP 300s limit
-            analysis_handler=analyze_chunk
-        )
+        # Generate data context using static analysis
+        data_context = self._generate_static_data_context(workspace_root)
         
-        # Scan files
+        return project_context, data_context
+    
+    async def _generate_static_project_context(self, workspace_root: str = ".") -> str:
+        """Generate project context using static analysis only (no LLM calls)."""
         scanned_files = self._scan_project_files(workspace_root)
         file_count = len(scanned_files)
         
-        logger.info(f"Context generation: {file_count} files using parallel builder")
+        lines = ["# Project Context\n"]
+        lines.append(f"Generated: {datetime.now().isoformat()}\n")
+        lines.append(f"Files analyzed: {file_count}\n")
+        lines.append("---\n\n")
         
-        # Get file paths for parallel processing
-        file_paths = [str(Path(workspace_root) / k) for k in scanned_files.keys() if k != "_directory_structure"]
+        for filename, content in scanned_files.items():
+            if filename == "_directory_structure":
+                lines.append(f"## Directory Structure\n```\n{content}\n```\n")
+            else:
+                lines.append(f"## {filename}\n```\n{content[:2000]}...\n```\n")
         
-        # Process files in parallel with checkpointing
-        async def stream_callback(result):
-            logger.info(f"Progress: {result.get('progress', 0):.1%} - {result.get('chunk_id', 'unknown')}")
-        
-        try:
-            chunk_results = await parallel_builder.build_context(
-                file_paths,
-                stream_callback=stream_callback
-            )
-        except asyncio.TimeoutError:
-            logger.warning("Parallel processing timed out, falling back to sequential generation")
-            # Fallback to original sequential generation
-            return await self._generate_sequential_context(workspace_root)
-        
-        # Aggregate chunk results into project context
-        project_context = self._aggregate_chunk_results(chunk_results, "project")
-        
-        # Generate data context separately (smaller scope)
+        return "\n".join(lines)
+    
+    def _generate_static_data_context(self, workspace_root: str = ".") -> str:
+        """Generate data context using static analysis only (no LLM calls)."""
         data_scanned = self._scan_data_files(workspace_root)
-        if data_scanned:
-            data_paths = [str(Path(workspace_root) / k) for k in data_scanned.keys()]
-            try:
-                data_results = await parallel_builder.build_context(data_paths)
-                data_context = self._aggregate_chunk_results(data_results, "data")
-            except Exception:
-                data_context = "# Data Context\n\nNo data files found or processing failed."
-        else:
-            data_context = "# Data Context\n\nNo data files detected in workspace."
         
-        return project_context, data_context
+        if not data_scanned:
+            return "# Data Context\n\nNo data files detected in workspace."
+        
+        lines = ["# Data Context\n"]
+        lines.append(f"Generated: {datetime.now().isoformat()}\n")
+        lines.append(f"Data files found: {len(data_scanned)}\n")
+        lines.append("---\n\n")
+        
+        for filename, content in data_scanned.items():
+            lines.append(f"## {filename}\n{content}\n")
+        
+        return "\n".join(lines)
     
     async def _generate_sequential_context(
         self,
