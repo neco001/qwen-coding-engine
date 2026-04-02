@@ -60,17 +60,27 @@ class CompletionHandler(BaseDashScopeClient):
         """
         request_timeout = timeout or self.default_timeout
         
-        # Dynamic max_tokens based on complexity (controls response length & time)
+        # TokenScout: Dynamic max_tokens based on prompt analysis
+        # Replaces hardcoded complexity-based limits
+        from qwen_mcp.engines.token_scout import TokenScout, SAFETY_MAX_TOKENS
+        
+        scout = TokenScout()
+        
         if max_tokens:
+            # Explicit override - use it
             force_max_tokens = max_tokens
-        elif complexity == "critical":
-            force_max_tokens = 6144  # Deep architecture/multi-file (Strategic mid-point)
-        elif complexity == "high":
-            force_max_tokens = 4096  # Standard features
-        elif complexity == "medium":
-            force_max_tokens = 2048  # Quick fixes
-        else:  # low/auto
-            force_max_tokens = 1024   # Fast, focused responses
+        else:
+            # Extract prompt from messages for estimation
+            prompt_text = ""
+            for msg in messages:
+                if msg.get("role") == "user" and "content" in msg:
+                    prompt_text += msg["content"] + "\n"
+            
+            # Use TokenScout to estimate output tokens
+            estimation = scout.estimate_output_tokens(prompt_text)
+            force_max_tokens = scout.get_max_tokens(estimation["estimated_tokens"])
+            
+            logger.info(f"TokenScout estimate: {estimation['estimated_tokens']} tokens → max_tokens={force_max_tokens} (confidence: {estimation['confidence']})")
 
         # Check circuit breaker
         try:

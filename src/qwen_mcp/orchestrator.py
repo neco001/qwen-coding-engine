@@ -7,6 +7,8 @@ from typing import List, Optional, Dict
 from pydantic import BaseModel, Field, field_validator
 from qwen_mcp.prompts.swarm import DECOMPOSE_SYSTEM_PROMPT, SYNTHESIZE_SYSTEM_PROMPT
 from qwen_mcp.io_utils import resolve_context_keys
+from qwen_mcp.engines.recursive_decomposer import RecursiveDecomposer, DEFAULT_DECOMPOSITION_THRESHOLD
+from qwen_mcp.engines.token_scout import SAFETY_MAX_TOKENS
 
 logger = logging.getLogger("qwen_mcp.swarm")
 
@@ -32,9 +34,10 @@ class SwarmResult(BaseModel):
 
 
 class SwarmOrchestrator:
-    def __init__(self, completion_handler, max_concurrent_tasks: int = 5):
+    def __init__(self, completion_handler, max_concurrent_tasks: int = 5, decomposition_threshold: int = DEFAULT_DECOMPOSITION_THRESHOLD):
         self.completion_handler = completion_handler
         self._semaphore = asyncio.Semaphore(max_concurrent_tasks)
+        self.decomposer = RecursiveDecomposer(threshold=decomposition_threshold)
 
     async def execute_subtasks(self, sub_tasks: List[SubTask]) -> Dict[str, str]:
         """
@@ -88,15 +91,22 @@ class SwarmOrchestrator:
             result = await self.completion_handler.generate_completion(messages)
             return result
 
-    async def decompose(self, prompt: str) -> SwarmResult:
+    async def decompose(self, prompt: str, complexity: str = None) -> SwarmResult:
         """
         Decomposes a complex user prompt into atomic sub-tasks using the model.
+        
+        Args:
+            prompt: The user prompt to decompose
+            complexity: Complexity level (low, medium, high, critical) - affects max_tokens
         """
         messages = [
             {"role": "system", "content": DECOMPOSE_SYSTEM_PROMPT},
             {"role": "user", "content": prompt}
         ]
-        response_text = await self.completion_handler.generate_completion(messages)
+        response_text = await self.completion_handler.generate_completion(
+            messages,
+            complexity=complexity or "medium"
+        )
         
         # Robust JSON extraction using regex
         clean_json = response_text.strip()
@@ -140,9 +150,14 @@ class SwarmOrchestrator:
                 estimated_total_tokens=100
             )
 
-    async def synthesize(self, original_prompt: str, subtask_results: Dict[str, str]) -> str:
+    async def synthesize(self, original_prompt: str, subtask_results: Dict[str, str], complexity: str = None) -> str:
         """
         Synthesizes the final response by combining the original prompt and subtask results.
+        
+        Args:
+            original_prompt: The original user prompt
+            subtask_results: Dict mapping task_id to result string
+            complexity: Complexity level (low, medium, high, critical) - affects max_tokens
         """
         if not subtask_results:
             logger.warning("Synthesis called with empty subtask results")
@@ -164,28 +179,55 @@ class SwarmOrchestrator:
 
         logger.info(f"Synthesizing results from {valid_results} valid sub-tasks")
         
+        # TokenScout handles max_tokens estimation - no hardcoded complexity limits
+        # Synthesis output size is estimated from input size
         messages = [
             {"role": "system", "content": SYNTHESIZE_SYSTEM_PROMPT},
             {"role": "user", "content": synthesis_input}
         ]
-        final_response = await self.completion_handler.generate_completion(messages)
+        final_response = await self.completion_handler.generate_completion(
+            messages
+        )
         
         return final_response
 
-    async def run_swarm(self, prompt: str, task_type: str = "general") -> str:
+    async def run_swarm(self, prompt: str, task_type: str = "general", complexity: str = None) -> str:
         """
         High-level entry point: Decompose -> Parallel Execute -> Synthesize.
+        
+        Uses RecursiveDecomposer for pre-flight token estimation:
+        - If estimated output > threshold (50K), decompose into atomic subtasks
+        - Recursively check each subtask until all fit within budget
+        - Depth limit of 3 prevents infinite recursion
+        
+        Args:
+            prompt: The user prompt to process
+            task_type: Type hint for decomposition (e.g., "coding", "audit", "general")
+            complexity: DEPRECATED - TokenScout now handles max_tokens estimation
         """
         logger.info(f"Starting Swarm for prompt: {prompt[:50]}... (Task Type: {task_type})")
         
-        # 1. Decompose
+        # 0. Pre-flight analysis with RecursiveDecomposer
+        decomposition_plan = self.decomposer.create_plan(prompt)
+        estimated_tokens = decomposition_plan["total_estimated_tokens"]
+        needs_decomposition = decomposition_plan.get("depth_exceeded", False) or estimated_tokens > self.decomposer.threshold
+        
+        logger.info(f"TokenScout estimate: {estimated_tokens} tokens, needs_decomposition: {needs_decomposition}")
+        
+        # If task is atomic (below threshold), skip swarm and use direct completion
+        if not needs_decomposition and len(decomposition_plan["subtasks"]) == 1:
+            logger.info("Task is atomic - using direct completion instead of swarm")
+            return await self.completion_handler.generate_completion(
+                [{"role": "user", "content": prompt}]
+            )
+        
+        # 1. Decompose via model (for complex tasks)
         swarm_plan = await self.decompose(prompt)
         
         # 🧪 Force Decomposition for Coding if needed
         is_coding = task_type and task_type.startswith("coding")
         if is_coding and (not swarm_plan.intent_validation or not swarm_plan.sub_tasks):
             logger.info(f"Forcing {task_type} decomposition into phases...")
-            from .orchestrator import SubTask
             swarm_plan.intent_validation = True
             swarm_plan.sub_tasks = [
                 SubTask(id="T1", task=f"Analyze current state for: {prompt}"),
@@ -196,8 +238,9 @@ class SwarmOrchestrator:
         if not swarm_plan.intent_validation or not swarm_plan.sub_tasks:
             logger.info("Swarm decomposition skipped: intent invalid or no sub-tasks.")
             # Fallback to normal completion if no decomposition
-            # Wrap prompt as message for consistency
-            return await self.completion_handler.generate_completion([{"role": "user", "content": prompt}], task_type=task_type)
+            return await self.completion_handler.generate_completion(
+                [{"role": "user", "content": prompt}]
+            )
 
         # 2. Execute Parallel
         logger.info(f"Executing swarm with {len(swarm_plan.sub_tasks)} agents")

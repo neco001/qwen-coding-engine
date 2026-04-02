@@ -346,10 +346,25 @@ async def generate_swarm(
         Synthesized response from all parallel sub-tasks
     """
     from qwen_mcp.orchestrator import SwarmOrchestrator
+    from qwen_mcp.engines.scout import ScoutEngine
     
     client = DashScopeClient()
-    orchestrator = SwarmOrchestrator(completion_handler=client)
+    scout = ScoutEngine(client)
     
+    # Scout analysis to determine complexity (fixes truncation issue)
+    try:
+        scout_result = await scout.analyze_task(
+            prompt,
+            task_hint=task_type,
+            progress_callback=ctx.report_progress if ctx else None
+        )
+        complexity = scout_result.get("complexity", "high")
+        logger.info(f"Scout analysis for swarm: complexity={complexity}, reason={scout_result.get('reason', 'N/A')}")
+    except Exception as e:
+        logger.warning(f"Scout analysis failed: {e}. TokenScout will handle max_tokens estimation.")
+        complexity = None  # DEPRECATED - TokenScout handles estimation
+    
+    orchestrator = SwarmOrchestrator(completion_handler=client)
     result = await orchestrator.run_swarm(prompt, task_type=task_type)
     return result
 

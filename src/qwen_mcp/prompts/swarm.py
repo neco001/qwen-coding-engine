@@ -14,6 +14,12 @@ Each sub-task should be represented as a JSON object with the following structur
   "context_keys": ["required_key_1", "required_key_2"]
 }
 
+### CRITICAL: FILE PATH EXTRACTION
+If the prompt mentions specific file paths (e.g., 'foo.py', 'config.yaml', 'src/module.py'), you MUST:
+1. Extract these file paths and add them to the sub-task's "context_keys" array
+2. This enables automatic file content loading before task execution
+3. Example: If prompt says "modify ml_processor.py:COLUMN_STANDARD_MAP", add "ml_processor.py" to context_keys
+
 Include an "intent_validation" field at the top level:
 - true if the original request can and should be decomposed into multiple sub-tasks
 - false if the request is already atomic or cannot be meaningfully decomposed
@@ -28,7 +34,7 @@ Ensure that all sub-tasks are truly independent and can be executed in parallel.
       "id": "1",
       "task": "...",
       "priority": 5,
-      "context_keys": []
+      "context_keys": ["file1.py", "file2.yaml"]
     }
   ],
   "estimated_total_tokens": 100
