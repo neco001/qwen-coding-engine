@@ -14,7 +14,7 @@ Never call `qwen_coder` to implement logic without first having a failing test.
 
 ### 🟢 Phase 2: GREEN (The Code)
 1. **Objective**: Pass the test as quickly as possible.
-2. **Action**: Call `qwen_coder` (or `qwen_coder_25` for complex logic) providing the failing test as context.
+2. **Action**: Call `qwen_coder` with `mode="pro"` or `mode="expert"` for complex logic, providing the failing test as context.
   -  *Example Prompt*: "Implement the `calculate_roi` function to satisfy this test: [paste test code]."
 3. **Verification**: Run the test again. It must be **GREEN**.
 

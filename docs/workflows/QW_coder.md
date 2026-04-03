@@ -7,12 +7,12 @@ description: Tasks the Qwen agent to generate code or perform refactoring using 
 Principle: **If logic is more than 10 lines long, delegate it to Coder. Every implementation MUST be bound by the [TDD Shackle](../TDD.md).**
 
 1. **Assess Task Complexity:**
-  - **Standard Tasks**: For typical logic, boilerplate, or quick fixes, use `qwen_coder`.
-  - **High-Logic / Specialist**: For complex algorithms or major refactoring, use `qwen_coder_25` (Coder-Next).
+  - **Standard Tasks**: For typical logic, boilerplate, or quick fixes, use `qwen_coder` (default mode).
+  - **High-Logic / Specialist**: For complex algorithms or major refactoring, use `qwen_coder(mode="pro")` or `qwen_coder(mode="expert")`.
 
 2. **The TDD Protocol (Mandatory):**
-  - **Phase 1: RED (The Test)**: Before writing logic, call `qwen_coder` to write an **asymmetrically simple test**. Run it. **It must FAIL.** 
-  - **Phase 2: GREEN (The Code)**: Once the test fails, use `qwen_coder` or `qwen_coder_25` to implement the logic that satisfies the test. Provide the failing test as context.
+  - **Phase 1: RED (The Test)**: Before writing logic, call `qwen_coder` to write an **asymmetrically simple test**. Run it. **It must FAIL.**
+  - **Phase 2: GREEN (The Code)**: Once the test fails, use `qwen_coder` with appropriate mode to implement the logic that satisfies the test. Provide the failing test as context.
   - **Phase 3: REFACTOR (The Audit)**: After the test turns GREEN, call `qwen_audit` to clean up the implementation without breaking the test.
 
 3. **Repository Change Process (Surgical Precision):**

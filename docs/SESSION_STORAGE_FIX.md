@@ -6,10 +6,10 @@ The `SessionStore` class in `src/qwen_mcp/engines/session_store.py` uses a relat
 
 ### Issue Scenario
 
-1. MCP server starts from `C:\Repos\_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local`
-2. User opens different workspace in VS Code: `C:\Repos\Officer`
-3. User runs `qwen_sparring_pro` from that workspace
-4. Sessions are saved to `C:\Repos\Officer\.sparring_sessions` (workspace directory)
+1. MCP server starts from `<repo-root>`
+2. User opens different workspace in VS Code: `<user-workspace>`
+3. User runs `qwen_sparring` from that workspace
+4. Sessions are saved to `<user-workspace>/.sparring_sessions` (workspace directory)
 5. But MCP server looks for sessions in its own directory
 
 This causes "Session not found" errors when trying to continue sessions across different working directories.
@@ -45,7 +45,7 @@ Add new configuration option:
 # 8. Sparring Session Storage
 # Directory to store sparring session checkpoints.
 # If not set, uses user-level directory (APPDATA on Windows, ~/.qwen-mcp on Unix)
-# QWEN_SPARRING_SESSIONS_DIR=C:\Users\YourName\AppData\Roaming\qwen-mcp\sparring_sessions
+# QWEN_SPARRING_SESSIONS_DIR=%APPDATA%\qwen-mcp\sparring_sessions
 ```
 
 ## Benefits
