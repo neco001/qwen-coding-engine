@@ -1,6 +1,6 @@
 [project]
 name = "qwen-coding-engine"
-version = "0.1.0"
+version = "1.0.0"
 description = "The Lachman Protocol: Qwen Coding Engine - MCP Server"
 readme = "README.md"
 requires-python = ">=3.10"
