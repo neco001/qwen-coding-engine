@@ -281,26 +281,33 @@ class TelemetryBroadcaster:
 
     async def _send_heartbeat(self):
         """Internal method to send heartbeat to all clients.
-        
+
         Sends a lightweight heartbeat message with type field for UI filtering.
         Does NOT call broadcast_state() to avoid triggering full state updates.
+        
+        P3-7 FIX: Include project_id in heartbeat message for proper session tracking.
         """
         # Atomic counter increment under lock
         async with self._lock:
             self._heartbeat_counter += 1
             counter = self._heartbeat_counter
-        
-        heartbeat_msg = json.dumps({"type": "heartbeat", "count": counter}, ensure_ascii=False)
-        
+
         # Send directly to clients without broadcast_state()
         # Copy client structure under lock to avoid race conditions
         async with self._lock:
             clients_snapshot = {
                 proj_id: list(clients) for proj_id, clients in self._clients.items() if clients
             }
-        
+
         disconnected = set()
         for project_id, clients in clients_snapshot.items():
+            # P3-8 FIX: Include project_id in each heartbeat message
+            heartbeat_msg = json.dumps({
+                "type": "heartbeat",
+                "count": counter,
+                "project_id": project_id
+            }, ensure_ascii=False)
+            
             for client in clients:
                 try:
                     await client.send_text(heartbeat_msg)

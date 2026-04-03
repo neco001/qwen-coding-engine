@@ -98,9 +98,9 @@ class CompletionHandler(BaseDashScopeClient):
             estimated_input = self.estimate_tokens(messages) or 0
             target_model = model_override or (
                 self.registry.route_request(
-                    task_type, 
-                    complexity_hint=complexity, 
-                    context_tags=tags or [], 
+                    task_type,
+                    complexity_hint=complexity,
+                    context_tags=tags or [],
                     billing_mode=billing_mode_val,
                     estimated_tokens=estimated_input
                 )
@@ -156,11 +156,26 @@ class CompletionHandler(BaseDashScopeClient):
                         request_timeout, include_reasoning, project_id=project_id
                     )
             except Exception as e:
-                is_model_error = "model_not_found" in str(e).lower() or "not found" in str(e).lower()
+                error_str = str(e).lower()
+                is_model_error = "model_not_found" in error_str or "not found" in error_str
+                is_token_limit_error = "invalid_parameter" in error_str or "max_tokens" in error_str or "65536" in error_str
+                
+                # Retry on model_not_found (refresh registry)
                 if is_model_error and attempt == 0:
                     logger.warning(f"Model {target_model} rejected. Refreshing registry...")
                     await self.heal_registry()
                     continue
+                
+                # Retry ONCE on token limit errors (HTTP 400)
+                if is_token_limit_error and attempt == 0:
+                    logger.warning(
+                        f"Token limit error detected (attempt {attempt+1}): {e}. "
+                        f"Retrying with reduced max_tokens ({force_max_tokens} -> {min(force_max_tokens, 30000)})..."
+                    )
+                    # Reduce max_tokens for retry
+                    force_max_tokens = min(force_max_tokens, 30000)
+                    continue
+                
                 return await self._handle_error(e, request_timeout)
 
     async def _stream_completion(self, model, messages, temp, max_t, timeout, extra, include_reasoning, project_id="default", progress_callback=None):

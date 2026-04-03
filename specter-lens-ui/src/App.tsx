@@ -199,9 +199,10 @@ function App() {
                                 : 'bg-white/5 text-white/40 border border-transparent hover:bg-white/10'
                         }`}
                     >
-                        {/* P3-2 FIX: Compute display name dynamically from session_display_id */}
-                        {session.telemetry.session_display_name ||
-                         (session.telemetry.session_display_id ? `Sesja ${session.telemetry.session_display_id}` : session.name)}
+                        {/* P3-13 FIX: Use session.name from extension, fallback to telemetry */}
+                        {session.name || 
+                         session.telemetry.session_display_name ||
+                         (session.telemetry.session_display_id ? `Sesja ${session.telemetry.session_display_id}` : 'Session')}
                         {session.isConnected && (
                             <span className="ml-1.5 w-1.5 h-1.5 inline-block rounded-full bg-green-500 animate-pulse" />
                         )}

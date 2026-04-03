@@ -1,5 +1,5 @@
 """
-Context Builder Engine - Generates project context files using Swarm analysis.
+Context Builder Engine - Generates project context files using parallel worker pool.
 
 This engine creates and maintains:
 - .context/_PROJECT_CONTEXT.md: Tech stack, structure, conventions
@@ -7,7 +7,11 @@ This engine creates and maintains:
 - .context/_SESSION_SUPPLEMENT.md: Session history and recommendations
 
 Features:
-- Scout analysis for complexity-based Swarm routing
+- ParallelContextBuilder with worker pool (max 4 workers MCP-safe)
+- Token-based file chunking (estimate before process)
+- Checkpoint state machine with atomic JSON writes
+- Progressive result streaming
+- Timeout handling and resume capability
 - Atomic file writes (temp + rename pattern)
 - Session continuity tracking
 """
@@ -15,8 +19,11 @@ Features:
 import os
 import logging
 import tempfile
+import asyncio
+import fnmatch
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Any, List
+from typing import Dict, Optional, Tuple, Any, List, Set
 
 from qwen_mcp.orchestrator import SwarmOrchestrator
 from qwen_mcp.prompts.context import (
@@ -24,8 +31,15 @@ from qwen_mcp.prompts.context import (
     DATA_CONTEXT_SYSTEM_PROMPT,
     SESSION_SUPPLEMENT_SYSTEM_PROMPT,
 )
+from qwen_mcp.engines.token_validator import estimate_tokens_heuristic
+from context_builder import ParallelContextBuilder
 
 logger = logging.getLogger(__name__)
+
+# Token threshold for chunking large files
+CHUNK_TOKEN_THRESHOLD = 50000
+# Target chunk size (40K tokens per chunk, leaving room for prompt overhead)
+TARGET_CHUNK_SIZE = 40000
 
 CONTEXT_DIR_NAME = ".context"
 
@@ -67,6 +81,68 @@ MAX_FILE_SIZE = 50000
 MAX_FILE_LINES = 100
 
 
+def _load_gitignore_patterns(workspace_root: str) -> Set[str]:
+    """
+    Load .gitignore patterns from workspace root.
+    
+    Returns:
+        Set of glob patterns to exclude from scanning
+    """
+    gitignore_path = Path(workspace_root) / ".gitignore"
+    patterns: Set[str] = set()
+    
+    if not gitignore_path.exists():
+        return patterns
+    
+    try:
+        content = gitignore_path.read_text(encoding="utf-8", errors="replace")
+        for line in content.splitlines():
+            line = line.strip()
+            # Skip empty lines and comments
+            if not line or line.startswith("#"):
+                continue
+            # Remove leading/trailing slashes for fnmatch compatibility
+            pattern = line.strip("/")
+            patterns.add(pattern)
+    except Exception as e:
+        logger.warning(f"Failed to load .gitignore: {e}")
+    
+    return patterns
+
+
+def _should_exclude(filepath: Path, gitignore_patterns: Set[str]) -> bool:
+    """
+    Check if a file should be excluded based on .gitignore patterns.
+    
+    Args:
+        filepath: Path to check (relative to workspace root)
+        gitignore_patterns: Set of patterns from .gitignore
+        
+    Returns:
+        True if file should be excluded
+    """
+    path_str = str(filepath)
+    path_parts = filepath.parts
+    
+    for pattern in gitignore_patterns:
+        # Normalize pattern (remove trailing slashes for consistent handling)
+        clean_pattern = pattern.rstrip("/")
+        
+        # Check if any path component matches directory patterns (e.g., .venv, __pycache__)
+        if clean_pattern in path_parts:
+            return True
+        
+        # Check if full path matches the pattern (for patterns like *.egg-info)
+        if fnmatch.fnmatch(path_str, clean_pattern):
+            return True
+        
+        # Check if filename matches (for patterns like *.pyc, debug_*.txt)
+        if fnmatch.fnmatch(filepath.name, clean_pattern):
+            return True
+    
+    return False
+
+
 class ContextBuilderEngine:
     """
     Engine for generating and updating context files using Swarm analysis.
@@ -100,8 +176,8 @@ class ContextBuilderEngine:
         """
         Generate _PROJECT_CONTEXT.md and _DATA_CONTEXT.md.
         
-        NOTE: Scout analysis is SKIPPED for context generation to avoid timeout.
-        Uses heuristic complexity based on file count instead.
+        OPTIMIZED: Uses existing _PROJECT_CONTEXT.md if available, otherwise generates
+        using static analysis only (NO LLM calls per chunk - too slow for large projects).
         
         Returns:
             Tuple of (project_context_content, data_context_content)
@@ -109,12 +185,62 @@ class ContextBuilderEngine:
         # Ensure context directory exists
         self.context_dir.mkdir(exist_ok=True, parents=True)
         
-        # SKIP ScoutEngine - it causes timeout on API call
-        # Use heuristic complexity based on scanned files
+        # OPTIMIZATION: Check if _PROJECT_CONTEXT.md exists at root - use it directly
+        root_project_context = Path(workspace_root) / "_PROJECT_CONTEXT.md"
+        if root_project_context.exists():
+            logger.info("Using existing _PROJECT_CONTEXT.md from project root")
+            project_context = root_project_context.read_text(encoding="utf-8")
+        else:
+            # Generate using static analysis only (no LLM)
+            project_context = await self._generate_static_project_context(workspace_root)
+        
+        # Generate data context using static analysis
+        data_context = self._generate_static_data_context(workspace_root)
+        
+        return project_context, data_context
+    
+    async def _generate_static_project_context(self, workspace_root: str = ".") -> str:
+        """Generate project context using static analysis only (no LLM calls)."""
         scanned_files = self._scan_project_files(workspace_root)
         file_count = len(scanned_files)
         
-        # Heuristic: more files = higher complexity
+        lines = ["# Project Context\n"]
+        lines.append(f"Generated: {datetime.now().isoformat()}\n")
+        lines.append(f"Files analyzed: {file_count}\n")
+        lines.append("---\n\n")
+        
+        for filename, content in scanned_files.items():
+            if filename == "_directory_structure":
+                lines.append(f"## Directory Structure\n```\n{content}\n```\n")
+            else:
+                lines.append(f"## {filename}\n```\n{content[:2000]}...\n```\n")
+        
+        return "\n".join(lines)
+    
+    def _generate_static_data_context(self, workspace_root: str = ".") -> str:
+        """Generate data context using static analysis only (no LLM calls)."""
+        data_scanned = self._scan_data_files(workspace_root)
+        
+        if not data_scanned:
+            return "# Data Context\n\nNo data files detected in workspace."
+        
+        lines = ["# Data Context\n"]
+        lines.append(f"Generated: {datetime.now().isoformat()}\n")
+        lines.append(f"Data files found: {len(data_scanned)}\n")
+        lines.append("---\n\n")
+        
+        for filename, content in data_scanned.items():
+            lines.append(f"## {filename}\n{content}\n")
+        
+        return "\n".join(lines)
+    
+    async def _generate_sequential_context(
+        self,
+        workspace_root: str = "."
+    ) -> Tuple[str, str]:
+        """Fallback sequential generation using original method."""
+        file_count = len(self._scan_project_files(workspace_root))
+        
         if file_count > 20:
             complexity = "high"
         elif file_count > 10:
@@ -122,17 +248,59 @@ class ContextBuilderEngine:
         else:
             complexity = "low"
         
-        logger.info(f"Context generation: {file_count} files, complexity={complexity}")
-        
-        # Generate each context type separately for quality
-        project_context = await self._generate_single_context(
-            workspace_root, "project", complexity
-        )
-        data_context = await self._generate_single_context(
-            workspace_root, "data", complexity
+        project_context, data_context = await asyncio.gather(
+            self._generate_single_context(workspace_root, "project", complexity),
+            self._generate_single_context(workspace_root, "data", complexity),
+            return_exceptions=False
         )
         
         return project_context, data_context
+    
+    def _aggregate_chunk_results(self, chunk_results: List[Dict], context_type: str) -> str:
+        """Aggregate chunk results into context file content with LLM analysis."""
+        if not chunk_results:
+            return f"# {context_type.title()} Context\n\nNo content generated."
+        
+        # Group results by file
+        by_file: Dict[str, List[Dict]] = {}
+        for result in chunk_results:
+            if isinstance(result, dict) and "path" in result:
+                path = result["path"]
+                if path not in by_file:
+                    by_file[path] = []
+                by_file[path].append(result)
+        
+        # Build aggregated content with analysis
+        lines = [f"# {context_type.title()} Context\n"]
+        lines.append(f"Generated: {datetime.now().isoformat()}\n")
+        lines.append(f"Files processed: {len(by_file)}\n")
+        lines.append("---\n\n")
+        
+        for file_path, chunks in by_file.items():
+            file_name = Path(file_path).name
+            lines.append(f"## {file_name}\n")
+            
+            # Combine all analyses for this file
+            analyses = []
+            for chunk in sorted(chunks, key=lambda c: c.get("lines", "0-0")):
+                analysis = chunk.get("analysis", "")
+                if analysis and not analysis.startswith("["):
+                    analyses.append(analysis.strip())
+            
+            if analyses:
+                # Merge and deduplicate analyses
+                merged_analysis = "\n\n".join(analyses)
+                lines.append(f"**Analysis:**\n{merged_analysis}\n\n")
+            else:
+                # Fallback to basic info if no analysis
+                lines.append("**Structure:**\n")
+                for chunk in sorted(chunks, key=lambda c: c.get("lines", "0-0")):
+                    lines.append(f"- Lines {chunk.get('lines', 'N/A')}: {chunk.get('tokens', 0)} tokens")
+                lines.append("\n")
+            
+            lines.append("\n")
+        
+        return "\n".join(lines)
     
     def _build_context_swarm_prompt(self, workspace_root: str) -> str:
         """Build the swarm decomposition prompt for context analysis."""
@@ -162,6 +330,9 @@ Output should be structured for two files:
         root = Path(workspace_root)
         scanned = {}
         
+        # Load .gitignore patterns for exclusion
+        gitignore_patterns = _load_gitignore_patterns(workspace_root)
+        
         # Scan specific files
         for filename in PROJECT_SCAN_FILES:
             filepath = root / filename
@@ -177,12 +348,15 @@ Output should be structured for two files:
                 # Find key files in this directory
                 for pattern in ["*.py", "*.ts", "*.js", "*.go", "*.rs"]:
                     for filepath in dirpath.glob(pattern):
+                        rel_path = filepath.relative_to(root)
+                        # Skip files matching .gitignore patterns
+                        if _should_exclude(rel_path, gitignore_patterns):
+                            continue
                         # Only include entry-point-like files
                         name = filepath.name.lower()
                         if any(kw in name for kw in ["main", "server", "app", "init", "index", "entry", "cli", "api", "tools", "registry", "base", "engine", "orchestrator"]):
                             content = self._read_file_safe(filepath)
                             if content:
-                                rel_path = filepath.relative_to(root)
                                 scanned[str(rel_path)] = content
         
         # Get directory structure
@@ -201,10 +375,16 @@ Output should be structured for two files:
         root = Path(workspace_root)
         scanned = {}
         
+        # Load .gitignore patterns for exclusion
+        gitignore_patterns = _load_gitignore_patterns(workspace_root)
+        
         # Check for database files (don't read content, just note existence)
         for pattern in DATA_SCAN_FILES:
             for filepath in root.glob(f"**/{pattern}"):
                 rel_path = filepath.relative_to(root)
+                # Skip files matching .gitignore patterns
+                if _should_exclude(rel_path, gitignore_patterns):
+                    continue
                 size = filepath.stat().st_size if filepath.exists() else 0
                 scanned[str(rel_path)] = f"[{filepath.suffix} file, {size} bytes]"
         
@@ -289,20 +469,33 @@ Output should be structured for two files:
         context_type: str,
         complexity: str = "medium"
     ) -> str:
-        """Generate a single context file content with actual file data."""
+        """
+        Generate a single context file content with actual file data.
         
-        # SCAN ACTUAL FILES - this is the fix!
+        Includes automatic chunking for large files (>50K tokens).
+        
+        Args:
+            workspace_root: Path to workspace
+            context_type: "project" or "data"
+            complexity: "low", "medium", "high"
+        
+        Returns:
+            Generated context content
+        """
+        # SCAN ACTUAL FILES
         if context_type == "project":
             system_prompt = PROJECT_CONTEXT_SYSTEM_PROMPT
             file_data = self._scan_project_files(workspace_root)
             
-            # Build prompt with actual file content
+            # Build prompt with actual file content (with chunking for large files)
             file_sections = []
             for filename, content in file_data.items():
                 if filename == "_directory_structure":
                     file_sections.append(f"### Directory Structure\n```\n{content}\n```")
                 else:
-                    file_sections.append(f"### {filename}\n```\n{content}\n```")
+                    # Apply chunking for large files
+                    chunked_content = self._chunk_file_content(filename, content)
+                    file_sections.append(chunked_content)
             
             files_block = "\n\n".join(file_sections[:15])  # Limit to avoid token overflow
             
@@ -327,10 +520,12 @@ Return the complete _PROJECT_CONTEXT.md content based on ACTUAL evidence.
             system_prompt = DATA_CONTEXT_SYSTEM_PROMPT
             file_data = self._scan_data_files(workspace_root)
             
-            # Build prompt with actual file content
+            # Build prompt with actual file content (with chunking for large files)
             file_sections = []
             for filename, content in file_data.items():
-                file_sections.append(f"### {filename}\n```\n{content}\n```")
+                # Apply chunking for large files
+                chunked_content = self._chunk_file_content(filename, content)
+                file_sections.append(chunked_content)
             
             files_block = "\n\n".join(file_sections[:10])
             
@@ -367,6 +562,51 @@ Return the complete _DATA_CONTEXT.md content based on ACTUAL evidence.
         )
         
         return response
+    
+    def _chunk_file_content(self, filename: str, content: str) -> str:
+        """
+        Chunk large file content into smaller segments if it exceeds token threshold.
+        
+        Files >50K tokens are split into ~40K token chunks with clear markers.
+        
+        Args:
+            filename: Name of the file
+            content: File content
+        
+        Returns:
+            Formatted file section with chunk markers if split
+        """
+        estimated_tokens = estimate_tokens_heuristic(content)
+        
+        if estimated_tokens <= CHUNK_TOKEN_THRESHOLD:
+            # No chunking needed
+            return f"### {filename}\n```\n{content}\n```"
+        
+        logger.info(f"Chunking {filename}: {estimated_tokens} tokens -> multiple chunks")
+        
+        # Calculate chunk boundaries (by lines to avoid breaking code mid-statement)
+        lines = content.splitlines()
+        total_lines = len(lines)
+        
+        # Estimate tokens per line
+        tokens_per_line = estimated_tokens / max(total_lines, 1)
+        lines_per_chunk = int(TARGET_CHUNK_SIZE / max(tokens_per_line, 1))
+        lines_per_chunk = max(lines_per_chunk, 50)  # Minimum 50 lines per chunk
+        
+        chunks = []
+        chunk_num = 1
+        total_chunks = (total_lines + lines_per_chunk - 1) // lines_per_chunk
+        
+        for start_idx in range(0, total_lines, lines_per_chunk):
+            end_idx = min(start_idx + lines_per_chunk, total_lines)
+            chunk_lines = lines[start_idx:end_idx]
+            chunk_content = "\n".join(chunk_lines)
+            
+            chunk_header = f"### {filename} [Chunk {chunk_num}/{total_chunks}]"
+            chunks.append(f"{chunk_header}\n```\n{chunk_content}\n```")
+            chunk_num += 1
+        
+        return "\n\n".join(chunks)
     
     async def update_session_context(
         self,

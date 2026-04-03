@@ -25,6 +25,7 @@ import sys
 import threading
 import socket
 import os
+import hashlib
 import uvicorn
 from fastapi import FastAPI, WebSocket
 
@@ -336,10 +337,18 @@ def run_telemetry_server():
 
     @app.get("/")
     async def root():
-        project_id = get_current_project_id()
+        # P3-5 FIX: Generate proper session ID with instanceId for HUD
+        instance_id = get_or_create_instance_id()
+        cwd = os.getcwd()
+        workspace_hash = hashlib.sha256(cwd.encode()).hexdigest()[:8]
+        
+        # For HTTP endpoint, use "hud" as client_source
+        project_id = f"{instance_id}_hud_{workspace_hash}"
+        
         return {
-            "status": "SPECTER LENS SIDECAR ACTIVE", 
+            "status": "SPECTER LENS SIDECAR ACTIVE",
             "project_id": project_id,
+            "instance_id": instance_id,  # P3-6: Return instanceId for extension sync
             "uplink": f"ws://127.0.0.1:8878/ws/telemetry?project_id={project_id}"
         }
 

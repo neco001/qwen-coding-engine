@@ -66,89 +66,7 @@ class SpecterViewProvider {
     constructor(extensionUri, instanceId) {
         this._extensionUri = extensionUri;
         this._instanceId = instanceId;  // P3-2 FIX: Store instance ID for session generation
-        this._sessions = null;  // P3-9 FIX: Cache sessions to avoid async issues
         console.log(`[SPECTER] Provider initialized with instanceId: ${instanceId}`);
-        
-        // P3-10 FIX: Pre-detect sessions synchronously at construction time
-        this._sessions = this._detectMcpSessionsSync();
-    }
-
-    _detectMcpSessionsSync() {
-        // P3-11 FIX: Synchronous version for use in HTML generation
-        const sessions = [];
-        const workspaceName = vscode.workspace.workspaceFolders?.[0]?.name || 'default';
-        const workspaceHash = this._hashWorkspace(workspaceName);
-        const userHome = process.env.USERPROFILE || process.env.HOME || os.homedir();
-
-        console.log(`[SPECTER] Detecting MCP sessions (sync) for instance: ${this._instanceId}`);
-
-        // Path to Roo Code MCP settings
-        const rooConfigPath = path.join(userHome, 'AppData/Roaming/Antigravity/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json');
-        // Path to Gemini/Antigravity MCP config
-        const geminiConfigPath = path.join(userHome, '.gemini/antigravity/mcp_config.json');
-
-        // Check Roo Code config first
-        try {
-            if (fs.existsSync(rooConfigPath)) {
-                const rooConfig = JSON.parse(fs.readFileSync(rooConfigPath, 'utf8'));
-                const servers = rooConfig.mcpServers || {};
-                const hasRooQwenServer = Object.keys(servers).some(key =>
-                    key.toLowerCase().includes('qwen') && key.toLowerCase().includes('_roo')
-                );
-
-                if (hasRooQwenServer) {
-                    const projectId = `${this._instanceId}_roocode_${workspaceHash}`;
-                    console.log(`[SPECTER] Found Roo Code MCP session: ${projectId}`);
-                    sessions.push({
-                        id: 'roocode',
-                        name: 'Roo Code',
-                        projectId: projectId,
-                        clientSource: 'roocode'
-                    });
-                }
-            }
-        } catch (e) {
-            console.log('[SPECTER] Failed to read Roo config:', e.message);
-        }
-
-        // Check Gemini config
-        try {
-            if (fs.existsSync(geminiConfigPath)) {
-                const geminiConfig = JSON.parse(fs.readFileSync(geminiConfigPath, 'utf8'));
-                const servers = geminiConfig.mcpServers || {};
-                const hasQwenServer = Object.keys(servers).some(key =>
-                    key.toLowerCase().includes('qwen') && !key.toLowerCase().includes('_roo')
-                );
-
-                if (hasQwenServer) {
-                    const projectId = `${this._instanceId}_gemini_${workspaceHash}`;
-                    console.log(`[SPECTER] Found Gemini MCP session: ${projectId}`);
-                    sessions.push({
-                        id: 'gemini',
-                        name: 'Gemini',
-                        projectId: projectId,
-                        clientSource: 'gemini'
-                    });
-                }
-            }
-        } catch (e) {
-            console.log('[SPECTER] Failed to read Gemini config:', e.message);
-        }
-
-        // Fallback
-        if (sessions.length === 0) {
-            const projectId = `${this._instanceId}_default_${workspaceHash}`;
-            console.log(`[SPECTER] No MCP config found, using default session: ${projectId}`);
-            sessions.push({
-                id: 'default',
-                name: 'Default',
-                projectId: projectId,
-                clientSource: 'default'
-            });
-        }
-
-        console.log(`[SPECTER] Detected ${sessions.length} session(s):`, sessions.map(s => s.id).join(', '));
-        return sessions;
     }
 
     resolveWebviewView(webviewView) {
@@ -173,6 +91,89 @@ class SpecterViewProvider {
         } catch (e) {
             webviewView.webview.html = `<html><body><pre>FAILED TO LOAD HUD: ${e.message}</pre></body></html>`;
         }
+    }
+
+    async _detectMcpSessions() {
+        // P3-3 FIX: Generate session IDs using local instanceId
+        // Format: {instanceId}_{clientSource}_{workspaceHash}
+        const sessions = [];
+        const workspaceName = vscode.workspace.workspaceFolders?.[0]?.name || 'default';
+        const workspaceHash = this._hashWorkspace(workspaceName);
+        const userHome = process.env.USERPROFILE || process.env.HOME || os.homedir();
+
+        console.log(`[SPECTER] Detecting MCP sessions for instance: ${this._instanceId}`);
+
+        // Path to Roo Code MCP settings
+        const rooConfigPath = path.join(userHome, 'AppData/Roaming/Antigravity/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json');
+        // Path to Gemini/Antigravity MCP config
+        const geminiConfigPath = path.join(userHome, '.gemini/antigravity/mcp_config.json');
+
+        // Check Roo Code config first (more likely to be active)
+        try {
+            if (fs.existsSync(rooConfigPath)) {
+                const rooConfig = JSON.parse(fs.readFileSync(rooConfigPath, 'utf8'));
+                const servers = rooConfig.mcpServers || {};
+
+                // Check for any qwen-coding_roo or roo-specific server
+                const hasRooQwenServer = Object.keys(servers).some(key =>
+                    key.toLowerCase().includes('qwen') && key.toLowerCase().includes('_roo')
+                );
+
+                if (hasRooQwenServer) {
+                    const projectId = `${this._instanceId}_roocode_${workspaceHash}`;
+                    console.log(`[SPECTER] Found Roo Code MCP session: ${projectId}`);
+                    sessions.push({
+                        id: 'roocode',
+                        name: 'Roo Code',
+                        projectId: projectId,
+                        clientSource: 'roocode'
+                    });
+                }
+            }
+        } catch (e) {
+            console.log('[SPECTER] Failed to read Roo config:', e.message);
+        }
+
+        // Check Gemini config
+        try {
+            if (fs.existsSync(geminiConfigPath)) {
+                const geminiConfig = JSON.parse(fs.readFileSync(geminiConfigPath, 'utf8'));
+                const servers = geminiConfig.mcpServers || {};
+
+                // Check for any qwen-coding server in Gemini config
+                const hasQwenServer = Object.keys(servers).some(key =>
+                    key.toLowerCase().includes('qwen') && !key.toLowerCase().includes('_roo')
+                );
+
+                if (hasQwenServer) {
+                    const projectId = `${this._instanceId}_gemini_${workspaceHash}`;
+                    console.log(`[SPECTER] Found Gemini MCP session: ${projectId}`);
+                    sessions.push({
+                        id: 'gemini',
+                        name: 'Gemini',
+                        projectId: projectId,
+                        clientSource: 'gemini'
+                    });
+                }
+            }
+        } catch (e) {
+            console.log('[SPECTER] Failed to read Gemini config:', e.message);
+        }
+
+        // Fallback: always provide at least one default session
+        if (sessions.length === 0) {
+            const projectId = `${this._instanceId}_default_${workspaceHash}`;
+            console.log(`[SPECTER] No MCP config found, using default session: ${projectId}`);
+            sessions.push({
+                id: 'default',
+                name: 'Default',
+                projectId: projectId,
+                clientSource: 'default'
+            });
+        }
+
+        console.log(`[SPECTER] Detected ${sessions.length} session(s):`, sessions.map(s => s.id).join(', '));
+        return sessions;
     }
 
     _hashWorkspace(input) {
@@ -206,11 +207,9 @@ class SpecterViewProvider {
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(assetsUri, jsFile));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(assetsUri, cssFile));
 
-        // P3-12 FIX: Use cached sessions (computed synchronously in constructor)
-        const sessions = this._sessions || [];
-        const sessionsJson = JSON.stringify(sessions);
-
-        console.log(`[SPECTER] Injecting sessions into HTML: ${sessionsJson}`);
+        // Get detected sessions
+        const sessions = this._detectMcpSessions();
+        const sessionsJson = JSON.stringify(sessions).replace(/"/g, '"');
 
         return `<!DOCTYPE html>
             <html lang="en">
@@ -221,7 +220,6 @@ class SpecterViewProvider {
                 <link href="${styleUri}" rel="stylesheet">
                 <title>Specter Cockpit</title>
                 <script>
-                    console.log('[HUD] Setting INITIAL_SESSIONS:', ${sessionsJson});
                     window.INITIAL_SESSIONS = ${sessionsJson};
                 </script>
                 <style>
