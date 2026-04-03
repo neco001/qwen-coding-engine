@@ -21,16 +21,16 @@ All notable changes to this project will be documented in this file.
 
 ### 🛠️ Available Tools
 
-| Tool | Role | Default Model |
-|------|------|---------------|
-| `qwen_architect` | Strategist | qwen3.5-plus |
-| `qwen_coder` | Coder | qwen3-coder-next |
-| `qwen_coder_pro` | Specialist | qwen3-coder-plus |
-| `qwen_audit` | Analyst | glm-5 |
-| `qwen_sparring` | Debate Master | qwen3.5-plus / glm-5 |
-| `qwen_read_file` | Scout | kimi-k2.5 |
-| `qwen_list_files` | Explorer | kimi-k2.5 |
-| `qwen_usage_report` | Billing | N/A (DuckDB) |
+| Tool                | Role          | Default Model        |
+| ------------------- | ------------- | -------------------- |
+| `qwen_architect`    | Strategist    | qwen3.5-plus         |
+| `qwen_coder`        | Coder         | qwen3-coder-next     |
+| `qwen_coder_pro`    | Specialist    | qwen3-coder-plus     |
+| `qwen_audit`        | Analyst       | glm-5                |
+| `qwen_sparring`     | Debate Master | qwen3.5-plus / glm-5 |
+| `qwen_read_file`    | Scout         | kimi-k2.5            |
+| `qwen_list_files`   | Explorer      | kimi-k2.5            |
+| `qwen_usage_report` | Billing       | N/A (DuckDB)         |
 
 ### 📦 Tech Stack
 
@@ -59,12 +59,14 @@ All notable changes to this project will be documented in this file.
 ### 🔧 Configuration
 
 **Environment Variables:**
+
 - `DASHSCOPE_API_KEY` - Required (Alibaba DashScope API key)
 - `BILLING_MODE` - Optional, default: `coding_plan` (`coding_plan`, `payg`, `hybrid`)
 - `LP_MAX_RETRIES` - Optional, default: `3` (circuit breaker for self-healing loop)
 
 **Billing Modes:**
-- `coding_plan` - Strict mode using only prepaid coding plan models
+
+- `coding_plan` - Strict mode using only prepaid Alibaba Coding Plan models
 - `payg` - Pay-as-you-go via DashScope API
 - `hybrid` - Coding plan preferred, PAYG fallback for complex tasks
 
