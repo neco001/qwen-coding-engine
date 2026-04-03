@@ -18,6 +18,7 @@ class ScoutEngine:
     async def analyze_task(self, prompt: str, context: str = "", task_hint: str = "general", progress_callback=None) -> Dict[str, Any]:
         """
         Intelligently analyzes a task to determine complexity and recommended swarm usage.
+        Also detects if task is brownfield (modifying existing code) vs greenfield (new code).
         """
         # Truncate context for scout for speed
         scout_prompt = f"""Analyze this {task_hint} request and categorize it:
@@ -30,6 +31,10 @@ Categorize by size:
 - high: complex feature, multi-file changes (>2-3 files), thorough audit
 - critical: architecture redesign, entire server boilerplate, massive codebase audit
 
+Detect BROWNFIELD vs GREENFIELD:
+- BROWNFIELD (is_brownfield=true): Task involves modifying existing code, fixing bugs, refactoring, adding to existing files
+- GREENFIELD (is_brownfield=false): Task is creating new files from scratch, new project, new feature with no existing code
+
 Rules:
 1. Recommend use_swarm=true IF task requires more than 300 lines of code OR touches more than 3 distinct files/modules OR if it's a multi-file audit.
 2. Output ONLY JSON:
@@ -37,6 +42,7 @@ Rules:
   "complexity": "low|medium|high|critical",
   "score": 1-10,
   "use_swarm": true|false,
+  "is_brownfield": true|false,
   "reason": "short explanation"
 }}
 """
@@ -57,12 +63,13 @@ Rules:
             match = re.search(r"\{.*\}", raw, re.DOTALL)
             if match:
                 data = json.loads(match.group(0))
-                logger.info(f"Scout Result: {data['complexity']} (score: {data['score']}), use_swarm={data['use_swarm']}")
+                logger.info(f"Scout Result: {data['complexity']} (score: {data['score']}), use_swarm={data.get('use_swarm', False)}, is_brownfield={data.get('is_brownfield', False)}")
                 return data
                 
             return {
                 "complexity": self._heuristic_complexity(prompt, context),
                 "use_swarm": False,
+                "is_brownfield": False,  # Default to greenfield on fallback
                 "reason": "Scout failed to follow JSON format"
             }
         except Exception as e:
@@ -70,6 +77,7 @@ Rules:
             return {
                 "complexity": self._heuristic_complexity(prompt, context),
                 "use_swarm": False,
+                "is_brownfield": False,  # Default to greenfield on fallback
                 "reason": f"Scout error: {str(e)}"
             }
 

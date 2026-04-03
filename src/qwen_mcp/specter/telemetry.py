@@ -3,6 +3,7 @@ import json
 import time
 import threading
 import logging
+import sys
 from typing import Set, Dict, Any, Optional
 from dataclasses import dataclass, field
 
@@ -77,7 +78,7 @@ async def start_heartbeat_loop():
         except asyncio.CancelledError:
             break
         except Exception as e:
-            print(f"[Telemetry] Heartbeat error: {e}")
+            print(f"[Telemetry] Heartbeat error: {e}", file=sys.stderr)
 
 
 def ensure_heartbeat_running():

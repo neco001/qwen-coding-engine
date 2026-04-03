@@ -24,6 +24,38 @@ from qwen_mcp.prompts.system import CODER_SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 # =============================================================================
+# Local Heuristics for Swarm Detection (Opcja A - NO API CALL)
+# =============================================================================
+
+def should_use_swarm(prompt: str, context: str = "") -> bool:
+    """
+    Local heuristics to determine if Swarm is needed - NO API CALL.
+    
+    This replaces ScoutEngine.analyze_task() for most cases to avoid
+    blocking API calls and potential timeouts.
+    
+    Returns:
+        True if Swarm orchestrator should be used, False for single-agent generation
+    """
+    combined = prompt + " " + context
+    # Check character count (~15K chars ≈ 3-4K tokens)
+    if len(combined) > 15000:
+        return True
+    # Check word count (>500 words suggests complex task)
+    if len(combined.split()) > 500:
+        return True
+    # Check for complexity keywords
+    complexity_keywords = [
+        "architecture", "refactor", "multiple files", "complex",
+        "redesign", "restructure", "comprehensive", "full audit",
+        "multi-file", "restructure", "migration", "boilerplate"
+    ]
+    if any(kw in combined.lower() for kw in complexity_keywords):
+        return True
+    return False
+
+
+# =============================================================================
 # Mode Configuration
 # =============================================================================
 
@@ -149,39 +181,75 @@ class CoderEngineV2:
                     error=f"Unknown mode: {mode}. Use: {', '.join(MODE_ROUTING.keys())}"
                 )
             
-            # Intelligent Scout: Analyze task complexity and routing
-            scout_res = await self.scout_engine.analyze_task(
-                prompt, context, task_hint="coding", 
-                progress_callback=ctx.report_progress if ctx else None
-            )
-            scout_complexity = scout_res.get("complexity", "medium")
-            scout_use_swarm = scout_res.get("use_swarm", False)
-            routing_reason = scout_res.get("reason", "Standard routing")
+            # Opcja A+C: Local heuristics + Scout only for mode="auto"
+            # For non-auto modes, skip Scout entirely to avoid API timeout
             
-            # Decision Matrix:
-            # - mode 'auto': follow scout recommendation (single or swarm)
-            # - modes 'pro/expert/standard': single model (use scout's complexity for sizing)
+            # BROWNFIELD DETECTION: Always run Scout for brownfield detection (not just complexity)
+            # This ensures proper diff-only output for existing code modification
+            is_brownfield = False
+            brownfield_reason = "Not analyzed"
             
-            if mode == "auto" and scout_use_swarm:
-                use_swarm = True
+            if mode == "auto":
+                # Use local heuristics first (Opcja A)
+                if should_use_swarm(prompt, context):
+                    # Heuristics suggest Swarm - optionally call Scout with timeout
+                    try:
+                        # Attempt Scout API call with timeout for additional insight
+                        scout_res = await self.scout_engine.analyze_task(
+                            prompt, context, task_hint="coding",
+                            progress_callback=ctx.report_progress if ctx else None
+                        )
+                        scout_complexity = scout_res.get("complexity", "high")
+                        scout_use_swarm = scout_res.get("use_swarm", True)
+                        is_brownfield = scout_res.get("is_brownfield", False)
+                        routing_reason = scout_res.get("reason", "Heuristics triggered Swarm")
+                        brownfield_reason = "Scout analysis"
+                        use_swarm = scout_use_swarm
+                    except Exception as e:
+                        # Fallback: trust local heuristics on Scout failure
+                        logger.warning(f"Scout API failed, using heuristics: {e}")
+                        scout_complexity = "high"
+                        use_swarm = True
+                        routing_reason = f"Local heuristics (Scout failed: {str(e)})"
+                        brownfield_reason = f"Scout failed: {str(e)}"
+                else:
+                    # Heuristics suggest simple task - skip Scout
+                    scout_complexity = "low"
+                    use_swarm = False
+                    routing_reason = "Local heuristics: simple task"
+                    # Check for brownfield indicators in context
+                    is_brownfield = len(context) > 100  # Existing code context = brownfield
+                    brownfield_reason = "Context-based heuristic"
             else:
-                use_swarm = False
-                
-            complexity = scout_complexity # Always use scout for sizing to prevent truncation
+                # Opcja C: For non-auto modes, skip Scout entirely
+                # Use local heuristics only
+                if should_use_swarm(prompt, context):
+                    scout_complexity = "high"
+                    use_swarm = True
+                    routing_reason = f"Local heuristics (mode={mode})"
+                else:
+                    scout_complexity = "low"
+                    use_swarm = False
+                    routing_reason = f"Local heuristics (mode={mode})"
+                # Check for brownfield indicators in context
+                is_brownfield = len(context) > 100  # Existing code context = brownfield
+                brownfield_reason = "Context-based heuristic"
             
-            logger.info(f"Coder Scouting: mode={mode}, complexity={complexity}, use_swarm={use_swarm}")
+            logger.info(f"Coder routing: mode={mode}, complexity={scout_complexity}, use_swarm={use_swarm}")
 
             # Determine task type and model
-            task_type, model_used = self._resolve_mode(mode, prompt, context, complexity)
+            task_type, model_used = self._resolve_mode(mode, prompt, context, scout_complexity)
             
-            await self._report_progress(ctx, 5.0, f"[Coder] Scout: {complexity} complexity. Model: {model_used}")
+            await self._report_progress(ctx, 5.0, f"[Coder] Scout: {scout_complexity} complexity. Model: {model_used}")
             
             # Delegate to Swarm if recommended and in auto mode
             if use_swarm:
                 from qwen_mcp.orchestrator import SwarmOrchestrator
                 await self._report_progress(ctx, 10.0, "[Coder] Task too complex for single agent - Launching Swarm Orchestrator...")
                 orchestrator = SwarmOrchestrator(self.client)
-                swarm_prompt = f"### TASK:\n{prompt}\n\n### CONTEXT:\n{context or 'None'}"
+                # Include brownfield flag in Swarm prompt for proper diff output
+                brownfield_note = " [BROWNFIELD - Output DIFFS ONLY]" if is_brownfield else " [GREENFIELD - Full code OK]"
+                swarm_prompt = f"### TASK:\n{prompt}\n\n### CONTEXT:\n{context or 'None'}\n\n### MODE:{brownfield_note}"
                 result = await orchestrator.run_swarm(swarm_prompt, task_type=task_type)
                 
                 elapsed = time.time() - start_time
@@ -191,17 +259,22 @@ class CoderEngineV2:
                     routing_reason=f"Swarm triggered: {routing_reason}"
                 )
             
-            # Build messages
+            # Build messages with brownfield flag in system prompt
+            # This ensures model knows whether to output diffs or full code
+            system_prompt = CODER_SYSTEM_PROMPT
+            if is_brownfield:
+                system_prompt += "\n\nBROWNFIELD MODE ACTIVE: You are modifying existing code. Output DIFFS ONLY (SEARCH/REPLACE format with line numbers). Never output full files."
+            
             messages = [
-                {"role": "system", "content": CODER_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Context: {context or 'None'}\n\nPrompt: {prompt}"}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Context: {context or 'None'}\n\nPrompt: {prompt}\n\nBROWNFIELD: {is_brownfield} ({brownfield_reason})"}
             ]
             
             # Generate code (Single Agent)
             result = await self.client.generate_completion(
                 messages=messages,
                 task_type=task_type,
-                complexity=complexity,
+                complexity=scout_complexity,
                 tags=["coder", mode],
                 progress_callback=ctx.report_progress if ctx else None,
                 project_id=project_id
@@ -244,13 +317,17 @@ class CoderEngineV2:
             Tuple of (task_type, model_id)
         """
         if mode == "auto":
-            # Use complexity from scout to route models
+            # Use complexity from scout/heuristics to route models
             if scout_complexity in ["high", "critical"]:
                 task_type = "coding_pro"
             else:
                 task_type = "coding"
         else:
+            # For explicit modes, use predefined routing
+            # Override to coding_pro if heuristics detected high complexity
             task_type = MODE_ROUTING[mode]
+            if scout_complexity in ["high", "critical"] and mode in ["pro", "expert"]:
+                task_type = "coding_pro"
         
         # Get model from registry
         model_used = registry.get_best_model(task_type)

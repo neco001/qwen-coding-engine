@@ -223,10 +223,44 @@ async def generate_code_unified(
     return response.to_markdown()
 
 async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: Optional[Context] = None) -> str:
-    # This remains complex, but keeps the modular structure
+    """
+    Generate blueprint. Scout detects if task involves existing code (brownfield) or new code (greenfield).
+    
+    BROWNFIELD = modifying existing files → diffs, line numbers, surgical edits
+    GREENFIELD = creating new files → full code OK
+    
+    Scout analyzes the task and determines the appropriate approach.
+    """
     from qwen_mcp.engines.scout import ScoutEngine
+    from qwen_mcp.prompts.lachman import LP_BROWNFIELD_PROMPT
     
     client = DashScopeClient()
+    scout = ScoutEngine(client)
+    
+    # Scout analyzes task - detects brownfield vs greenfield from context
+    scout_res = await scout.analyze_task(
+        goal, context, task_hint="strategy/architecture",
+        progress_callback=ctx.report_progress if ctx else None
+    )
+    complexity = scout_res.get("complexity", "high")
+    # Scout returns: is_brownfield=True if task involves modifying existing code
+    is_brownfield = scout_res.get("is_brownfield", False)
+    
+    if is_brownfield:
+        # BROWNFIELD: Option evaluation or modification of existing code
+        brownfield_msg = [
+            {"role": "system", "content": LP_BROWNFIELD_PROMPT},
+            {"role": "user", "content": f"Goal: {goal}\nContext: {context or ''}"}
+        ]
+        result = await client.generate_completion(
+            messages=brownfield_msg,
+            task_type="strategist",
+            complexity=complexity,
+            progress_callback=ctx.report_progress if ctx else None
+        )
+        return f"## 🏗️ Brownfield Analysis\n\n{result}"
+    
+    # GREENFIELD MODE: Full LP blueprint
     scout = ScoutEngine(client)
     
     # 0. Scout for Sizing (Architect blueprints are often large)

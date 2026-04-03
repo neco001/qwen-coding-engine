@@ -41,6 +41,16 @@ Never implement complex files yourself. Delegate to the Engine and follow the **
 4. **Implementation (Faza GREEN)**: Only after a failing test, call `qwen_coder` or `qwen_coder_25` to write the code that satisfies the test.
 5. **Audit**: Call `qwen_audit` with logs BEFORE trying to patch a bug yourself.
 
+### 2.5 BROWNFIELD vs GREENFIELD:
+**Scout auto-detects** from your task context:
+
+| Mode | Meaning | Output |
+|------|---------|--------|
+| **BROWNFIELD** | Modifying existing files, fixing bugs, refactoring | Diffs only (SEARCH/REPLACE with line numbers) |
+| **GREENFIELD** | Creating new files from scratch | Full code OK |
+
+**CRITICAL**: `qwen_coder` outputs **DIFFS ONLY** for brownfield tasks - never full files. This prevents degeneracy.
+
 ### 3. Advanced Protocols (Workflows):
 Use these slash commands/workflows for specialized operations:
 - `/QW_architect`: Detailed blueprint development and context gathering.
@@ -48,9 +58,12 @@ Use these slash commands/workflows for specialized operations:
 - `/QW_audit`: Deep SRE analysis and RCA (Root Cause Analysis).
 - `/QW_admin`: Managing model registry, token usage, and costs.
 
-### 4. Audit Interpretation (The "No-Trust" Safety):
-- If `qwen_audit` labels a fix as **[SIMPLE]**, you may apply it yourself using standard edit tools.
-- If `qwen_audit` labels a fix as **[COMPLEX]**, you **MUST** call `qwen_coder` or `qwen_coder_25` to implement the solution. Do not attempt to synthesize complex logic, type system refactors, or cross-file migrations yourself.
+### 4. Audit → Architect → Coder Handoff:
+When `qwen_audit` finds issues:
+- **[SIMPLE]** fixes: Direct diff with line numbers → apply yourself or via `qwen_coder`
+- **[COMPLEX]** fixes: Structured output → pass to `qwen_architect` for evaluation
+
+**Handoff Chain**: `qwen_audit` → `qwen_architect` → `qwen_coder` (diffs only for brownfield)
 
 ### 5. Tool Reference:
 - `qwen_init_request()`: **MANDATORY FIRST COMMAND** for every new task.
@@ -60,4 +73,4 @@ Use these slash commands/workflows for specialized operations:
 - `qwen_sparring_pro(topic, context)`: Full adversarial multi-agent debate.
 - `qwen_generate_image(prompt, image_paths, aspect_ratio)`: WanX synthesis.
 
-**Mantra: If it's more than 10 lines of logic, let Qwen write it. If it's broken, let QwQ audit it. If there's no failing test, DON'T WRITE THE CODE.**
+**Mantra: If it's more than 10 lines of logic, let Qwen write it. If it's broken, let QwQ audit it. If there's no failing test, DON'T WRITE THE CODE. BROWNFIELD = diffs only. GREENFIELD = full code OK.**

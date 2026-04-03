@@ -71,7 +71,7 @@ def init_qwen_directory(project_root: Path) -> Path:
             "| rationale | string | Decision rationale |\n\n"
             "## Usage\n\n"
             "```python\n"
-            "from src.logging import DecisionLogWriter\n\n"
+            "from src.decision_log import DecisionLogWriter\n\n"
             "writer = DecisionLogWriter(\n"
             "    log_path=Path('.qwen/decision_log.parquet'),\n"
             "    backup_dir=Path.home() / 'AppData' / 'Roaming' / 'qwen-mcp' / 'decision_log_backup'\n"

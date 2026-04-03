@@ -44,6 +44,23 @@ if sys.platform == "win32":
 mcp = FastMCP("Qwen MCP Server (DashScope)")
 
 
+async def _auto_init_request(ctx: Context = None, project_id: str = "default") -> None:
+    """
+    Automatically initialize request state for HUD telemetry.
+    
+    This eliminates the dependency on agent awareness by ensuring
+    every tool call starts with a properly initialized request state.
+    
+    Args:
+        ctx: MCP context for session ID extraction
+        project_id: Optional explicit project ID (uses ctx if not provided)
+    """
+    broadcaster = get_broadcaster()
+    if project_id == "default" and ctx is not None:
+        project_id = _get_tool_session_id(ctx, default_source="auto")
+    await broadcaster.start_request(project_id=project_id)
+
+
 def _get_tool_session_id(ctx: Context = None, default_source: str = "mcp") -> str:
     """
     Extract client_source from MCP context and generate proper session ID.
@@ -96,6 +113,7 @@ async def qwen_audit(
     Returns:
         Audit report with findings and recommendations
     """
+    await _auto_init_request(ctx, "audit")
     project_id = _get_tool_session_id(ctx, default_source="audit")
     await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("strategist"),
@@ -130,6 +148,7 @@ async def qwen_coder(
     - qwen_coder (old) → now calls qwen_coder(mode="standard")
     - qwen_coder_pro (old) → now calls qwen_coder(mode="pro")
     """
+    await _auto_init_request(ctx, "coder")
     project_id = _get_tool_session_id(ctx, default_source="coder")
     await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("coding"),
@@ -141,12 +160,29 @@ async def qwen_coder(
 
 @mcp.tool()
 async def qwen_architect(
-    goal: str, context: Optional[str] = None, ctx: Context = None
+    goal: str,
+    context: Optional[str] = None,
+    ctx: Context = None
 ) -> str:
     """
     Initiates 'The Lachman Protocol' (LP).
     The server hires a dynamic expert squad to audit your goal and generate a high-precision Blueprint.
+    
+    AUTO-DETECTION:
+    - BROWNFIELD mode: If goal/context contains existing options (Opcja A/B/C, Option 1/2/3, wariant),
+      existing code to modify, or comparison keywords → evaluates options
+    - GREENFIELD mode: If goal is about creating something new from scratch → generates full blueprint
+    
+    BROWNFIELD OUTPUT:
+    - Option comparison table (complexity, risk, time, ROI)
+    - Recommended option with justification
+    - Implementation steps with file:line references
+    - Diffs only, never full code (anti-degeneration)
+    
+    GREENFIELD OUTPUT:
+    - Full LP blueprint with swarm_tasks, manifest, roadmap
     """
+    await _auto_init_request(ctx, "architect")
     project_id = _get_tool_session_id(ctx, default_source="architect")
     await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("strategist"),
@@ -190,6 +226,7 @@ async def qwen_sparring(
     5. qwen_sparring(mode="blue", session_id="sp_abc123")
     6. qwen_sparring(mode="white", session_id="sp_abc123")
     """
+    await _auto_init_request(ctx, "sparring")
     project_id = _get_tool_session_id(ctx, default_source="sparring")
     await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("strategist"),
@@ -224,6 +261,7 @@ async def qwen_swarm(
     Returns:
         Synthesized response from all parallel sub-tasks
     """
+    await _auto_init_request(ctx, "swarm")
     project_id = _get_tool_session_id(ctx, default_source="swarm")
     await get_broadcaster().broadcast_state({
         "active_model": "swarm-orchestrator",
@@ -324,12 +362,12 @@ def run_telemetry_server():
     
     # Check if port is already in use (another MCP instance is running)
     if is_port_in_use(8878):
-        print("ℹ️ [SPECTER] Telemetry server already running on port 8878, skipping startup")
+        print("ℹ️ [SPECTER] Telemetry server already running on port 8878, skipping startup", file=sys.stderr)
         _TELEMETRY_SERVER_RUNNING = True
         return
     
     if _TELEMETRY_SERVER_RUNNING:
-        print("ℹ️ [SPECTER] Telemetry server already started in this process")
+        print("ℹ️ [SPECTER] Telemetry server already started in this process", file=sys.stderr)
         return
     
     app = FastAPI()
@@ -379,7 +417,7 @@ def run_telemetry_server():
         _TELEMETRY_SERVER_RUNNING = True
         server.run()
     except Exception as e:
-        print(f"❌ Telemetry Sidecar failed: {e}")
+        print(f"❌ Telemetry Sidecar failed: {e}", file=sys.stderr)
         _TELEMETRY_SERVER_RUNNING = False
 
 async def sync_hud_state():
@@ -394,14 +432,14 @@ def main():
     """Main entrypoint for the MCP server."""
     global _TELEMETRY_SERVER_RUNNING
     
-    print("🚀 [SPECTER] Starting Qwen Engineering Engine Context...")
+    print("🚀 [SPECTER] Starting Qwen Engineering Engine Context...", file=sys.stderr)
     
     # Check if telemetry server is already running (shared across MCP instances)
     if is_port_in_use(8878):
-        print("ℹ️ [SPECTER] Connecting to existing telemetry server on port 8878")
+        print("ℹ️ [SPECTER] Connecting to existing telemetry server on port 8878", file=sys.stderr)
         _TELEMETRY_SERVER_RUNNING = True
     else:
-        print("📡 [SPECTER] Starting telemetry sidecar on port 8878/ws")
+        print("📡 [SPECTER] Starting telemetry sidecar on port 8878/ws", file=sys.stderr)
         # Start telemetry in dedicated thread
         sidecar = threading.Thread(target=run_telemetry_server, daemon=True)
         sidecar.start()
@@ -471,6 +509,7 @@ async def qwen_init_context_tool(
     Example:
         qwen_init_context_tool(workspace_root=".")
     """
+    await _auto_init_request(ctx, "context_init")
     project_id = _get_tool_session_id(ctx, default_source="context_init")
     await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("scout"),
@@ -509,6 +548,7 @@ async def qwen_update_session_context_tool(
             workspace_root="."
         )
     """
+    await _auto_init_request(ctx, "context_update")
     project_id = _get_tool_session_id(ctx, default_source="context_update")
     await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("scout"),

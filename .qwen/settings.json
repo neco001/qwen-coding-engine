@@ -11,7 +11,8 @@
       "Read(c:\\Users\\pawel\\.vscode\\extensions\\specter.specter-qwen-hud-1.1.6/**)",
       "Read(c:\\Users\\pawel\\.vscode\\extensions\\specter.specter-qwen-hud-1.1.6\\dist\\assets/**)",
       "Read(c:\\Users\\pawel\\.vscode\\extensions\\specter.specter-qwen-hud-1.1.6\\dist/**)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "mcp__qwen-coding__qwen_coder"
     ]
   },
   "$version": 3
