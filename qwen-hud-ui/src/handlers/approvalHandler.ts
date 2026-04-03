@@ -1,4 +1,4 @@
-// specter-lens-ui/src/handlers/approvalHandler.ts
+// qwen-hud-ui/src/handlers/approvalHandler.ts
 
 interface ChangeRequest {
   id: string;

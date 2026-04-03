@@ -91,7 +91,7 @@ qwen-coding-local/
 │   ├── LP_SYSTEM_PROMPT.md       # Lachman Protocol system instructions
 │   └── workflows/                # Tool-specific guides
 │
-├── specter-lens-ui/              # React/Vite HUD dashboard (optional)
+├── qwen-hud-ui/                  # React/Vite HUD dashboard (optional)
 ├── vscode-extension/             # VSCode extension for HUD
 ├── pyproject.toml                # Project metadata & dependencies
 ├── .env.example                  # Environment template
@@ -143,7 +143,7 @@ uv run pytest tests/ -v --cov=src/qwen_mcp
 
 ### Build UI (Optional)
 ```bash
-cd specter-lens-ui
+cd qwen-hud-ui
 npm install
 npm run build
 ```

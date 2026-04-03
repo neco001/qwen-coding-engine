@@ -112,15 +112,16 @@ The engine automatically selects the best model for each task via **Qwen-Turbo M
 | :--- | :--- | :--- | :--- |
 | **Logic** | `qwen_architect` | **Strategist**: Expert planner & JSON architect. | `qwen3.5-plus` |
 | **Code** | `qwen_coder` | **Coder**: Writing production-grade complete files. | `qwen3-coder-plus` |
-| **Code** | `qwen_coder_pro` | **Specialist**: Expert in complex logic & Refactoring. | `qwen2.5-72b-instruct` |
-| **SRE** | `qwen_audit` | **Analyst**: Reason-heavy SRE/Debugging (QwQ). | `qwq-plus` |
-| **Strategy** | `qwen_sparring_flash` | **Tactician**: Quick strategic analysis & reasoning. | `qwq-plus` → `qwen3.5-plus` |
-| **Strategy** | `qwen_sparring_pro` | **Debate Master**: Full adversarial multi-agent debate. | `qwen3.5-plus` / `qwq-plus` |
-| **Data** | `qwen_read_file` | **Scout**: Context discovery and fast summaries. | `qwen-turbo` |
-| **Data** | `qwen_list_files` | **Explorer**: Map project structure. | `qwen-turbo` |
+| **Code** | `qwen_coder_pro` | **Specialist**: Expert in complex logic & Refactoring. | `qwen3-coder-plus` |
+| **SRE** | `qwen_audit` | **Analyst**: Reason-heavy SRE/Debugging. | `glm-5` |
+| **Strategy** | `qwen_sparring` (mode=`sparring1`) | **Flash**: Quick 2-step analysis. | `glm-5` → `qwen3.5-plus` |
+| **Strategy** | `qwen_sparring` (mode=`sparring2`) | **Normal**: Full 4-step session (DEFAULT). | `qwen3.5-plus` / `glm-5` |
+| **Strategy** | `qwen_sparring` (mode=`sparring3`) | **Pro**: Step-by-step with checkpointing. | `qwen3.5-plus` / `glm-5` |
+| **Data** | `qwen_read_file` | **Scout**: Context discovery and fast summaries. | `kimi-k2.5` |
+| **Data** | `qwen_list_files` | **Explorer**: Map project structure. | `kimi-k2.5` |
 | **Admin** | `qwen_usage_report`| **Billing**: Token/Cost report from DuckDB. | N/A |
 | **Admin** | `qwen_init_request`| **Telemetry**: Reset token counter for new tasks. | N/A |
-| **Logic** | `qwen_refresh_models`| **Intelligence**: Trigger meta-analysis update. | `qwen-turbo` |
+| **Logic** | `qwen_refresh_models`| **Intelligence**: Trigger meta-analysis update. | `kimi-k2.5` |
 | **Logic** | `qwen_heal_registry`| **Self-Heal**: Auto-repair model role mappings. | N/A |
 | **Logic** | `qwen_set_model` | **Manual**: Override a role assignment. | User Defined |
 | **Logic** | `qwen_set_billing_mode`| **Finance**: Switch between payg/coding_plan/hybrid. | N/A |
@@ -146,23 +147,50 @@ When `billing_mode="coding_plan"`, the engine uses **ONLY** these models:
 
 ### Model Rotation in Sparring Engine
 
-The Sparring Engine uses **dynamic model rotation** within a single tool call. The actual models depend on your billing mode:
+The Sparring Engine uses **dynamic model rotation** within a single tool call. Use the `mode` parameter to select the sparring level:
 
-**`qwen_sparring_flash`** (2-turn analysis):
-| Turn | Role | PAYG Model | Coding Plan Model |
-| :--- | :--- | :--- | :--- |
-| Turn 1 | Analyst | `qwq-plus` | `glm-5` |
-| Turn 2 | Drafter | `qwen3.5-plus` | `qwen3.5-plus` |
+**`qwen_sparring(mode="sparring1")`** - Flash (2-turn analysis):
+| Turn | Role | Model |
+| :--- | :--- | :--- |
+| Turn 1 | Analyst | `glm-5` |
+| Turn 2 | Drafter | `qwen3.5-plus` |
 
-**`qwen_sparring_pro`** (multi-turn war game):
-| Turn | Role | PAYG Model | Coding Plan Model |
-| :--- | :--- | :--- | :--- |
-| Discovery | Role Assembler | `qwen3.5-plus` | `qwen3.5-plus` |
-| Red Cell | Adversary Audit | `qwq-plus` | `glm-5` |
-| Blue Cell | Strategic Defense | `qwen3.5-plus` | `qwen3.5-plus` |
-| White Cell | Final Consensus | `qwen3.5-plus` | `qwen3.5-plus` |
+**`qwen_sparring(mode="sparring2")`** - Normal (4-step full session, DEFAULT):
+| Step | Role | Model |
+| :--- | :--- | :--- |
+| Discovery | Role Assembler | `qwen3.5-plus` |
+| Red Cell | Adversary Audit | `glm-5` |
+| Blue Cell | Strategic Defense | `qwen3.5-plus` |
+| White Cell | Final Consensus | `qwen3.5-plus` |
+
+**`qwen_sparring(mode="sparring3")`** - Pro (step-by-step with checkpointing):
+| Step | Role | Timeout |
+| :--- | :--- | :--- |
+| `discovery` | Create session + define roles | 100s |
+| `red` | Adversary critique | 100s |
+| `blue` | Strategic defense | 100s |
+| `white` | Final synthesis | 100s |
 
 This rotation ensures each phase uses the most cost-effective model for its specific cognitive task while respecting billing mode constraints.
+
+### Scout-Powered Context Discovery
+
+The **Scout** role (powered by **kimi-k2.5**) is the foundation of all context-aware operations:
+
+| Tool | Scout's Role |
+| :--- | :--- |
+| `qwen_read_file` | Reads and summarizes files for Architect, Coder, and Auditor. Uses kimi-k2.5 for fast, accurate extraction of relevant code sections. |
+| `qwen_list_files` | Maps project structure, identifies key directories, and filters irrelevant files (node_modules, __pycache__, etc.). |
+| **Architect Integration** | Scout pre-scans the codebase before blueprint generation, ensuring the plan respects existing architecture. |
+| **Coder Integration** | Scout fetches related modules before coding, enabling the Coder to understand imports, dependencies, and patterns. |
+| **Auditor Integration** | Scout gathers full file context + logs before audit, enabling complete Root Cause Analysis without "missing context" errors. |
+| **Sparring Integration** | Scout summarizes project context before the sparring session, ensuring all debate participants share the same baseline understanding. |
+
+**Why kimi-k2.5 for Scout?**
+- Fast token generation (critical for file scanning)
+- Strong code comprehension (understands imports, classes, functions)
+- Cost-effective for high-volume read operations
+- Available in both `coding_plan` and `payg` billing modes
 
 ---
 
@@ -207,11 +235,11 @@ graph TD
   R --> A
   end
 
-  subgraph "Phase 5: Parallel Execution (Swarm)"
+  subgraph "Phase 5: Parallel Execution"
   G --> S{Parallelizable Task?}
   S -- "Yes" --> T[SwarmOrchestrator]
   T --> U[Decompose into SubTasks]
-  U --> V[Execute in Parallel (max 5)]
+  U --> V["Execute in Parallel (max 5)"]
   V --> W[Synthesize Results]
   W --> K
   end
@@ -231,19 +259,25 @@ The Architect doesn't just write a list of steps. It initiates the **Lachman Pro
 3. **Self-Healing Circuit:** Before you see the result, a separate **Verifier** model audits the blueprint for "degeneration" (placeholders, logical gaps). If it fails, the engine autonomously retries to fix the design.
 *  **Output:** A high-precision JSON Blueprint with a TDD-first roadmap and "Clean Slate" instructions (what to delete).
 
+**Scout Integration:** Before architecting, the engine uses `qwen_read_file` and `qwen_list_files` (powered by **kimi-k2.5**) to discover project structure, existing patterns, and dependencies. This ensures the blueprint is grounded in your actual codebase, not assumptions.
+
 ### The Coder (The Implementation)
-**Logic:** `qwen_coder` / `qwen_coder_pro` / **Model:** `qwen3-coder-plus` or `qwen2.5-72b-instruct`
+**Logic:** `qwen_coder` / `qwen_coder_pro` / **Model:** `qwen3-coder-next` or `qwen3-coder-plus`
 The Coder is bound by strict **Surgicial Precision Rules**:
 -  **No Placeholders:** A absolute ban on `// ... rest of code`. Every file is generated in full or as a clean, integrable block.
 -  **Context Awareness:** It consumes the Architect's blueprint to stay aligned with the big picture.
--  **Model Switching:** For simple boilerplate, it uses `qwen3-coder-next` (fast, inline). For complex algorithms or heavy refactoring, it escalates to `qwen3-coder-plus` (huge context) or `qwen2.5-72b-instruct` (maximum logic density).
+-  **Model Switching:** For simple boilerplate, it uses `qwen3-coder-next` (fast, inline). For complex algorithms or heavy refactoring, it escalates to `qwen3-coder-plus` (huge context, maximum logic density).
+
+**Scout Integration:** For large refactors, the Coder uses `qwen_read_file` (kimi-k2.5) to scan existing implementations, understand patterns, and ensure new code integrates seamlessly with legacy modules.
 
 ### The Auditor (The Analyst)
-**Logic:** `qwen_audit` / **Model:** `qwq-plus`
-The Auditor uses **heavy reasoning (QwQ)** to act as a Senior SRE (Site Reliability Engineer):
+**Logic:** `qwen_audit` / **Model:** `glm-5`
+The Auditor uses **heavy reasoning** to act as a Senior SRE (Site Reliability Engineer):
 -  **Root Cause Analysis (RCA):** Feed it terminal logs, and it will find the exact line causing the memory leak or dependency conflict.
 -  **Brevity & ROI:** It doesn't nitpick code style. It focuses on high-impact fixes, security vulnerabilities, and edge cases that simpler models miss.
 -  **Zero Fluff:** You get actionable feedback and specific code blocks to fix, nothing more.
+
+**Scout Integration:** The Auditor uses `qwen_read_file` (kimi-k2.5) to gather full file context before analysis, ensuring RCA is based on complete code, not truncated snippets.
 
 ---
 
@@ -280,7 +314,9 @@ The engine includes a lightweight telemetry sidecar that streams real-time token
 ### Architecture:
 - **Port**: 8878 (WebSocket)
 - **Protocol**: JSON telemetry events
-- **Integration**: VSCode extension (specter-qwen-hud)
+- **Integration**: VSCode extension (qwen-hud-ui)
+
+> **⚠️ Status**: The HUD is currently under repair. The MCP server works fully without the UI component.
 
 ### Telemetry Events:
 - Token consumption (prompt/completion)
@@ -305,11 +341,11 @@ Here is a real example of an entire afternoon spent orchestrating the 5-role squ
 
 | Model | Prompts | Completions | Total Tokens |
 |---|---|---|---|
-| **qwen-flash** (Scout) | 3,946 | 1,853 | **5,799** |
-| **qwen3-coder-next** (Specialist) | 920 | 2,638 | **3,558** |
-| **qwen3-coder-plus** (Coder)| 1,150 | 1,223 | **2,373** |
+| **kimi-k2.5** (Scout) | 3,946 | 1,853 | **5,799** |
+| **qwen3-coder-next** (Coder) | 920 | 2,638 | **3,558** |
+| **qwen3-coder-plus** (Coder Pro)| 1,150 | 1,223 | **2,373** |
 | **qwen3.5-plus** (Strategist) | 952 | 1,254 | **2,206** |
-| **qwq-plus** (Analyst) | 721 | 3,313 | **4,034** |
+| **glm-5** (Analyst) | 721 | 3,313 | **4,034** |
 | **TOTAL TODAY** | **7,689** | **10,281** | **~17,970 tokens** |
 
 *Cost for a full SRE squad rewriting your codebase? Fractions of a cent on DashScope. You can pull this exact report anytime via the `qwen_usage_report` tool.*
@@ -342,7 +378,7 @@ Without these steps, your primary assistant will not know how to orchestrate the
 
 ### Continuous Improvement: Backlog Protocol
 The Lachman Protocol doesn't stop at deployment. For heavy projects, we use a mandatory **Backlog Workflow**:
--  Any insight or secondary task found during a `qwen_audit` is immediately registered via the **[Backlog Protocol](./.agent/workflows/TBLG_To_backlog.md)**.
+-  Any insight or secondary task found during a `qwen_audit` is immediately registered in the `.qwen/` directory.
 -  This ensures your project has a "memory" beyond the current chat context.
 
 ---
@@ -350,8 +386,9 @@ The Lachman Protocol doesn't stop at deployment. For heavy projects, we use a ma
 ## Installation & Setup
 
 ### 0. Required Tools
-- **Antigravity, Claude Desktop, Cursor**, etc.
+- **Antigravity, Claude Desktop, Cursor, Roo**, or any MCP-compatible host.
 - **QWEN API KEY** (via Alibaba DashScope).
+- **uv** - Python package manager (uses `uv add` and `uv pip install`).
 - **Brain** - even this tool requires PI (Protein Intelligence). It is as intelligent as your interaction with it... Do not expect wonders after typing "write an email for me".
 
 ### 1. Get a DashScope API Key

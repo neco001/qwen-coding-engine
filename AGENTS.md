@@ -16,8 +16,8 @@ pytest tests/ -v
 # Run single test
 pytest tests/test_api_v2.py::test_generate_completion_reasoning_fallback -v
 
-# Build UI (React/Vite in specter-lens-ui/)
-cd specter-lens-ui && npm run build
+# Build UI (React/Vite in qwen-hud-ui/)
+cd qwen-hud-ui && npm run build
 
 # Package VSCode extension
 cd vscode-extension && npx @vscode/vsce package --allow-missing-repository

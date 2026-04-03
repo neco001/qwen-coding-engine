@@ -29,5 +29,10 @@ hf_output.txt
 hf_sync_res.txt
 .sparring_sessions/
 
+# Test files in root directory
+test_*.py
 
-
+*.checkpoint.json
+*.vsix
+temp/
+_archive/
