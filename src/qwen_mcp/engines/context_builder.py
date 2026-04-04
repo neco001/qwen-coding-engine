@@ -182,14 +182,16 @@ class ContextBuilderEngine:
         Returns:
             Tuple of (project_context_content, data_context_content)
         """
-        # Ensure context directory exists
-        self.context_dir.mkdir(exist_ok=True, parents=True)
+        # Resolve absolute context directory
+        base_path = Path(workspace_root)
+        resolved_context_dir = base_path / self.context_dir
+        resolved_context_dir.mkdir(exist_ok=True, parents=True)
         
-        # OPTIMIZATION: Check if _PROJECT_CONTEXT.md exists at root - use it directly
-        root_project_context = Path(workspace_root) / "_PROJECT_CONTEXT.md"
-        if root_project_context.exists():
-            logger.info("Using existing _PROJECT_CONTEXT.md from project root")
-            project_context = root_project_context.read_text(encoding="utf-8")
+        # OPTIMIZATION: Check if _PROJECT_CONTEXT.md exists - use it directly
+        existing_project_context = resolved_context_dir / "_PROJECT_CONTEXT.md"
+        if existing_project_context.exists():
+            logger.info(f"Using existing _PROJECT_CONTEXT.md from {existing_project_context}")
+            project_context = existing_project_context.read_text(encoding="utf-8")
         else:
             # Generate using static analysis only (no LLM)
             project_context = await self._generate_static_project_context(workspace_root)
@@ -668,21 +670,23 @@ Generate updated _SESSION_SUPPLEMENT.md preserving previous sessions as history.
         Returns:
             Dict mapping context type to file path
         """
-        self.context_dir.mkdir(exist_ok=True, parents=True)
+        base_path = Path(workspace_root)
+        resolved_context_dir = base_path / self.context_dir
+        resolved_context_dir.mkdir(exist_ok=True, parents=True)
         
         saved_files = {}
         
         # Save project context
-        project_path = self.context_dir / "_PROJECT_CONTEXT.md"
+        project_path = resolved_context_dir / "_PROJECT_CONTEXT.md"
         self._atomic_write(project_path, project_context)
         saved_files["project"] = project_path
         
         # Save data context
-        data_path = self.context_dir / "_DATA_CONTEXT.md"
+        data_path = resolved_context_dir / "_DATA_CONTEXT.md"
         self._atomic_write(data_path, data_context)
         saved_files["data"] = data_path
         
-        logger.info(f"Context files saved to {self.context_dir}")
+        logger.info(f"Context files saved to {resolved_context_dir}")
         return saved_files
     
     def save_session_context(
@@ -691,9 +695,11 @@ Generate updated _SESSION_SUPPLEMENT.md preserving previous sessions as history.
         workspace_root: str = "."
     ) -> Path:
         """Atomically save session supplement."""
-        self.context_dir.mkdir(exist_ok=True, parents=True)
+        base_path = Path(workspace_root)
+        resolved_context_dir = base_path / self.context_dir
+        resolved_context_dir.mkdir(exist_ok=True, parents=True)
         
-        session_path = self.context_dir / "_SESSION_SUPPLEMENT.md"
+        session_path = resolved_context_dir / "_SESSION_SUPPLEMENT.md"
         self._atomic_write(session_path, session_content)
         
         logger.info(f"Session context saved to {session_path}")
@@ -706,10 +712,11 @@ Generate updated _SESSION_SUPPLEMENT.md preserving previous sessions as history.
         This prevents corruption if the process is interrupted during write.
         Matches the pattern from SessionStore.save().
         """
+        parent_dir = path.parent
         # Write to temp file first
         fd, temp_path = tempfile.mkstemp(
             suffix=".tmp",
-            dir=self.context_dir
+            dir=str(parent_dir)
         )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
