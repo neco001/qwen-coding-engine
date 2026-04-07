@@ -30,13 +30,39 @@ Sparring Engine v2 is a refactored version of the original `qwen_sparring_pro` t
 
 ## Modes
 
-| Mode | Timeout | Session Required | Description |
-|------|---------|------------------|-------------|
-| `flash` | 90s + 90s | No | Quick analysis + draft (single call) |
-| `discovery` | 60s | No (creates) | Create session + define roles |
-| `red` | 90s | Yes | Execute Red Cell critique |
-| `blue` | 90s | Yes + red | Execute Blue Cell defense |
-| `white` | 90s | Yes + red + blue | Execute White Cell synthesis |
+### sparring1 / flash (Quick Analysis)
+
+| Mode | Timeout | Max Tokens | Session Required | Description |
+|------|---------|------------|------------------|-------------|
+| `flash` | 90s + 90s = 180s | 1024 + 1024 = 2048 | No | Quick analysis + draft (single call) |
+
+**Use Case:** Szybkie decyzje, proste pytania. Czas generowania: ~10-20s.
+
+### sparring2 / full (Standard Session)
+
+| Mode | Timeout | Max Tokens | Session Required | Description |
+|------|---------|------------|------------------|-------------|
+| `discovery` | 100s | 512 | No (creates) | Create session + define roles |
+| `red` | 100s | 1024 | Yes | Execute Red Cell critique |
+| `blue` | 100s | 1024 | Yes + red | Execute Blue Cell defense |
+| `white` | 100s | 1024 | Yes + red + blue | Execute White Cell synthesis |
+
+**Total:** 3584 tokens (~2600 words), czas generowania: ~65-80s. Timeout: 180s z marginesem 100s.
+
+**Use Case:** Standardowe analizy (80% przypadków).
+
+### sparring3 / pro (Deep Analysis)
+
+| Mode | Timeout | Max Tokens | Session Required | Description |
+|------|---------|------------|------------------|-------------|
+| `discovery` | 100s | 512 | No (creates) | Create session + define roles |
+| `red` | 100s | 4096 | Yes | Execute Red Cell critique |
+| `blue` | 100s | 4096 | Yes + red | Execute Blue Cell defense |
+| `white` | 100s | 4096 | Yes + red + blue | Execute White Cell synthesis |
+
+**Total:** 12800 tokens (~9500 words), czas generowania: ~245s. Timeout: 100s/krok = 400s całkowity.
+
+**Use Case:** Złożone strategie, audyt.
 
 ## Usage
 
@@ -167,20 +193,53 @@ def _save_session(self, session: SessionCheckpoint) -> None:
         raise
 ```
 
-## Timeout Configuration
+## Timeout and Token Configuration
+
+### Timeouts
 
 ```python
 TIMEOUTS = {
-    "flash_analyst": 90.0,      # Reduced from 300s
-    "flash_drafter": 90.0,       # Reduced from 300s
-    "discovery": 60.0,           # Keep as is (already low)
-    "red_cell": 90.0,            # Reduced from 300s
-    "blue_cell": 90.0,           # Reduced from 300s
-    "white_cell": 90.0,          # Reduced from 300s
+    "flash_analyst": 90.0,      # sparring1: 180s total for 2 steps
+    "flash_drafter": 90.0,      # sparring1: 180s total for 2 steps
+    "discovery": 100.0,         # sparring3: step-by-step, 100s per step
+    "red_cell": 100.0,          # sparring3: step-by-step, 100s per step
+    "blue_cell": 100.0,         # sparring3: step-by-step, 100s per step
+    "white_cell": 100.0,        # sparring3: step-by-step, 100s per step
 }
 ```
 
-**Rationale:** Each timeout is set to ensure completion well under the 300s MCP client limit, with buffer for network latency and processing overhead.
+### Max Tokens (Output Length Control)
+
+```python
+MAX_TOKENS_CONFIG = {
+    "flash": {
+        "analyst": 1024,        # sparring1: quick analysis
+        "drafter": 1024,        # sparring1: strategy draft
+    },
+    "full": {
+        "discovery": 512,       # sparring2: role definition (JSON)
+        "red": 1024,            # sparring2: critique
+        "blue": 1024,           # sparring2: defense
+        "white": 1024,          # sparring2: synthesis
+    },
+    "pro": {
+        "discovery": 512,       # sparring3: role definition (JSON)
+        "red": 4096,            # sparring3: deep critique
+        "blue": 4096,           # sparring3: detailed defense
+        "white": 4096,          # sparring3: comprehensive synthesis
+    },
+}
+```
+
+**Total Token Budget:**
+- **sparring1 (flash):** 2048 tokens (~1500 words, ~2-3 min gen time)
+- **sparring2 (full):** 3584 tokens (~2600 words, ~65-80s gen time)
+- **sparring3 (pro):** 12800 tokens (~9500 words, ~245s gen time)
+
+**Rationale:**
+- Timeouts are set to ensure completion well under the 300s MCP client limit
+- `max_tokens` provides predictable output length and generation time
+- Token limits prevent timeout risks by controlling response length
 
 ## Migration Guide
 

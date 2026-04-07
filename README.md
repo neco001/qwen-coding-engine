@@ -10,6 +10,8 @@
 
 By offloading heavy architectural planning and raw coding to specialized Qwen models, you stop the "two steps forward, one step back" dance and start delivering finished applications.
 
+**Version:** 1.0.1 | **License:** MIT | **Python:** 3.10+
+
 **[ See the Lachman Protocol Storyboard in action!](./docs/EXAMPLE.md)**
 
 ### This is NOT for you if:
@@ -111,7 +113,7 @@ The engine automatically selects the best model for each task via **Qwen-Turbo M
 | Category | Tool | Role | Default Model |
 | :--- | :--- | :--- | :--- |
 | **Logic** | `qwen_architect` | **Strategist**: Expert planner & JSON architect. | `qwen3.5-plus` |
-| **Code** | `qwen_coder` | **Coder**: Writing production-grade complete files. | `qwen3-coder-plus` |
+| **Code** | `qwen_coder` | **Coder**: Writing production-grade complete files. | `qwen3-coder-next` |
 | **Code** | `qwen_coder_pro` | **Specialist**: Expert in complex logic & Refactoring. | `qwen3-coder-plus` |
 | **SRE** | `qwen_audit` | **Analyst**: Reason-heavy SRE/Debugging. | `glm-5` |
 | **Strategy** | `qwen_sparring` (mode=`sparring1`) | **Flash**: Quick 2-step analysis. | `glm-5` → `qwen3.5-plus` |
@@ -119,6 +121,10 @@ The engine automatically selects the best model for each task via **Qwen-Turbo M
 | **Strategy** | `qwen_sparring` (mode=`sparring3`) | **Pro**: Step-by-step with checkpointing. | `qwen3.5-plus` / `glm-5` |
 | **Data** | `qwen_read_file` | **Scout**: Context discovery and fast summaries. | `kimi-k2.5` |
 | **Data** | `qwen_list_files` | **Explorer**: Map project structure. | `kimi-k2.5` |
+| **Context** | `qwen_init_context_tool` | **Initializer**: Generate project context files. | `kimi-k2.5` (Swarm for large projects) |
+| **Context** | `qwen_update_session_context_tool` | **Scribe**: Capture session insights. | N/A |
+| **SOS** | `qwen_add_task` | **Backlog**: Add task to BACKLOG.md + Parquet. | N/A |
+| **SOS** | `qwen_sync_state` | **Sync**: Apply pending advices to docs. | N/A |
 | **Admin** | `qwen_usage_report`| **Billing**: Token/Cost report from DuckDB. | N/A |
 | **Admin** | `qwen_init_request`| **Telemetry**: Reset token counter for new tasks. | N/A |
 | **Logic** | `qwen_refresh_models`| **Intelligence**: Trigger meta-analysis update. | `kimi-k2.5` |
@@ -140,8 +146,28 @@ When `billing_mode="coding_plan"`, the engine uses **ONLY** these models:
 | **Code** | `qwen_coder_pro` | **Specialist** | `qwen3-coder-plus` (heavy refactor, huge context) |
 | **SRE** | `qwen_audit` | **Analyst** | `glm-5` |
 | **Data** | `qwen_read_file` | **Scout** | `kimi-k2.5` |
+| **Context** | `qwen_init_context_tool` | **Initializer** | Swarm (parallel analysis) |
+| **SOS** | `qwen_add_task` | **Backlog** | N/A |
+| **SOS** | `qwen_sync_state` | **Sync** | N/A |
 
-> **Important**: In `coding_plan` mode, tools like `qwen_sparring_flash` and `qwen_sparring_pro` will use `glm-5` for audit tasks instead of `qwq-plus`, and `kimi-k2.5` for scouting instead of `qwen-turbo`.
+> **Important**: In `coding_plan` mode, sparring tools use `glm-5` for audit tasks, and `kimi-k2.5` for scouting.
+
+---
+
+### Context Tools: Project Documentation Automation
+
+The **Context Tools** automate creation and maintenance of project documentation:
+
+| Tool | Purpose | Output |
+| :--- | :--- | :--- |
+| `qwen_init_context_tool` | Generate initial project context | `.context/_PROJECT_CONTEXT.md`, `.context/_DATA_CONTEXT.md` |
+| `qwen_update_session_context_tool` | Capture session insights | `.context/_SESSION_SUPPLEMENT.md` |
+
+**When to use:**
+- **Start of new project**: Run `qwen_init_context_tool()` to generate tech stack, structure, and conventions docs
+- **End of each session**: Run `qwen_update_session_context_tool(session_summary="...")` to capture decisions and recommendations
+
+**Scout Integration:** Uses Swarm parallel analysis for large projects, single LLM call for small codebases.
 
 ---
 
@@ -163,15 +189,19 @@ The Sparring Engine uses **dynamic model rotation** within a single tool call. U
 | Blue Cell | Strategic Defense | `qwen3.5-plus` |
 | White Cell | Final Consensus | `qwen3.5-plus` |
 
+**Session Storage:** Sessions are checkpointed in JSON format at `%APPDATA%/qwen-mcp/sessions/` (Windows) or `~/.config/qwen-mcp/sessions/` (Linux/macOS).
+
 **`qwen_sparring(mode="sparring3")`** - Pro (step-by-step with checkpointing):
-| Step | Role | Timeout |
-| :--- | :--- | :--- |
-| `discovery` | Create session + define roles | 100s |
-| `red` | Adversary critique | 100s |
-| `blue` | Strategic defense | 100s |
-| `white` | Final synthesis | 100s |
+| Step | Role | Timeout | Max Tokens |
+| :--- | :--- | :--- | :--- |
+| `discovery` | Create session + define roles | 100s | 512 |
+| `red` | Adversary critique | 100s | 4096 |
+| `blue` | Strategic defense | 100s | 4096 |
+| `white` | Final synthesis | 100s | 4096 |
 
 This rotation ensures each phase uses the most cost-effective model for its specific cognitive task while respecting billing mode constraints.
+
+**Guided UX:** Each step returns a `next_step` hint with a copy-paste ready command for the next mode.
 
 ### Scout-Powered Context Discovery
 
@@ -276,8 +306,11 @@ The Auditor uses **heavy reasoning** to act as a Senior SRE (Site Reliability En
 -  **Root Cause Analysis (RCA):** Feed it terminal logs, and it will find the exact line causing the memory leak or dependency conflict.
 -  **Brevity & ROI:** It doesn't nitpick code style. It focuses on high-impact fixes, security vulnerabilities, and edge cases that simpler models miss.
 -  **Zero Fluff:** You get actionable feedback and specific code blocks to fix, nothing more.
+-  **Auto-Backlog Integration:** When `qwen_audit` finds issues outside session scope, it automatically triggers `qwen_add_task` to register the task in BACKLOG.md.
 
 **Scout Integration:** The Auditor uses `qwen_read_file` (kimi-k2.5) to gather full file context before analysis, ensuring RCA is based on complete code, not truncated snippets.
+
+**Swarm Auto-Detection:** For multi-file content, `qwen_audit` automatically uses parallel analysis for faster, more comprehensive audits.
 
 ---
 
@@ -367,19 +400,37 @@ To get the most out of the Qwen Engineering Engine, you **MUST** provide your pr
 
 For agents supporting slash commands or `.md` workflows, you can trigger these specialized protocols:
 
-- **`/QW_architect`**: Initiates a high-precision planning phase.
-- **`/QW_coder`**: Orchestrates surgical code generation.
-- **`/QW_audit`**: Automates Root Cause Analysis (RCA).
-- **`/QW_admin`**: Automates financial monitoring and model registry management.
+| Workflow | Purpose | Output |
+| :--- | :--- | :--- |
+| **`/QW_architect`** | High-precision planning phase | Technical Blueprint + TDD Roadmap |
+| **`/QW_coder`** | Surgical code generation | Complete, no-placeholder code |
+| **`/QW_audit`** | Root Cause Analysis (RCA) | Bug fix + optional backlog task |
+| **`/QW_admin`** | Financial monitoring | Token usage + model registry status |
+| **`/QW_sync`** | SOS state synchronization | BACKLOG.md + CHANGELOG.md updated |
 
 Each workflow is designed to reduce agent "laziness" and enforce production-grade engineering standards.
 
 Without these steps, your primary assistant will not know how to orchestrate the specialized Qwen experts, and you risk falling into the "Hallucination Trap".
 
-### Continuous Improvement: Backlog Protocol
-The Lachman Protocol doesn't stop at deployment. For heavy projects, we use a mandatory **Backlog Workflow**:
--  Any insight or secondary task found during a `qwen_audit` is immediately registered in the `.qwen/` directory.
--  This ensures your project has a "memory" beyond the current chat context.
+### SOS Sync: Backlog & Changelog Automation
+
+The **SOS Sync Engine** automates project documentation by keeping BACKLOG.md and CHANGELOG.md in sync with the decision log (Parquet):
+
+| Tool | Purpose | Workflow |
+| :--- | :--- | :--- |
+| `qwen_add_task` | Add task to BACKLOG.md + Parquet | Audit finds issue → Auto-adds to backlog |
+| `qwen_sync_state` | Apply pending advices to docs | Session end → Mark tasks complete, update changelog |
+
+**How it works:**
+1. **Files → Parquet**: `qwen_add_task` creates a decision record and adds a checkbox task to BACKLOG.md
+2. **Parquet → Files**: `qwen_sync_state` scans for records with `agentic_advice`, marks tasks as `[x]` in BACKLOG.md, and appends entries to CHANGELOG.md
+
+**Storage:**
+- **Decision Log**: `src/decision_log.parquet` (atomic writes with lock file)
+- **Backlog**: `PLAN/BACKLOG.md` (or custom path)
+- **Changelog**: `PLAN/CHANGELOG.md` (or auto-created)
+
+This ensures your project maintains a "memory" beyond the current chat context.
 
 ---
 
@@ -391,14 +442,30 @@ The Lachman Protocol doesn't stop at deployment. For heavy projects, we use a ma
 - **uv** - Python package manager (uses `uv add` and `uv pip install`).
 - **Brain** - even this tool requires PI (Protein Intelligence). It is as intelligent as your interaction with it... Do not expect wonders after typing "write an email for me".
 
-### 1. Get a DashScope API Key
+### 1. Project Structure
+
+```
+qwen-coding-local/
+├── src/qwen_mcp/          # Core MCP server
+│   ├── engines/           # Specialized engines (Coder, Sparring, SOS)
+│   ├── specter/           # Telemetry & identity
+│   └── prompts/           # System prompts for each role
+├── src/decision_log/      # Decision schema & writer
+├── src/graph/             # Static analysis & dependency tracking
+├── tests/                 # TDD test suite
+├── PLAN/                  # Project backlog & changelog (git-ignored)
+├── .context/              # Auto-generated project context
+└── qwen-hud-ui/           # React/Vite telemetry dashboard
+```
+
+### 2. Get a DashScope API Key
 *What is DashScope?* It's Alibaba Cloud's native platform for serving Qwen models. By pulling directly from Alibaba, you get the absolute lowest prices and maximum rate limits.
 1. Create an account on Alibaba Cloud / DashScope.
 2. Claim your free tier/trial tokens.
 3. Generate your `DASHSCOPE_API_KEY`.
 *(Alternatively, you can use OpenRouter, but be prepared to pay their markup fees).*
 
-### 2. Local Development Setup (Quick Start)
+### 3. Local Development Setup (Quick Start)
 Since the package is in development, install it in editable mode:
 
 ```bash
@@ -407,7 +474,7 @@ cd qwen-coding-local
 uv pip install -e .
 ```
 
-### 2. Configure Environment
+### 4. Configure Environment
 Create a `.env` file or set the following variables:
 ```bash
 export DASHSCOPE_API_KEY=your_key_here
@@ -415,7 +482,7 @@ export DASHSCOPE_API_KEY=your_key_here
 # export OLLAMA_BASE_URL=http://localhost:11434/v1
 ```
 
-### 3. Let your AI do the work (Recommended)
+### 5. Let your AI do the work (Recommended)
 Don't waste time manually editing config files. Just copy the prompt from **[INSTALL_MCP.md](./docs/INSTALL_MCP.md)** and paste it into your AI assistant. It will handle the registration and paths for you.
 
 *Manual configuration block for reference:*

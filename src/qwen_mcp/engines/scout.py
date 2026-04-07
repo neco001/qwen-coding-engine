@@ -62,22 +62,28 @@ Rules:
             
             match = re.search(r"\{.*\}", raw, re.DOTALL)
             if match:
-                data = json.loads(match.group(0))
-                logger.info(f"Scout Result: {data['complexity']} (score: {data['score']}), use_swarm={data.get('use_swarm', False)}, is_brownfield={data.get('is_brownfield', False)}")
-                return data
-                
+                try:
+                    data = json.loads(match.group(0))
+                    if isinstance(data, dict):
+                        logger.info(f"Scout Result: {data.get('complexity', 'unknown')} (score: {data.get('score', 0)}), use_swarm={data.get('use_swarm', False)}, is_brownfield={data.get('is_brownfield', False)}")
+                        return data
+                except Exception as je:
+                    logger.warning(f"Failed to parse Scout JSON: {je}")
+            
+            # Fallback for parsing failure
+            logger.warning(f"Scout failed to find/parse JSON in response: {raw[:100]}...")
             return {
                 "complexity": self._heuristic_complexity(prompt, context),
                 "use_swarm": False,
-                "is_brownfield": False,  # Default to greenfield on fallback
-                "reason": "Scout failed to follow JSON format"
+                "is_brownfield": False,
+                "reason": "Scout failed to follow JSON format or returned invalid JSON"
             }
         except Exception as e:
             logger.warning(f"Scout failed: {e}")
             return {
                 "complexity": self._heuristic_complexity(prompt, context),
                 "use_swarm": False,
-                "is_brownfield": False,  # Default to greenfield on fallback
+                "is_brownfield": False,
                 "reason": f"Scout error: {str(e)}"
             }
 

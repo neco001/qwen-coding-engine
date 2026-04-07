@@ -1,13 +1,35 @@
 import logging
 import json
 import re
+import os
+import glob
 from typing import Optional, List, Dict, Any
 from mcp.server.fastmcp import Context
 from qwen_mcp.api import DashScopeClient
-from qwen_mcp.base import set_billing_mode as apply_billing_mode, get_billing_mode
+from qwen_mcp.base import set_billing_mode, get_billing_mode as get_current_billing_mode
 from qwen_mcp.registry import registry
 from qwen_mcp.sanitizer import ContentValidator
 from qwen_mcp.specter.telemetry import get_broadcaster
+
+# Re-export billing mode functions for server.py
+__all__ = [
+    'set_billing_mode',
+    'get_current_billing_mode',
+    'generate_audit',
+    'generate_code_unified',
+    'generate_lp_blueprint',
+    'generate_sparring',
+    'generate_swarm',
+    'generate_sos_sync',
+    'generate_usage_report',
+    'heal_registry',
+    'list_available_models',
+    'list_repo_files',
+    'qwen_init_context',
+    'qwen_update_session_context',
+    'read_repo_file',
+    'set_model_in_registry',
+]
 
 # New modular imports
 from qwen_mcp.prompts.system import AUDIT_SYSTEM_PROMPT, CODER_SYSTEM_PROMPT
@@ -15,65 +37,15 @@ from qwen_mcp.prompts.lachman import LP_DISCOVERY_PROMPT, LP_ARCHITECT_PROMPT, L
 
 logger = logging.getLogger(__name__)
 
-
-# =============================================================================
-# Sparring Mode Configuration (defined here to avoid circular imports)
-# =============================================================================
-
-# Mode aliases: sparring1/2/3 → internal modes
-MODE_ALIASES = {
-    "sparring1": "flash",    # Quick 2-step analysis
-    "sparring2": "full",     # Full session in one call (DEFAULT)
-    "sparring3": "pro",      # Step-by-step with checkpointing
-    # Short aliases
-    "nor": "full",           # "normal" shortcut
-    # Legacy aliases (passthrough)
-    "flash": "flash",
-    "full": "full",
-    "pro": "pro",
-    "discovery": "discovery",
-    "red": "red",
-    "blue": "blue",
-    "white": "white",
-}
-
-# Default sparring level
-DEFAULT_SPARRING_MODE = "sparring2"  # normal/full mode
-
-
-def resolve_sparring_mode(mode: str) -> str:
-    """
-    Resolve sparring mode alias to internal mode name.
-    
-    Sparring Levels:
-    - sparring1 (flash): 2 steps (analyst→drafter), 180s total
-    - sparring2 (normal): 4 steps in one call (full), 180s total - DEFAULT
-    - sparring3 (pro): 4 steps separately (step-by-step), 100s per step
-    
-    Args:
-        mode: User-provided mode (sparring1, sparring2, sparring3, flash, full, pro, nor, etc.)
-              Case-insensitive: "SPARRING1", "Sparring1", "sparring1" all work.
-    
-    Returns:
-        Internal mode name (flash, full, pro, discovery, red, blue, white)
-    """
-    # Normalize to lowercase for case-insensitive matching
-    normalized_mode = mode.lower().strip() if mode else ""
-    
-    # Check if mode is in aliases
-    if normalized_mode in MODE_ALIASES:
-        return MODE_ALIASES[normalized_mode]
-    
-    # If not found, return flash as fallback (safest option)
-    logger.warning(f"Unknown sparring mode '{mode}'. Using 'flash' as fallback.")
-    return "flash"
-
 def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
     """Utility to pull JSON blocks from LLM markdown responses."""
+    if not text:
+        return None
     try:
         # Try finding a ```json block first
         match = re.search(r'```json\n(.*?)\n```', text, re.DOTALL)
         json_str = match.group(1) if match else text
+        if not json_str: return None
         return json.loads(json_str.strip())
     except Exception:
         # Fallback to finding anything that looks like a JSON object
@@ -85,400 +57,154 @@ def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
             pass
     return None
 
-async def generate_audit(
-    content: str,
-    context: Optional[str] = None,
-    ctx: Optional[Context] = None,
-    use_swarm: bool = True,
-    project_id: str = "default"
-) -> str:
-    """
-    Audits the provided code or terminal logs using Qwen models.
-    
-    For multi-file content, automatically uses Swarm for parallel analysis.
-    Set use_swarm=False to disable parallel processing.
-    
-    Args:
-        content: The code or logs to audit
-        context: Additional context for the audit
-        ctx: MCP context for progress reporting
-        use_swarm: Enable automatic parallel file analysis (default: True)
-        project_id: Project/session ID for telemetry isolation (format: {instance}_{source}_{hash})
-    
-    Returns:
-        Audit report with findings and recommendations
-    """
-    from qwen_mcp.engines.scout import ScoutEngine
-    from qwen_mcp.orchestrator import SwarmOrchestrator
-    
-    client = DashScopeClient()
-    scout = ScoutEngine(client)
-    
-    # 1. Scout Analysis
-    scout_res = await scout.analyze_task(
-        content, context, task_hint="audit",
-        progress_callback=ctx.report_progress if ctx else None
-    )
-    use_swarm_recommendation = scout_res.get("use_swarm", False)
-    complexity = scout_res.get("complexity", "high")
-    reason = scout_res.get("reason", "Standard audit")
-    
-    # 2. Execution Choice
-    if use_swarm and use_swarm_recommendation:
-        orchestrator = SwarmOrchestrator(completion_handler=client)
-        
-        swarm_prompt = f"""Audit the following code or logs for issues, bugs, and improvements.
-Context: {context or 'General code audit'}
-Content to audit:
-{content}
-
-Provide a comprehensive audit report with summary, critical issues, and recommendations."""
-        
-        return await orchestrator.run_swarm(swarm_prompt, task_type="audit")
-    
-    # Standard completion with intelligent complexity limit
-    messages = [
-        {"role": "system", "content": AUDIT_SYSTEM_PROMPT},
-        {"role": "user", "content": f"Context: {context or 'None'}\n\nContent to audit:\n{content}"}
-    ]
-    return await client.generate_completion(
-        messages=messages,
-        task_type="audit",
-        complexity=complexity,
-        tags=["audit"],
-        progress_callback=ctx.report_progress if ctx else None,
-        project_id=project_id
-    )
-
-async def generate_code(
-    prompt: str,
-    context: Optional[str] = None,
-    ctx: Optional[Context] = None,
-    project_id: str = "default"
-) -> str:
-    """
-    Simple code generation using standard coder model.
-    
-    Args:
-        prompt: The code generation request
-        context: Additional context (optional)
-        ctx: MCP context for progress reporting
-        project_id: Project/session ID for telemetry isolation (format: {instance}_{source}_{hash})
-    
-    Returns:
-        Generated code as markdown text
-    """
-    client = DashScopeClient()
-    messages = [
-        {"role": "system", "content": CODER_SYSTEM_PROMPT},
-        {"role": "user", "content": f"Context: {context or 'None'}\n\nPrompt: {prompt}"}
-    ]
-    return await client.generate_completion(
-        messages=messages,
-        task_type="coding",
-        tags=["coder"],
-        progress_callback=ctx.report_progress if ctx else None,
-        project_id=project_id
-    )
-
-async def generate_code_unified(
-    prompt: str,
-    mode: str = "auto",
-    context: Optional[str] = None,
-    ctx: Optional[Context] = None,
-    project_id: str = "default"
-) -> str:
-    """
-    Unified code generation with mode-based routing.
-    
-    Modes:
-    - auto: Intelligent routing based on prompt complexity (default)
-    - standard: Fast generation using qwen3-coder-next
-    - pro: Heavy-duty generation using qwen3-coder-plus
-    - expert: Maximum capability for complex refactors/architecture
-    
-    Args:
-        prompt: The code generation request
-        mode: One of 'auto', 'standard', 'pro', 'expert'
-        context: Additional context (optional)
-        ctx: MCP context for progress reporting
-        project_id: Project/session ID for telemetry isolation (format: {instance}_{source}_{hash})
-    
-    Returns:
-        Markdown-formatted response with generated code
-    """
-    from qwen_mcp.engines.coder_v2 import CoderEngineV2
-    
-    client = DashScopeClient()
-    engine = CoderEngineV2(client)
-    
-    response = await engine.execute(
-        prompt=prompt,
-        mode=mode,
-        context=context or "",
-        ctx=ctx,
-        project_id=project_id
-    )
-    
-    return response.to_markdown()
-
 async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: Optional[Context] = None) -> str:
-    """
-    Generate blueprint. Scout detects if task involves existing code (brownfield) or new code (greenfield).
-    
-    BROWNFIELD = modifying existing files → diffs, line numbers, surgical edits
-    GREENFIELD = creating new files → full code OK
-    
-    Scout analyzes the task and determines the appropriate approach.
-    """
+    """Generate blueprint with heavy defense against NoneType errors and timeout protection."""
     from qwen_mcp.engines.scout import ScoutEngine
     from qwen_mcp.prompts.lachman import LP_BROWNFIELD_PROMPT
+    from qwen_mcp.specter.telemetry import get_broadcaster
     
     client = DashScopeClient()
     scout = ScoutEngine(client)
     
-    # Scout analyzes task - detects brownfield vs greenfield from context
-    scout_res = await scout.analyze_task(
-        goal, context, task_hint="strategy/architecture",
-        progress_callback=ctx.report_progress if ctx else None
-    )
+    # Extract project_id for telemetry
+    project_id = "default"
+    if ctx:
+        try:
+            from mcp.server.fastmcp import Context
+            # Extract from ctx if available
+            pass
+        except Exception:
+            pass
+    
+    # 0. Initial Sizing with heartbeat protection
+    try:
+        scout_res = await scout.analyze_task(
+            goal, context or "", task_hint="strategy/architecture",
+            progress_callback=ctx.report_progress if ctx else None
+        )
+    except Exception as e:
+        logger.error(f"Scout failed: {e}")
+        scout_res = {"complexity": "high", "is_brownfield": False}
+    
+    if not isinstance(scout_res, dict):
+        scout_res = {"complexity": "high", "is_brownfield": False}
+        
     complexity = scout_res.get("complexity", "high")
-    # Scout returns: is_brownfield=True if task involves modifying existing code
     is_brownfield = scout_res.get("is_brownfield", False)
     
     if is_brownfield:
-        # BROWNFIELD: Option evaluation or modification of existing code
         brownfield_msg = [
             {"role": "system", "content": LP_BROWNFIELD_PROMPT},
             {"role": "user", "content": f"Goal: {goal}\nContext: {context or ''}"}
         ]
+        # Heartbeat during API wait - both MCP progress and WebSocket broadcast
+        if ctx:
+            await ctx.report_progress(progress=10, total=None, message="Analyzing brownfield context...")
+        # Broadcast via WebSocket for Roo Code HUD visibility
+        await get_broadcaster().broadcast_state({
+            "operation": "Analyzing brownfield context...",
+            "progress": 10.0,
+            "is_live": True
+        }, project_id=project_id)
         result = await client.generate_completion(
             messages=brownfield_msg,
             task_type="strategist",
             complexity=complexity,
+            project_id=project_id,
+            timeout=60.0,
             progress_callback=ctx.report_progress if ctx else None
         )
         return f"## 🏗️ Brownfield Analysis\n\n{result}"
     
-    # GREENFIELD MODE: Full LP blueprint
-    scout = ScoutEngine(client)
-    
-    # 0. Scout for Sizing (Architect blueprints are often large)
-    scout_res = await scout.analyze_task(
-        goal, context, task_hint="strategy/architecture",
-        progress_callback=ctx.report_progress if ctx else None
-    )
-    complexity = scout_res.get("complexity", "high")
-    
-    # 1. Discovery
+    # GREENFIELD MODE - Discovery phase with heartbeat
     discovery_msg = [
         {"role": "system", "content": LP_DISCOVERY_PROMPT},
         {"role": "user", "content": f"Goal: {goal}\nContext: {context or ''}"}
     ]
-    discovery_raw = await client.generate_completion(messages=discovery_msg, complexity="medium")
+    # Report progress via MCP protocol AND broadcast via WebSocket for UI visibility
+    if ctx:
+        await ctx.report_progress(progress=25, total=None, message="Discovering squad requirements...")
+    await get_broadcaster().broadcast_state({
+        "operation": "Discovering squad requirements...",
+        "progress": 25.0,
+        "is_live": True
+    }, project_id=project_id)
+    discovery_raw = await client.generate_completion(
+        messages=discovery_msg,
+        complexity="medium",
+        timeout=60.0,
+        progress_callback=ctx.report_progress if ctx else None
+    )
     discovery = extract_json_from_text(discovery_raw) or {"hired_squad": []}
-    squad_str = ", ".join([s.get("role", "Expert") for s in discovery.get("hired_squad", [])])
+    
+    squad_list = discovery.get("hired_squad", [])
+    if not isinstance(squad_list, list):
+        squad_list = []
+    
+    squad_roles = []
+    for s in squad_list:
+        if isinstance(s, dict):
+            squad_roles.append(s.get("role", "Expert"))
+        else:
+            squad_roles.append("Expert")
+    
+    squad_str = ", ".join(squad_roles)
 
-    # 2. Architect
+    # Architect phase with heartbeat - both MCP progress and WebSocket broadcast
     arch_msg = [
         {"role": "system", "content": LP_ARCHITECT_PROMPT.format(squad=squad_str)},
         {"role": "user", "content": f"Goal: {goal}"}
     ]
-    # Blueprints use scouted complexity (often high/critical) to unlock 4k/8k tokens
+    if ctx:
+        await ctx.report_progress(progress=50, total=None, message="Generating architecture blueprint...")
+    # Broadcast via WebSocket for Roo Code HUD visibility
+    await get_broadcaster().broadcast_state({
+        "operation": "Generating architecture blueprint...",
+        "progress": 50.0,
+        "is_live": True
+    }, project_id=project_id)
     blueprint_raw = await client.generate_completion(
         messages=arch_msg,
         task_type="strategist",
         complexity=complexity,
+        project_id=project_id,
+        timeout=120.0,
         progress_callback=ctx.report_progress if ctx else None
     )
     
-    # 3. Parse and enhance blueprint with swarm-ready task formatting
     blueprint_data = extract_json_from_text(blueprint_raw)
-    if blueprint_data and "swarm_tasks" in blueprint_data:
-        # Format swarm_tasks for downstream execution
-        swarm_section = "\n\n## 🎯 Swarm Execution Tasks\n\n"
-        swarm_section += "The following atomic tasks are ready for parallel execution:\n\n"
-        
-        for task in blueprint_data.get("swarm_tasks", []):
-            task_id = task.get("id", "unknown")
-            task_desc = task.get("task", "")
-            priority = task.get("priority", 5)
-            target_files = task.get("target_files", [])
-            exec_hint = task.get("execution_hint", "qwen_coder")
-            
-            swarm_section += f"### {task_id} (Priority: {priority})\n"
-            swarm_section += f"- **Task**: {task_desc}\n"
-            swarm_section += f"- **Target Files**: {', '.join(target_files) if target_files else 'N/A'}\n"
-            swarm_section += f"- **Execution**: `{exec_hint}`\n\n"
-        
-        # Append swarm section to raw blueprint
-        return blueprint_raw + swarm_section
+    if blueprint_data and isinstance(blueprint_data, dict) and "swarm_tasks" in blueprint_data:
+        swarm_tasks = blueprint_data.get("swarm_tasks", [])
+        if isinstance(swarm_tasks, list):
+            swarm_section = "\n\n## 🎯 Swarm Execution Tasks\n\n"
+            for task in swarm_tasks:
+                if isinstance(task, dict):
+                    task_id = task.get("id", "unknown")
+                    task_desc = task.get("task", "")
+                    priority = task.get("priority", 5)
+                    target_files = task.get("target_files", [])
+                    exec_hint = task.get("execution_hint", "qwen_coder")
+                    
+                    swarm_section += f"### {task_id} (Priority: {priority})\n"
+                    swarm_section += f"- **Task**: {task_desc}\n"
+                    swarm_section += f"- **Target Files**: {', '.join(target_files) if target_files else 'N/A'}\n"
+                    swarm_section += f"- **Execution**: `{exec_hint}`\n\n"
+            return blueprint_raw + swarm_section
     
     return blueprint_raw
 
-async def read_repo_file(path: str) -> str:
-    import os
-    if not os.path.exists(path):
-        return f"Error: File not found at {path}"
-    with open(path, 'r', encoding='utf-8') as f:
-        return f.read()
-
-async def list_repo_files(directory: str = ".", pattern: str = "**/*") -> str:
-    import glob
-    import os
-    files = glob.glob(os.path.join(directory, pattern), recursive=True)
-    return "\n".join([f for f in files if os.path.isfile(f)][:100])
-
-async def generate_usage_report() -> str:
-    from qwen_mcp.api import billing_tracker
-    return billing_tracker.get_aggregated_report()
-
-async def list_available_models() -> str:
-    from qwen_mcp.api import DashScopeClient
-    client = DashScopeClient()
-    models = await client.list_models()
-    return json.dumps(models, indent=2) if models else "[]"
-
-async def set_model_in_registry(role: str, model_id: str) -> str:
-    registry.models[role] = model_id
-    await registry.save_cache()
-    return f"Success: Role '{role}' set to '{model_id}'."
-
-async def set_billing_mode(mode: str) -> str:
-    """Changes the global billing mode: 'payg', 'coding_plan', or 'hybrid'."""
-    success = apply_billing_mode(mode)
-    if success:
-        return f"✅ Billing Mode changed to: {mode.upper()}"
-    return f"❌ Invalid mode: {mode}. Use 'payg', 'coding_plan', or 'hybrid'."
-
-async def get_current_billing_mode() -> str:
-    """Returns the current billing mode."""
-    mode = get_billing_mode()
-    return f"Current Billing Mode: {mode.upper()}"
-
-async def generate_sparring(
-    topic: str = "",
-    context: str = "",
-    mode: str = DEFAULT_SPARRING_MODE,  # Default: sparring2 (normal/full)
-    session_id: str = "",
-    ctx: Optional[Context] = None
-) -> str:
-    """
-    Executes the Sparring Engine v2 with step-by-step execution.
-    
-    Sparring Levels (use aliases for clarity):
-    - sparring1 (flash): Quick 2-step analysis (analyst→drafter), 180s timeout
-    - sparring2 (normal): Full session in one call, 180s timeout - DEFAULT
-    - sparring3 (pro): Step-by-step with checkpointing, 100s per step
-    
-    Step-by-step modes (for sparring3/pro):
-    - discovery: Create session + define roles (returns session_id)
-    - red: Execute Red Cell critique (requires session_id)
-    - blue: Execute Blue Cell defense (requires session_id + red critique)
-    - white: Execute White Cell synthesis (requires session_id + red + blue)
-    
-    Args:
-        topic: The topic to analyze (required for sparring1/2/3/discovery)
-        context: Additional context (optional)
-        mode: Sparring level (sparring1, sparring2, sparring3) or step mode (discovery, red, blue, white)
-        session_id: Session ID for step modes (required for red/blue/white)
-    
-    Returns:
-        Markdown-formatted response with guided UX hints
-    """
-    from qwen_mcp.engines.sparring_v2 import SparringEngineV2
-    
-    client = DashScopeClient()
-    engine = SparringEngineV2(client)
-    
-    # Resolve mode alias (sparring1→flash, sparring2→full, sparring3→pro)
-    resolved_mode = resolve_sparring_mode(mode)
-    
-    # Handle session_id parameter
-    if resolved_mode not in ["flash", "full"] and not session_id:
-        session_id = None
-    
-    response = await engine.execute(
-        mode=resolved_mode,
-        topic=topic or None,
-        context=context or None,
-        session_id=session_id or None,
-        ctx=ctx  # Pass context for progress reporting
-    )
-    
-    return response.to_markdown()
-
-
 async def heal_registry() -> str:
+    from qwen_mcp.api import DashScopeClient
     client = DashScopeClient()
     return await client.heal_registry()
 
-
-async def generate_swarm(
-    prompt: str,
-    task_type: str = "general",
-    ctx: Optional[Context] = None
-) -> str:
-    """
-    Executes the Swarm Orchestrator for parallel task decomposition and execution.
-    
-    The Swarm decomposes complex prompts into atomic sub-tasks, executes them
-    in parallel, and synthesizes the results into a coherent response.
-    
-    Use cases:
-    - Multi-file analysis (decompose into per-file tasks)
-    - Multi-expert review (QA, Security, ROI in parallel)
-    - Complex implementations (analyze, plan, implement phases)
-    
-    Args:
-        prompt: The complex prompt to decompose and execute
-        task_type: Type hint for decomposition (e.g., "coding", "audit", "general")
-        ctx: MCP context for progress reporting
-    
-    Returns:
-        Synthesized response from all parallel sub-tasks
-    """
-    from qwen_mcp.orchestrator import SwarmOrchestrator
-    from qwen_mcp.engines.scout import ScoutEngine
-    
-    client = DashScopeClient()
-    scout = ScoutEngine(client)
-    
-    # Scout analysis to determine complexity (fixes truncation issue)
-    try:
-        scout_result = await scout.analyze_task(
-            prompt,
-            task_hint=task_type,
-            progress_callback=ctx.report_progress if ctx else None
-        )
-        complexity = scout_result.get("complexity", "high")
-        logger.info(f"Scout analysis for swarm: complexity={complexity}, reason={scout_result.get('reason', 'N/A')}")
-    except Exception as e:
-        logger.warning(f"Scout analysis failed: {e}. TokenScout will handle max_tokens estimation.")
-        complexity = None  # DEPRECATED - TokenScout handles estimation
-    
-    orchestrator = SwarmOrchestrator(completion_handler=client)
-    result = await orchestrator.run_swarm(prompt, task_type=task_type)
-    return result
-
-
-async def qwen_init_context(
-    workspace_root: str = ".",
-    ctx: Context = None
-) -> str:
+async def qwen_init_context(workspace_root: str, ctx: Optional[Context] = None) -> str:
     """
     Initialize project context files using Swarm analysis.
     
     Generates:
     - .context/_PROJECT_CONTEXT.md: Tech stack, structure, conventions
     - .context/_DATA_CONTEXT.md: Data sources, schemas, pipelines
-    
-    Args:
-        workspace_root: Path to workspace root (default: current directory)
-        ctx: MCP context for progress reporting
-    
-    Returns:
-        Summary of generated files with paths
     """
     from pathlib import Path
     from qwen_mcp.engines.context_builder import ContextBuilderEngine
@@ -542,28 +268,21 @@ async def qwen_init_context(
         logger.error(f"qwen_init_context failed: {e}", exc_info=True)
         return f"## Error\n\nFailed to initialize context: {str(e)}"
 
-
-async def qwen_update_session_context(
-    session_summary: str,
-    workspace_root: str = ".",
-    ctx: Context = None
-) -> str:
+async def qwen_update_session_context(summary: str, workspace_root: str, ctx: Optional[Context] = None) -> str:
     """
     Update session supplement with current session insights.
     
-    Args:
-        session_summary: Summary of work done in this session
-        workspace_root: Path to workspace root
-        ctx: MCP context for progress reporting
-    
-    Returns:
-        Confirmation of update with session highlights
+    Call this at the END of each session to capture:
+    - Key decisions made
+    - Changes implemented
+    - Open questions
+    - Recommendations for next session
     """
     from pathlib import Path
     from qwen_mcp.engines.context_builder import ContextBuilderEngine
     
     # Input validation
-    if not session_summary or not session_summary.strip():
+    if not summary or not summary.strip():
         logger.error("Empty session_summary provided")
         return "## Error\n\nSession summary cannot be empty"
     
@@ -591,7 +310,7 @@ async def qwen_update_session_context(
         
         # Generate/update session context
         session_content = await engine.update_session_context(
-            session_summary,
+            summary,
             workspace_root
         )
         
@@ -602,7 +321,7 @@ async def qwen_update_session_context(
         )
         
         # Extract key highlights from session summary
-        highlights = session_summary.split("\n")[:5]  # First 5 lines as highlights
+        highlights = summary.split("\n")[:5]  # First 5 lines as highlights
         
         result = f"## Session Context Updated\n\n"
         result += f"**File**: `{saved_path}`\n\n"
@@ -619,3 +338,375 @@ async def qwen_update_session_context(
     except Exception as e:
         logger.error(f"qwen_update_session_context failed: {e}", exc_info=True)
         return f"## Error\n\nFailed to update session context: {str(e)}"
+
+async def generate_audit(content: str, context: Optional[str] = None, ctx: Optional[Context] = None, use_swarm: bool = True, project_id: str = "default") -> str:
+    client = DashScopeClient()
+    
+    # Report progress and broadcast for UI visibility
+    if ctx:
+        await ctx.report_progress(progress=10, total=None, message="Analyzing code for audit...")
+    await get_broadcaster().broadcast_state({
+        "operation": "Analyzing code for audit...",
+        "progress": 10.0,
+        "is_live": True
+    }, project_id=project_id)
+    
+    messages = [
+        {"role": "system", "content": AUDIT_SYSTEM_PROMPT},
+        {"role": "user", "content": f"Context: {context}\nContent: {content}"}
+    ]
+    return await client.generate_completion(
+        messages=messages,
+        task_type="audit",
+        project_id=project_id,
+        progress_callback=ctx.report_progress if ctx else None
+    )
+
+async def generate_code_unified(prompt: str, mode: str = "auto", context: Optional[str] = None, ctx: Optional[Context] = None, project_id: str = "default") -> str:
+    """
+    Unified code generation with intelligent routing via CoderEngineV2.
+    
+    Features:
+    - Brownfield detection (diffs vs. full files)
+    - Mode-based model routing (standard/pro/expert)
+    - Swarm orchestration for complex tasks
+    - Context-aware code generation
+    
+    Args:
+        prompt: The code generation request
+        mode: One of 'auto', 'standard', 'pro', 'expert'
+        context: Additional context (existing code, requirements, etc.)
+        ctx: MCP context for progress reporting
+        project_id: Project/session ID for telemetry isolation
+        
+    Returns:
+        Generated code or error message
+    """
+    from qwen_mcp.engines.coder_v2 import CoderEngineV2
+    
+    # Report progress FIRST
+    if ctx:
+        await ctx.report_progress(progress=0, total=None, message="Starting code generation...")
+    
+    # Broadcast state for UI visibility
+    await get_broadcaster().broadcast_state({
+        "operation": "Code generation in progress...",
+        "progress": 10.0,
+        "is_live": True
+    }, project_id=project_id)
+    
+    # Delegate to CoderEngineV2 for intelligent routing
+    engine = CoderEngineV2()
+    response = await engine.execute(
+        prompt=prompt,
+        mode=mode,
+        context=context,
+        ctx=ctx,
+        project_id=project_id
+    )
+    
+    if response.success:
+        return response.to_markdown()
+    else:
+        return f"❌ Code generation failed: {response.error}\n\n{response.message}"
+
+# Mode aliases: sparring1/2/3 → internal modes
+MODE_ALIASES = {
+    "sparring1": "flash",    # Quick 2-step analysis
+    "sparring2": "full",     # Full session in one call (DEFAULT)
+    "sparring3": "pro",      # Step-by-step with checkpointing
+    # Short aliases
+    "nor": "full",           # "normal" shortcut
+    # Legacy aliases (passthrough)
+    "flash": "flash",
+    "full": "full",
+    "pro": "pro",
+    "discovery": "discovery",
+    "red": "red",
+    "blue": "blue",
+    "white": "white",
+}
+
+def resolve_sparring_mode(mode: str) -> str:
+    """
+    Resolve sparring mode alias to internal mode name.
+    
+    Sparring Levels:
+    - sparring1 (flash): 2 steps (analyst→drafter), 180s total
+    - sparring2 (normal): 4 steps in one call (full), 180s total - DEFAULT
+    - sparring3 (pro): 4 steps separately (step-by-step), 100s per step
+    
+    Args:
+        mode: User-provided mode (sparring1, sparring2, sparring3, flash, full, pro, nor, etc.)
+              Case-insensitive: "SPARRING1", "Sparring1", "sparring1" all work.
+    
+    Returns:
+        Internal mode name (flash, full, pro, discovery, red, blue, white)
+    """
+    normalized_mode = mode.lower().strip() if mode else ""
+    if normalized_mode in MODE_ALIASES:
+        return MODE_ALIASES[normalized_mode]
+    logger.warning(f"Unknown sparring mode '{mode}'. Using 'flash' as fallback.")
+    return "flash"
+
+async def generate_sparring(topic: str, context: str, mode: str, session_id: str, ctx: Optional[Context] = None, project_id: str = "default") -> str:
+    """
+    Execute sparring session using SparringEngineV2.
+    
+    Supports both full sessions (sparring1/2) and step-by-step (sparring3).
+    
+    Defensive parameter handling: ensures all parameters are strings even if MCP passes dicts.
+    """
+    from qwen_mcp.engines.sparring_v2 import SparringEngineV2, SparringResponse
+    
+    # Defensive: Ensure parameters are strings (MCP sometimes passes dicts for complex prompts)
+    if isinstance(topic, dict):
+        topic = str(topic.get("topic", topic))
+    if isinstance(context, dict):
+        context = str(context.get("context", context))
+    if isinstance(mode, dict):
+        mode = str(mode.get("mode", "sparring2"))
+    if isinstance(session_id, dict):
+        session_id = str(session_id.get("session_id", ""))
+    
+    # Ensure string types
+    topic = str(topic) if topic else ""
+    context = str(context) if context else ""
+    mode = str(mode) if mode else "sparring2"
+    session_id = str(session_id) if session_id else ""
+    
+    client = DashScopeClient()
+    engine = SparringEngineV2(client)
+    
+    # Resolve mode alias to internal mode
+    internal_mode = resolve_sparring_mode(mode)
+    
+    # Report progress and broadcast for UI visibility
+    if ctx:
+        await ctx.report_progress(progress=10, total=None, message=f"Starting sparring (mode: {internal_mode})...")
+    await get_broadcaster().broadcast_state({
+        "operation": f"Sparring session in progress (mode: {internal_mode})...",
+        "progress": 10.0,
+        "is_live": True
+    }, project_id=project_id)
+    
+    # Execute via engine
+    try:
+        response: SparringResponse = await engine.execute(
+            mode=internal_mode,
+            topic=topic,
+            context=context,
+            session_id=session_id,
+            ctx=ctx
+        )
+    except Exception as e:
+        logger.error(f"Sparring engine execution failed: {e}", exc_info=True)
+        return f"❌ Sparring engine error: {type(e).__name__}: {e}"
+    
+    # Format response for MCP tool output
+    if response.success:
+        # Convert result to string if it's a dict
+        result = response.result
+        if isinstance(result, dict):
+            output = str(result)
+        else:
+            output = result or ""
+        if response.session_id:
+            output += f"\n\n**Session ID**: `{response.session_id}`"
+        if response.next_step:
+            output += f"\n\n**Next Step**: `{response.next_step}`"
+        if response.next_command:
+            output += f"\n\n**Next Command**: `{response.next_command}`"
+        return output
+    else:
+        return f"❌ Sparring failed: {response.error or response.message}"
+
+async def generate_swarm(prompt: str, task_type: str, ctx: Optional[Context] = None, project_id: str = "default") -> str:
+    """
+    Swarm orchestrator for parallel multi-agent analysis.
+    
+    Decomposes complex tasks into parallel subtasks executed by specialized agents.
+    """
+    from qwen_mcp.orchestrator import SwarmOrchestrator
+    from qwen_mcp.engines.scout import ScoutEngine
+    
+    client = DashScopeClient()
+    scout = ScoutEngine(client)
+    
+    # Scout analysis to determine complexity - with progress broadcast
+    if ctx:
+        await ctx.report_progress(progress=10, total=None, message="Analyzing task complexity...")
+    await get_broadcaster().broadcast_state({
+        "operation": "Swarm analyzing task complexity...",
+        "progress": 10.0,
+        "is_live": True
+    }, project_id=project_id)
+    
+    try:
+        scout_result = await scout.analyze_task(
+            prompt,
+            task_hint=task_type,
+            progress_callback=ctx.report_progress if ctx else None
+        )
+        complexity = scout_result.get("complexity", "high")
+        logger.info(f"Scout analysis for swarm: complexity={complexity}")
+    except Exception as e:
+        logger.warning(f"Scout analysis failed: {e}")
+        complexity = None
+    
+    # Broadcast during orchestration
+    if ctx:
+        await ctx.report_progress(progress=50, total=None, message="Running swarm agents...")
+    await get_broadcaster().broadcast_state({
+        "operation": "Swarm agents executing in parallel...",
+        "progress": 50.0,
+        "is_live": True
+    }, project_id=project_id)
+    
+    orchestrator = SwarmOrchestrator(completion_handler=client)
+    result = await orchestrator.run_swarm(prompt, task_type=task_type)
+    return result
+
+async def generate_sos_sync(apply: bool, decision_id: str, apply_all: bool, workspace_root: str) -> str:
+    """
+    SOS (State of Session) synchronization tool.
+    
+    Synchronizes decision log state with filesystem.
+    """
+    from pathlib import Path
+    from qwen_mcp.engines.sos_sync import SOSSyncEngine
+    
+    decision_log_path = Path(workspace_root) / "src" / "decision_log.parquet"
+    backlog_path = Path(workspace_root) / "PLAN" / "BACKLOG.md"
+    
+    if not decision_log_path.exists():
+        return f"No decision log found at {decision_log_path}"
+    
+    engine = SOSSyncEngine(decision_log_path)
+    
+    if apply_all:
+        result = await engine.apply_all_advices(backlog_path)
+        if result:
+            return "✅ All pending SOS insights applied to BACKLOG.md"
+        return "No pending insights to apply"
+    
+    if apply and decision_id:
+        result = await engine.apply_advice(decision_id, backlog_path)
+        if result:
+            return f"✅ SOS insight {decision_id} applied to BACKLOG.md"
+        return f"No pending insight found for {decision_id}"
+    
+    # Just scan and report
+    advices = await engine.scan_advices()
+    if not advices:
+        return "No pending SOS insights"
+    return f"Found {len(advices)} pending SOS insights. Use apply_all=True to apply."
+
+
+async def add_task_to_backlog(
+    task_name: str,
+    advice: str,
+    workspace_root: str,
+    session_id: str = "sos_manual",
+    decision_type: str = "manual_task",
+    complexity: str = "medium",
+    tags: Optional[List[str]] = None,
+    risk_score: float = 0.0
+) -> str:
+    """
+    Add a new task from natural language to BACKLOG.md and decision_log.parquet.
+    
+    This is the "Files → Parquet" direction of SOS sync.
+    
+    Args:
+        task_name: Human-readable task name
+        advice: The agentic advice/recommendation
+        workspace_root: Workspace root path
+        session_id: Session identifier (default: "sos_manual")
+        decision_type: Type of decision (default: "manual_task")
+        complexity: Task complexity (default: "medium")
+        tags: Optional tags list
+        risk_score: Risk assessment (default: 0.0)
+        
+    Returns:
+        Confirmation message with decision_id
+    """
+    from pathlib import Path
+    from qwen_mcp.engines.sos_sync import SOSSyncEngine
+    
+    decision_log_path = Path(workspace_root) / "src" / "decision_log.parquet"
+    backlog_path = Path(workspace_root) / "PLAN" / "BACKLOG.md"
+    
+    engine = SOSSyncEngine(decision_log_path)
+    
+    try:
+        decision_id = await engine.add_task(
+            task_name=task_name,
+            advice=advice,
+            backlog_path=backlog_path,
+            workspace_root=workspace_root,
+            session_id=session_id,
+            decision_type=decision_type,
+            complexity=complexity,
+            tags=tags,
+            risk_score=risk_score
+        )
+        return f"✅ Task added to BACKLOG.md with decision_id: `{decision_id}`\n\nTask: {task_name}\nAdvice: {advice}"
+    except ValueError as e:
+        return f"❌ Invalid input: {e}"
+    except Exception as e:
+        return f"❌ Failed to add task: {e}"
+        if result:
+            return f"✅ SOS insight {decision_id} applied to BACKLOG.md"
+        return f"❌ Failed to apply insight {decision_id}"
+    
+    # Scan for pending insights
+    pending = await engine.scan_advices()
+    if not pending:
+        return "No pending SOS insights found"
+    
+    output = "## 📋 Pending SOS Insights\n\n"
+    for item in pending[:10]:  # Limit to 10 for readability
+        output += f"- **{item.get('decision_id', 'unknown')}**: {item.get('agentic_advice', '')[:100]}...\n"
+    
+    return output
+
+async def list_available_models() -> str:
+    client = DashScopeClient()
+    models = await client.list_models()
+    return json.dumps(models, indent=2)
+
+async def set_model_in_registry(role: str, model_id: str) -> str:
+    registry.models[role] = model_id
+    await registry.save_cache()
+    return f"Role {role} set to {model_id}"
+
+async def generate_usage_report() -> str:
+    """
+    Generates token usage and cost summary from billing tracker.
+    """
+    from qwen_mcp.billing import billing_tracker
+    
+    report = billing_tracker.get_summary()
+    
+    output = "## 📊 Usage Report\n\n"
+    output += f"**Total Requests**: {report.get('total_requests', 0)}\n"
+    output += f"**Total Prompt Tokens**: {report.get('total_prompt_tokens', 0)}\n"
+    output += f"**Total Completion Tokens**: {report.get('total_completion_tokens', 0)}\n\n"
+    
+    if report.get('by_model'):
+        output += "### By Model\n\n"
+        for model, stats in report.get('by_model', {}).items():
+            output += f"- **{model}**: {stats.get('requests', 0)} requests, {stats.get('prompt', 0)} prompt, {stats.get('completion', 0)} completion\n"
+    
+    return output
+
+async def read_repo_file(path: str) -> str:
+    if not os.path.exists(path):
+        return f"Error: File not found at {path}"
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+async def list_repo_files(directory: str = ".", pattern: str = "**/*") -> str:
+    files = glob.glob(os.path.join(directory, pattern), recursive=True)
+    return "\n".join([f for f in files if os.path.isfile(f)][:100])

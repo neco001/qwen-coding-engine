@@ -50,9 +50,10 @@ def get_discovery_prompt(billing_mode: str = "coding_plan") -> str:
     Returns:
         Formatted discovery prompt string
     """
-    from qwen_mcp.registry import ModelEntitlementRegistry
+    from qwen_mcp.registry import ModelRegistry
     
-    models_str = ModelEntitlementRegistry.get_models_for_discovery(billing_mode)
+    models_dict = ModelRegistry.get_available_models(billing_mode)
+    models_str = "\n".join([f"- {k}: {v.get('description', '')}" for k, v in models_dict.items()])
     
     return f"""Analizujesz temat i kontekst sesji strategicznej.
 Twoim zadaniem jest optymalne obsadzenie 3 ról do debaty War Game Protocol ORAZ dobór modeli.

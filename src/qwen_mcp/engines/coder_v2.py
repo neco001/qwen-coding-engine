@@ -12,7 +12,7 @@ Similar to SparringEngineV2, this engine handles mode routing and execution.
 
 import logging
 import time
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, Union
 from dataclasses import dataclass
 from mcp.server.fastmcp import Context
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # Local Heuristics for Swarm Detection (Opcja A - NO API CALL)
 # =============================================================================
 
-def should_use_swarm(prompt: str, context: str = "") -> bool:
+def should_use_swarm(prompt: str, context: Optional[str] = None) -> bool:
     """
     Local heuristics to determine if Swarm is needed - NO API CALL.
     
@@ -37,7 +37,7 @@ def should_use_swarm(prompt: str, context: str = "") -> bool:
     Returns:
         True if Swarm orchestrator should be used, False for single-agent generation
     """
-    combined = prompt + " " + context
+    combined = prompt + " " + (context or "")
     # Check character count (~15K chars ≈ 3-4K tokens)
     if len(combined) > 15000:
         return True
@@ -59,11 +59,20 @@ def should_use_swarm(prompt: str, context: str = "") -> bool:
 # Mode Configuration
 # =============================================================================
 
+# Mode routing: user-facing mode → internal task type
 MODE_ROUTING = {
-    "auto": "coding",        # Let registry decide based on complexity
-    "standard": "coder",     # qwen3-coder-next (fast, plan)
-    "pro": "coder_pro",      # qwen3-coder-plus (heavy, plan)
-    "expert": "specialist",  # qwen2.5-coder-32b-instruct (PAYG)
+    "auto": "coding",        # Let complexity decide (resolved at runtime)
+    "standard": "coding",    # qwen3-coder-next (fast, plan)
+    "pro": "coding_pro",     # qwen3-coder-plus (heavy, plan)
+    "expert": "coding_expert",  # qwen2.5-coder-32b-instruct (PAYG)
+}
+
+# Complexity to mode mapping for auto resolution
+COMPLEXITY_TO_MODE = {
+    "low": "standard",
+    "medium": "standard",
+    "high": "pro",
+    "critical": "expert",
 }
 
 MODE_DESCRIPTIONS = {
@@ -181,8 +190,10 @@ class CoderEngineV2:
                     error=f"Unknown mode: {mode}. Use: {', '.join(MODE_ROUTING.keys())}"
                 )
             
-            # Opcja A+C: Local heuristics + Scout only for mode="auto"
-            # For non-auto modes, skip Scout entirely to avoid API timeout
+            # BROWNFIELD DETECTION: Always run Scout for brownfield detection (not just complexity)
+            # This ensures proper diff-only output for existing code modification
+            is_brownfield = False
+            brownfield_reason = "Not analyzed"
             
             # BROWNFIELD DETECTION: Always run Scout for brownfield detection (not just complexity)
             # This ensures proper diff-only output for existing code modification
@@ -237,8 +248,8 @@ class CoderEngineV2:
             
             logger.info(f"Coder routing: mode={mode}, complexity={scout_complexity}, use_swarm={use_swarm}")
 
-            # Determine task type and model
-            task_type, model_used = self._resolve_mode(mode, prompt, context, scout_complexity)
+            # Determine task type, model, and resolved mode
+            task_type, model_used, resolved_mode = self._resolve_mode(mode, prompt, context, scout_complexity)
             
             await self._report_progress(ctx, 5.0, f"[Coder] Scout: {scout_complexity} complexity. Model: {model_used}")
             
@@ -286,7 +297,7 @@ class CoderEngineV2:
             elapsed = time.time() - start_time
             return CoderResponse(
                 success=True,
-                mode_used=mode,
+                mode_used=resolved_mode,  # Show actual mode selected (e.g., "pro" not "auto")
                 model_used=model_used,
                 result=result,
                 message=f"Code generated in {elapsed:.1f}s",
@@ -296,9 +307,14 @@ class CoderEngineV2:
         except Exception as e:
             logger.exception(f"Coder execution failed: {e}")
             elapsed = time.time() - start_time
+            # For error case, try to use resolved_mode if available, otherwise use original mode
+            try:
+                error_mode = resolved_mode
+            except NameError:
+                error_mode = mode
             return CoderResponse(
                 success=False,
-                mode_used=mode,
+                mode_used=error_mode,
                 model_used="",
                 result="",
                 message=f"Execution failed after {elapsed:.1f}s",
@@ -309,30 +325,43 @@ class CoderEngineV2:
     # Private Helpers
     # -------------------------------------------------------------------------
     
-    def _resolve_mode(self, mode: str, prompt: str, context: str, scout_complexity: str = "medium") -> Tuple[str, str]:
+    def _resolve_mode(self, mode: str, prompt: str, context: str, scout_complexity: str = "medium") -> Tuple[str, str, str]:
         """
-        Resolve mode to actual task_type and model.
+        Resolve mode to actual task_type, model, and resolved_mode.
+        
+        For 'auto' mode, resolves to explicit user-facing mode (standard/pro/expert)
+        based on Scout/heuristics complexity analysis.
         
         Returns:
-            Tuple of (task_type, model_id)
+            Tuple of (task_type, model_id, resolved_mode)
+            - resolved_mode is the user-facing mode that was actually used
         """
+        # Map internal task types to registry roles
+        TASK_TYPE_TO_ROLE = {
+            "coding": "coder",
+            "coding_pro": "coder",
+            "coding_expert": "coder",
+        }
+        
         if mode == "auto":
-            # Use complexity from scout/heuristics to route models
-            if scout_complexity in ["high", "critical"]:
-                task_type = "coding_pro"
-            else:
-                task_type = "coding"
+            # Resolve auto to explicit user-facing mode based on complexity
+            resolved_mode = COMPLEXITY_TO_MODE.get(scout_complexity, "standard")
+            # Derive task_type from resolved mode
+            task_type = MODE_ROUTING[resolved_mode]
         else:
             # For explicit modes, use predefined routing
-            # Override to coding_pro if heuristics detected high complexity
-            task_type = MODE_ROUTING[mode]
-            if scout_complexity in ["high", "critical"] and mode in ["pro", "expert"]:
-                task_type = "coding_pro"
+            resolved_mode = mode
+            task_type = MODE_ROUTING.get(mode, "coding")
         
-        # Get model from registry
-        model_used = registry.get_best_model(task_type)
+        # Map task_type to registry role and get model
+        role = TASK_TYPE_TO_ROLE.get(task_type, "coder")
+        model_used = registry.get_best_model(role)
         
-        return task_type, model_used
+        # Safety fallback - ensure we always have a valid model string
+        if not model_used:
+            model_used = "qwen3.5-plus"
+        
+        return task_type, model_used, resolved_mode
 
     def _estimate_complexity(self, prompt: str, context: str) -> str:
         """

@@ -48,14 +48,14 @@ class CompletionHandler(BaseDashScopeClient):
         include_reasoning: bool = False,
         model_override: Optional[str] = None,
         enable_thinking: Optional[bool] = None,
-        max_thinking_tokens: Optional[int] = None,
+        thinking_budget: Optional[int] = None,
         project_id: str = "default",
     ) -> str:
         """Generate common chat completion with financial circuit breakers and retries.
         
         Args:
             enable_thinking: Override thinking mode. None = auto-detect for reasoning models.
-            max_thinking_tokens: Limit thinking tokens for deep-thinking models (default: 2048).
+            thinking_budget: Limit thinking tokens for deep-thinking models (default: 2048).
             project_id: Project/session ID for telemetry isolation (format: {instance}_{source}_{hash}).
         """
         request_timeout = timeout or self.default_timeout
@@ -80,13 +80,13 @@ class CompletionHandler(BaseDashScopeClient):
             estimation = scout.estimate_output_tokens(prompt_text)
             force_max_tokens = scout.get_max_tokens(estimation["estimated_tokens"])
             
-            logger.info(f"TokenScout estimate: {estimation['estimated_tokens']} tokens → max_tokens={force_max_tokens} (confidence: {estimation['confidence']})")
+            logger.info(f"TokenScout estimate: {estimation['estimated_tokens']} tokens \u2192 max_tokens={force_max_tokens} (confidence: {estimation['confidence']})")
 
         # Check circuit breaker
         try:
             self.check_financial_circuit_breaker(messages)
         except ValueError as e:
-            return f"❌ {str(e)} Please truncate your files or context."
+            return f"\u274c {str(e)} Please truncate your files or context."
 
         # Sanitize all message content for security
         for msg in messages:
@@ -132,15 +132,15 @@ class CompletionHandler(BaseDashScopeClient):
                 # - low/medium: 1024 tokens (fast, focused)
                 # - high: 2048 tokens (balanced)
                 # - critical: 4096 tokens (deep analysis)
-                if max_thinking_tokens:
-                    thinking_budget = max_thinking_tokens
+                if thinking_budget:
+                    thinking_budget = thinking_budget  # Use provided value
                 elif complexity == "critical":
                     thinking_budget = 4096
                 elif complexity == "high":
                     thinking_budget = 2048
                 else:  # low, medium, auto
                     thinking_budget = 1024
-                extra_body["max_thinking_tokens"] = thinking_budget
+                extra_body["thinking_budget"] = thinking_budget
                 logger.info(f"Thinking mode enabled for {target_model} with budget {thinking_budget} tokens (complexity: {complexity})")
 
             try:
@@ -170,7 +170,7 @@ class CompletionHandler(BaseDashScopeClient):
                 if is_token_limit_error and attempt == 0:
                     logger.warning(
                         f"Token limit error detected (attempt {attempt+1}): {e}. "
-                        f"Retrying with reduced max_tokens ({force_max_tokens} -> {min(force_max_tokens, 30000)})..."
+                        f"Retrying with reduced max_tokens ({force_max_tokens} \u2192 {min(force_max_tokens, 30000)})..."
                     )
                     # Reduce max_tokens for retry
                     force_max_tokens = min(force_max_tokens, 30000)
@@ -209,15 +209,24 @@ class CompletionHandler(BaseDashScopeClient):
 
         # Heartbeat task to prevent MCP client timeout during model 'thinking' phase
         async def heartbeat_loop():
-            # Wait a few seconds before starting heartbeats
-            await asyncio.sleep(15)
+            # Wait only 3 seconds before starting heartbeats (MCP default timeout is ~30s)
+            await asyncio.sleep(3)
+            iteration = 0
             while not first_chunk_received.is_set():
                 if progress_callback:
                     try:
-                        await progress_callback(progress=15.0, message="Model is deep-thinking (reasoning phase)...")
-                    except Exception:
-                        pass
-                await asyncio.sleep(15)
+                        iteration += 1
+                        # Send MCP progress notification (for protocol compliance)
+                        await progress_callback(progress=15.0, message=f"Model is thinking... ({iteration * 5}s)")
+                        # ALSO broadcast via WebSocket for UI visibility (Roo Code HUD listens to this)
+                        await get_broadcaster().broadcast_state({
+                            "operation": f"Model is thinking... ({iteration * 5}s)",
+                            "progress": 15.0,
+                            "is_live": True
+                        }, project_id=project_id)
+                    except Exception as e:
+                        logger.debug(f"Heartbeat broadcast error: {e}")
+                await asyncio.sleep(5)  # Send heartbeat every 5 seconds
 
         heartbeat_task = asyncio.create_task(heartbeat_loop())
 
@@ -229,22 +238,25 @@ class CompletionHandler(BaseDashScopeClient):
                 chunk_count += 1
                 
                 # CRITICAL: Call progress_callback every 10 chunks to keep MCP connection alive
-                # This prevents MCP timeout -32001 during long streaming operations
                 if progress_callback and chunk_count % 10 == 0:
                     try:
+                        # Send MCP progress notification (for protocol compliance)
                         await progress_callback(progress=50.0, message=f"Streaming... ({chunk_count} chunks)")
-                    except Exception:
-                        pass  # Ignore callback errors
+                        # ALSO broadcast via WebSocket for UI visibility (Roo Code HUD listens to this)
+                        await get_broadcaster().broadcast_state({
+                            "operation": f"Streaming response... ({chunk_count} chunks)",
+                            "progress": 50.0,
+                            "is_live": True
+                        }, project_id=project_id)
+                    except Exception as e:
+                        logger.debug(f"Streaming broadcast error: {e}")
                 
-                # Report usage if present in chunk (some APIs send it mid-stream)
                 if hasattr(chunk, "usage") and chunk.usage:
-                    # Actual usage from API
                     await self._log_usage(model, chunk.usage.prompt_tokens, chunk.usage.completion_tokens, project_id=project_id)
                     usage_reported = True
 
-                if hasattr(chunk, "choices") and chunk.choices:
+                if hasattr(chunk, "choices") and chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
-                    # Support both reasoning_content and legacy thought/reasoning attributes
                     reasoning = getattr(delta, "reasoning_content", None) or getattr(delta, "thought", None)
                     if reasoning:
                         reasoning_log += reasoning
@@ -255,7 +267,6 @@ class CompletionHandler(BaseDashScopeClient):
                         full_response += content
                         await get_broadcaster().update_stream(content=content, project_id=project_id)
         finally:
-            # Ensure heartbeat task is stopped
             first_chunk_received.set()
             heartbeat_task.cancel()
             try:
@@ -263,10 +274,7 @@ class CompletionHandler(BaseDashScopeClient):
             except asyncio.CancelledError:
                 pass
 
-        # CRITICAL FIX: Report usage at END of stream if not already reported
-        # Coding Plan API and some other providers only send usage in the final chunk
         if not usage_reported:
-            # Estimate tokens if not provided (fallback) - use minimum of 1 to avoid 0 counts
             estimated_prompt = max(1, self.estimate_tokens(messages))
             estimated_completion = max(1, self.estimate_tokens([{"role": "assistant", "content": full_response}]))
             await self._log_usage(model, estimated_prompt, estimated_completion, project_id=project_id)
@@ -280,22 +288,22 @@ class CompletionHandler(BaseDashScopeClient):
 
     async def _standard_completion(self, model, messages, temp, max_t, timeout, include_reasoning, project_id="default"):
         client_to_use = self.get_client_for_model(model)
+        
         response = await client_to_use.chat.completions.create(
             model=model, messages=messages, temperature=temp, max_tokens=max_t,
             timeout=timeout, stream=False,
         )
+        
+        if not response.choices or len(response.choices) == 0:
+            return "Error: Empty response choices from API."
 
-        project_id = project_id
         if hasattr(response, "usage") and response.usage:
             await self._log_usage(model, response.usage.prompt_tokens, response.usage.completion_tokens, project_id=project_id)
         else:
-            # FALLBACK: Coding Plan and some APIs don't return usage - estimate it
             estimated_prompt = max(1, self.estimate_tokens(messages))
-            estimated_completion = max(1, self.estimate_tokens([{"role": "assistant", "content": getattr(response.choices[0].message, "content", "") or ""}]))
+            content_for_est = getattr(response.choices[0].message, "content", "") or ""
+            estimated_completion = max(1, self.estimate_tokens([{"role": "assistant", "content": content_for_est}]))
             await self._log_usage(model, estimated_prompt, estimated_completion, project_id=project_id)
-
-        if not response.choices:
-            return "Error: Empty response."
 
         msg = response.choices[0].message
         content = getattr(msg, "content", "") or ""
@@ -309,49 +317,33 @@ class CompletionHandler(BaseDashScopeClient):
         return await self._prepend_warnings(output)
 
     async def _prepend_warnings(self, content: str) -> str:
-        """Attaches active warnings to the response string and clears the warning queue."""
         if hasattr(self, "active_warnings") and self.active_warnings:
             warnings_str = "\n".join(self.active_warnings)
-            self.active_warnings.clear()  # Drain the queue
+            self.active_warnings.clear()
             delimiter = "-" * 40
             return f"{warnings_str}\n{delimiter}\n\n{content}"
         return content
 
     async def _log_usage(self, model, prompt, completion, project_id: str = "default"):
-        """Standardized billing and HUD telemetry logging.
-        
-        Args:
-            prompt: Prompt tokens (int) or prompt text (str) - will be estimated if string
-            completion: Completion tokens (int) or completion text (str) - will be estimated if string
-        """
-        # DEBUG: Log input types
-        logger.info(f"[DEBUG _log_usage] model={model}, prompt type={type(prompt)}, completion type={type(completion)}")
-        
-        # Convert to token counts (handle both int tokens and str content)
+        logger.info(f"Testing usage log: {model} {prompt} {completion}")
         prompt_tokens = prompt if isinstance(prompt, int) else self.estimate_tokens([{"role": "user", "content": str(prompt)}]) if prompt else 0
         completion_tokens = completion if isinstance(completion, int) else self.estimate_tokens([{"role": "assistant", "content": str(completion)}]) if completion else 0
-        
-        # DEBUG: Log converted types
-        logger.info(f"[DEBUG _log_usage] prompt_tokens={prompt_tokens} (type={type(prompt_tokens)}), completion_tokens={completion_tokens} (type={type(completion_tokens)})")
         
         if model not in self.session_usage:
             self.session_usage[model] = {"prompt": 0, "completion": 0}
         self.session_usage[model]["prompt"] += prompt_tokens
         self.session_usage[model]["completion"] += completion_tokens
 
-        project_name = project_id
         try:
-            billing_tracker.log_usage(project_name, model, prompt_tokens, completion_tokens)
+            billing_tracker.log_usage(project_id, model, prompt_tokens, completion_tokens)
             await get_broadcaster().report_usage(model, prompt_tokens, completion_tokens, project_id=project_id)
         except Exception as e:
             logger.error(f"Telemetry logging failed: {e}")
 
     async def _handle_error(self, e, timeout):
-        """Centralized error translation."""
         if isinstance(e, APITimeoutError):
             return f"Error: API Timeout (>{timeout}s). The request took too long to complete."
         if isinstance(e, APIError):
-            # Some APIError subclasses may not have status_code
             status_code = getattr(e, 'status_code', 'unknown')
             message = getattr(e, 'message', str(e))
             return f"Error: API Error ({status_code}): {message}"
@@ -361,6 +353,4 @@ class CompletionHandler(BaseDashScopeClient):
         return f"Error: {str(e)}"
 
     async def heal_registry(self) -> str:
-        """Stub for registry healing - to be inherited or shared."""
-        # This will be fully implemented or called from api.py DashScopeClient
         return "Healing triggered (stub)."

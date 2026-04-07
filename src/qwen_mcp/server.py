@@ -1,4 +1,5 @@
 from typing import Optional, List, Dict, Any, Union
+from qwen_mcp.tools import add_task_to_backlog
 from mcp.server.fastmcp import FastMCP, Context
 from qwen_mcp.tools import (
     generate_audit,
@@ -16,11 +17,13 @@ from qwen_mcp.tools import (
     get_current_billing_mode,
     qwen_init_context,
     qwen_update_session_context,
+    generate_sos_sync,
 )
 from qwen_mcp.specter.telemetry import get_broadcaster
 from qwen_mcp.specter.identity import get_current_project_id, get_session_id, get_or_create_instance_id
 from qwen_mcp.registry import registry
 import asyncio
+import logging
 import sys
 import threading
 import socket
@@ -29,20 +32,10 @@ import hashlib
 import uvicorn
 from fastapi import FastAPI, WebSocket
 
-# Global flag to track if telemetry server is already running
-_TELEMETRY_SERVER_RUNNING = False
-
-# Force UTF-8 encoding for stdout/stderr on Windows to prevent 'krzaki'
-if sys.platform == "win32":
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-        sys.stderr.reconfigure(encoding='utf-8')
-    except (AttributeError, Exception):
-        pass
+logger = logging.getLogger(__name__)
 
 # Initialize FastMCP Server
 mcp = FastMCP("Qwen MCP Server (DashScope)")
-
 
 async def _auto_init_request(ctx: Context = None, project_id: str = "default") -> None:
     """
@@ -90,7 +83,6 @@ def _get_tool_session_id(ctx: Context = None, default_source: str = "mcp") -> st
     cwd = os.getcwd()
     return get_session_id(instance_id, client_source, cwd)
 
-
 @mcp.tool()
 async def qwen_audit(
     content: str,
@@ -115,13 +107,22 @@ async def qwen_audit(
     """
     await _auto_init_request(ctx, "audit")
     project_id = _get_tool_session_id(ctx, default_source="audit")
+    
+    # Report progress FIRST (before any broadcast_state to avoid double-response)
+    if ctx:
+        await ctx.report_progress(
+            progress=0, total=None, message="Starting code audit..."
+        )
+    
+    # Broadcast state AFTER report_progress (telemetry only, for Roo Code HUD visibility)
     await get_broadcaster().broadcast_state({
-        "active_model": registry.get_best_model("strategist"),
+        "active_model": registry.get_best_model("audit"),
         "role_mapping": registry.models,
-        "is_live": True
+        "is_live": True,
+        "operation": "Code audit in progress..."
     }, project_id=project_id)
+    
     return await generate_audit(content, context, ctx, use_swarm=use_swarm, project_id=project_id)
-
 
 @mcp.tool()
 async def qwen_coder(
@@ -150,13 +151,22 @@ async def qwen_coder(
     """
     await _auto_init_request(ctx, "coder")
     project_id = _get_tool_session_id(ctx, default_source="coder")
+    
+    # Report progress FIRST (before any broadcast_state to avoid double-response)
+    if ctx:
+        await ctx.report_progress(
+            progress=0, total=None, message="Starting code generation..."
+        )
+    
+    # Broadcast state AFTER report_progress (telemetry only, for Roo Code HUD visibility)
     await get_broadcaster().broadcast_state({
-        "active_model": registry.get_best_model("coding"),
+        "active_model": registry.get_best_model("coder"),
         "role_mapping": registry.models,
-        "is_live": True
+        "is_live": True,
+        "operation": "Code generation in progress..."
     }, project_id=project_id)
+    
     return await generate_code_unified(prompt, mode, context, ctx, project_id=project_id)
-
 
 @mcp.tool()
 async def qwen_architect(
@@ -166,75 +176,94 @@ async def qwen_architect(
 ) -> str:
     """
     Initiates 'The Lachman Protocol' (LP).
-    The server hires a dynamic expert squad to audit your goal and generate a high-precision Blueprint.
     
-    AUTO-DETECTION:
-    - BROWNFIELD mode: If goal/context contains existing options (Opcja A/B/C, Option 1/2/3, wariant),
-      existing code to modify, or comparison keywords → evaluates options
-    - GREENFIELD mode: If goal is about creating something new from scratch → generates full blueprint
+    LP is a multi-expert blueprinting system that generates a comprehensive
+    implementation plan, manifest, and swarm tasks for complex features.
     
-    BROWNFIELD OUTPUT:
-    - Option comparison table (complexity, risk, time, ROI)
-    - Recommended option with justification
-    - Implementation steps with file:line references
-    - Diffs only, never full code (anti-degeneration)
+    Args:
+        goal: The architectural goal or feature to plan
+        context: Additional context or codebase reference
+        ctx: MCP context for progress reporting
     
     GREENFIELD OUTPUT:
     - Full LP blueprint with swarm_tasks, manifest, roadmap
     """
     await _auto_init_request(ctx, "architect")
     project_id = _get_tool_session_id(ctx, default_source="architect")
-    await get_broadcaster().broadcast_state({
-        "active_model": registry.get_best_model("strategist"),
-        "role_mapping": registry.models,
-        "is_live": True
-    }, project_id=project_id)
+    
+    # Report progress FIRST (before any broadcast_state to avoid double-response)
     if ctx:
         await ctx.report_progress(
             progress=0, total=None, message="Initiating Lachman Protocol..."
         )
-    return await generate_lp_blueprint(goal, context, ctx)
-
+    
+    # Broadcast state AFTER report_progress (telemetry only, not MCP response)
+    await get_broadcaster().broadcast_state({
+        "active_model": registry.get_best_model("strategist"),
+        "role_mapping": registry.models,
+        "is_live": True,
+        "operation": "Architectural planning in progress..."
+    }, project_id=project_id)
+    
+    from qwen_mcp.tools import generate_lp_blueprint
+    # Add timeout wrapper to prevent indefinite hangs
+    try:
+        return await asyncio.wait_for(
+            generate_lp_blueprint(goal, context, ctx),
+            timeout=240.0  # 4 minute timeout for architecture planning
+        )
+    except asyncio.TimeoutError:
+        logger.error(f"qwen_architect timed out after 240s for goal: {goal}")
+        return "❌ Error: Architect request timed out after 4 minutes. The task may be too complex or the API is unresponsive."
 
 @mcp.tool()
 async def qwen_sparring(
-    mode: str = "sparring2",  # DEFAULT: normal/full mode (180s timeout)
+    mode: str = "sparring2",
     topic: str = "",
     context: str = "",
     session_id: str = "",
     ctx: Context = None
 ) -> str:
     """
-    Adwersarialna analiza z sesyjnym checkpointingiem.
+    Sparring session for intellectual debate and strategic analysis.
     
-    SPARRING LEVELS (use aliases for clarity):
-    - sparring1 (flash): Szybka 2-step analiza (analyst→drafter), 180s timeout
-    - sparring2 (normal): Pełna sesja w jednym wywołaniu, 180s timeout - DEFAULT
-    - sparring3 (pro): Step-by-step z checkpointingiem, 100s/krok
+    MODES:
+    - sparring1: Quick 2-step analysis (flash mode)
+    - sparring2 (default): Full sparring session with Red/Blue/White cell analysis
+    - sparring3: Step-by-step with checkpointing (pro mode)
+    - discovery: Initial topic exploration
+    - red: Critical analysis and counter-arguments
+    - blue: Defense and supporting arguments
+    - white: Synthesis and conclusions
     
-    STEP-BY-STEP MODES (for sparring3/pro):
-    - discovery: Utwórz sesję + zdefiniuj role (zwraca session_id)
-    - red: Krytyka Red Cell (wymaga session_id z discovery)
-    - blue: Obrona Blue Cell (wymaga session_id + red)
-    - white: Synteza White Cell (wymaga session_id + red + blue)
+    Args:
+        mode: Sparring mode (default: sparring2). Also accepts: sparring1, sparring3, flash, full, pro
+        topic: The topic or thesis to debate
+        context: Additional context or background
+        session_id: Session identifier for continuity
+        ctx: MCP context for progress reporting
     
-    EXAMPLES:
-    1. qwen_sparring(topic="Czy użyć mikroserwisów?")  # DEFAULT: sparring2
-    2. qwen_sparring(mode="sparring1", topic="Szybka decyzja")
-    3. qwen_sparring(mode="sparring3", topic="Złożona strategia")  # Returns session_id
-    4. qwen_sparring(mode="red", session_id="sp_abc123")
-    5. qwen_sparring(mode="blue", session_id="sp_abc123")
-    6. qwen_sparring(mode="white", session_id="sp_abc123")
+    Returns:
+        Sparring session transcript with analysis
     """
     await _auto_init_request(ctx, "sparring")
     project_id = _get_tool_session_id(ctx, default_source="sparring")
+    
+    # Report progress FIRST (before any broadcast_state to avoid double-response)
+    if ctx:
+        await ctx.report_progress(
+            progress=0, total=None, message=f"Starting sparring session (mode: {mode})..."
+        )
+    
+    # Broadcast state AFTER report_progress (telemetry only, for Roo Code HUD visibility)
     await get_broadcaster().broadcast_state({
         "active_model": registry.get_best_model("strategist"),
         "role_mapping": registry.models,
-        "is_live": True
+        "is_live": True,
+        "operation": f"Sparring session in progress (mode: {mode})..."
     }, project_id=project_id)
-    return await generate_sparring(topic, context, mode, session_id, ctx)
-
+    
+    return await generate_sparring(topic, context, mode, session_id, ctx, project_id=project_id)
 
 @mcp.tool()
 async def qwen_swarm(
@@ -243,219 +272,263 @@ async def qwen_swarm(
     ctx: Context = None
 ) -> str:
     """
-    Executes the Swarm Orchestrator for parallel task decomposition and execution.
+    Swarm orchestrator for parallel multi-agent analysis.
     
-    The Swarm decomposes complex prompts into atomic sub-tasks, executes them
-    in parallel, and synthesizes the results into a coherent response.
-    
-    Use cases:
-    - Multi-file analysis (decompose into per-file tasks)
-    - Multi-expert review (QA, Security, ROI in parallel)
-    - Complex implementations (analyze, plan, implement phases)
+    Automatically decomposes complex tasks into parallel subtasks
+    executed by specialized agents, then synthesizes results.
     
     Args:
-        prompt: The complex prompt to decompose and execute
-        task_type: Type hint for decomposition (e.g., "coding", "audit", "general")
+        prompt: The task or question for swarm analysis
+        task_type: Type of task (general, audit, research, etc.)
         ctx: MCP context for progress reporting
     
     Returns:
-        Synthesized response from all parallel sub-tasks
+        Synthesized swarm analysis report
     """
     await _auto_init_request(ctx, "swarm")
     project_id = _get_tool_session_id(ctx, default_source="swarm")
+    
+    # Report progress FIRST (before any broadcast_state to avoid double-response)
+    if ctx:
+        await ctx.report_progress(
+            progress=0, total=None, message="Starting swarm analysis..."
+        )
+    
+    # Broadcast state AFTER report_progress (telemetry only, for Roo Code HUD visibility)
     await get_broadcaster().broadcast_state({
-        "active_model": "swarm-orchestrator",
-        "role_mapping": {"swarm": "parallel"},
+        "active_model": registry.get_best_model("strategist"),
+        "role_mapping": registry.models,
+        "is_live": True,
+        "operation": "Swarm analysis in progress..."
+    }, project_id=project_id)
+    
+    return await generate_swarm(prompt, task_type, ctx, project_id=project_id)
+
+@mcp.tool()
+async def qwen_sync_state(
+    apply: bool = False,
+    decision_id: str = None,
+    apply_all: bool = False,
+    workspace_root: str = ".",
+    ctx: Context = None
+) -> str:
+    """
+    SOS (State of Session) synchronization tool.
+    
+    Synchronizes decision log state with filesystem.
+    Use to materialize pending decisions or review session history.
+    
+    Args:
+        apply: Apply pending decisions to filesystem
+        decision_id: Specific decision ID to process
+        apply_all: Apply all pending decisions
+        workspace_root: Path to workspace root
+    
+    Returns:
+        Synchronization status and results
+    """
+    await _auto_init_request(ctx, "sos_sync")
+    project_id = _get_tool_session_id(ctx, default_source="sos_sync")
+    
+    # Report progress FIRST
+    if ctx:
+        await ctx.report_progress(progress=0, total=None, message="Synchronizing SOS state...")
+    
+    # Broadcast for UI visibility
+    await get_broadcaster().broadcast_state({
+        "operation": "SOS synchronization in progress...",
+        "progress": 0.0,
         "is_live": True
     }, project_id=project_id)
-    return await generate_swarm(prompt, task_type, ctx)
+    
+    return await generate_sos_sync(apply, decision_id, apply_all, workspace_root)
 
 
 @mcp.tool()
-async def qwen_refresh_models() -> str:
+async def qwen_add_task(
+    task_name: str,
+    advice: str,
+    workspace_root: str = ".",
+    session_id: str = "sos_manual",
+    decision_type: str = "manual_task",
+    complexity: str = "medium",
+    tags: Optional[List[str]] = None,
+    risk_score: float = 0.0,
+    ctx: Context = None
+) -> str:
     """
-    Checks for the latest SOTA models from Alibaba DashScope and identifies candidates.
-    Also synchronizes metadata from Hugging Face.
+    Add a new task from natural language to BACKLOG.md and decision_log.parquet.
+    
+    This is the "Files → Parquet" direction of SOS sync.
+    User says "dodaj do backloga" → Agent creates task in BACKLOG.md + Parquet.
+    
+    Args:
+        task_name: Human-readable task name (e.g., "Naprawić sparring3")
+        advice: The agentic advice/recommendation
+        workspace_root: Path to workspace root (default: ".")
+        session_id: Session identifier (default: "sos_manual")
+        decision_type: Type of decision (default: "manual_task")
+        complexity: Task complexity (default: "medium")
+        tags: Optional tags list
+        risk_score: Risk assessment (default: 0.0)
+        ctx: MCP context for progress reporting
+    
+    Returns:
+        Confirmation message with decision_id
     """
-    from qwen_mcp.api import DashScopeClient
-    from qwen_mcp.registry import registry
+    await _auto_init_request(ctx, "add_task")
+    project_id = _get_tool_session_id(ctx, default_source="add_task")
+    
+    # Report progress FIRST
+    if ctx:
+        await ctx.report_progress(progress=0, total=None, message=f"Adding task to backlog: {task_name}...")
+    
+    # Broadcast for UI visibility
+    await get_broadcaster().broadcast_state({
+        "operation": "Adding task to backlog...",
+        "progress": 0.0,
+        "is_live": True
+    }, project_id=project_id)
+    
+    return await add_task_to_backlog(
+        task_name=task_name,
+        advice=advice,
+        workspace_root=workspace_root,
+        session_id=session_id,
+        decision_type=decision_type,
+        complexity=complexity,
+        tags=tags,
+        risk_score=risk_score
+    )
 
+
+@mcp.tool()
+async def qwen_refresh_models(ctx: Context = None) -> str:
+    """
+    🔄 REFRESH MODELS: Syncs model registry with DashScope and HuggingFace.
+    Updates available models and refreshes role mappings based on latest SOTA.
+    
+    Returns:
+        Status of registry refresh from both sources
+    """
+    await _auto_init_request(ctx, "refresh")
+    project_id = _get_tool_session_id(ctx, default_source="refresh")
+    
+    if ctx:
+        await ctx.report_progress(progress=0, total=None, message="Refreshing model registry...")
+    
+    await get_broadcaster().broadcast_state({
+        "operation": "Refreshing model registry...",
+        "progress": 0.0,
+        "is_live": True
+    }, project_id=project_id)
+    
+    from qwen_mcp.api import DashScopeClient
     client = DashScopeClient()
     ds_res = await client.refresh_registry()
     hf_res = await registry.sync_with_hf()
     return f"DashScope: {ds_res}\nHugging Face: {hf_res}"
 
-
 @mcp.tool()
 async def qwen_list_available_models() -> str:
     """
-    Fetches and displays the full list of models available via your DashScope API key.
-    Use this to find IDs for qwen_set_model.
+    📋 LIST MODELS: Returns all available models from the registry.
+    Shows model IDs, capabilities, and current role assignments.
+    
+    Returns:
+        JSON-formatted list of available models
     """
     return await list_available_models()
 
-
 @mcp.tool()
-async def qwen_set_model(role: str, model_id: str) -> str:
+async def qwen_set_model(
+    role: str,
+    model_id: str
+) -> str:
     """
-    Manually sets a specific model ID for a role.
-    Roles: 'strategist' (audit/LP), 'coder' (qwen_coder_pro), 'scout' (internal/discovery).
+    ⚙️ SET MODEL: Manually assigns a model to a specific role.
+    Use to override automatic role-to-model mapping.
+    
+    Args:
+        role: The role to assign (e.g., coder, strategist, audit)
+        model_id: The model ID to assign (e.g., qwen3.5-plus)
+    
+    Returns:
+        Confirmation of role assignment
     """
     return await set_model_in_registry(role, model_id)
 
-
 @mcp.tool()
-async def qwen_set_billing_mode(mode: str) -> str:
+async def qwen_set_billing_mode(
+    mode: str
+) -> str:
     """
-    Dynamically switches the billing mode of the Qwen Engine.
-    Valid modes: 'coding_plan' (Strict Plan), 'payg' (Strict Pay-As-You-Go), 'hybrid' (Plan preferred, PAYG fallback).
+    💰 SET BILLING MODE: Switches between billing configurations.
+    
+    MODES:
+    - coding_plan: Use Coding Plan API (flat monthly fee)
+    - payg: Use PAYG API (pay-per-token)
+    - hybrid: Intelligent routing between both
+    
+    Args:
+        mode: Billing mode to activate
+    
+    Returns:
+        Confirmation of mode change
     """
     return await set_billing_mode(mode)
-
 
 @mcp.tool()
 async def qwen_get_billing_mode() -> str:
     """
-    Returns the currently active billing mode ('coding_plan', 'payg', or 'hybrid').
+    💰 GET BILLING MODE: Returns current billing configuration.
+    
+    Returns:
+        Current billing mode (coding_plan, payg, or hybrid)
     """
     return await get_current_billing_mode()
 
-
 @mcp.tool()
-async def qwen_read_file(path: str) -> str:
+async def qwen_read_file(
+    path: str
+) -> str:
     """
-    Reads a file from the local repository to use as context for your request.
+    📄 READ FILE: Reads content from a file in the workspace.
+    
+    Args:
+        path: Relative or absolute path to the file
+    
+    Returns:
+        File contents as string
     """
     return await read_repo_file(path)
 
-
 @mcp.tool()
-async def qwen_list_files(directory: str = ".", pattern: str = "**/*") -> str:
+async def qwen_list_files(
+    directory: str = ".",
+    pattern: str = "**/*"
+) -> str:
     """
-    Lists files in the repository to discover context.
+    📁 LIST FILES: Lists files in a directory matching a pattern.
+    
+    Args:
+        directory: Directory to search (default: current directory)
+        pattern: Glob pattern for filtering (default: **/*)
+    
+    Returns:
+        Newline-separated list of file paths
     """
     return await list_repo_files(directory, pattern)
-
 
 @mcp.tool()
 async def qwen_usage_report() -> str:
     """
-    Retrieves the DuckDB token billing usage report and formats it as an aggregated table
-    (Grouped by Date, Project, and Model).
+    📊 USAGE REPORT: Generates token usage and cost summary.
+    
+    Returns:
+        Usage statistics and cost breakdown
     """
     return await generate_usage_report()
-
-
-def is_port_in_use(port: int) -> bool:
-    """Check if a TCP port is already in use on localhost."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            sock.bind(("127.0.0.1", port))
-            return False
-        except OSError:
-            return True
-
-def run_telemetry_server():
-    """Starts a lightweight FastAPI server for the HUD telemetry."""
-    global _TELEMETRY_SERVER_RUNNING
-    
-    # Check if port is already in use (another MCP instance is running)
-    if is_port_in_use(8878):
-        print("ℹ️ [SPECTER] Telemetry server already running on port 8878, skipping startup", file=sys.stderr)
-        _TELEMETRY_SERVER_RUNNING = True
-        return
-    
-    if _TELEMETRY_SERVER_RUNNING:
-        print("ℹ️ [SPECTER] Telemetry server already started in this process", file=sys.stderr)
-        return
-    
-    app = FastAPI()
-    broadcaster = get_broadcaster()
-
-    @app.get("/")
-    async def root():
-        # P3-5 FIX: Generate proper session ID with instanceId for HUD
-        instance_id = get_or_create_instance_id()
-        cwd = os.getcwd()
-        workspace_hash = hashlib.sha256(cwd.encode()).hexdigest()[:8]
-        
-        # For HTTP endpoint, use "hud" as client_source
-        project_id = f"{instance_id}_hud_{workspace_hash}"
-        
-        return {
-            "status": "SPECTER LENS SIDECAR ACTIVE",
-            "project_id": project_id,
-            "instance_id": instance_id,  # P3-6: Return instanceId for extension sync
-            "uplink": f"ws://127.0.0.1:8878/ws/telemetry?project_id={project_id}"
-        }
-
-    @app.websocket("/ws/telemetry")
-    async def websocket_endpoint(websocket: WebSocket):
-        await websocket.accept()
-        # FIX: Extract project_id from query string manually (FastAPI doesn't auto-parse WebSocket query params)
-        project_id = websocket.query_params.get("project_id", "default")
-        await broadcaster.add_client(websocket, project_id=project_id)
-        try:
-            while True:
-                # Keep alive and signal handling
-                try:
-                    # Non-blocking check for messages + heartbeat
-                    await asyncio.wait_for(websocket.receive_text(), timeout=10)
-                except asyncio.TimeoutError:
-                    # Optional: send project-specific heartbeat if needed
-                    await websocket.send_json({"type": "heartbeat", "project_id": project_id})
-        except Exception:
-            pass
-        finally:
-            await broadcaster.remove_client(websocket)
-
-    # Run on fixed port 8878
-    try:
-        config = uvicorn.Config(app, host="127.0.0.1", port=8878, log_level="warning")
-        server = uvicorn.Server(config)
-        _TELEMETRY_SERVER_RUNNING = True
-        server.run()
-    except Exception as e:
-        print(f"❌ Telemetry Sidecar failed: {e}", file=sys.stderr)
-        _TELEMETRY_SERVER_RUNNING = False
-
-async def sync_hud_state():
-    """Broadcaster update for role mapping and basic state."""
-    await asyncio.sleep(2) # Wait for sidecar thread to start
-    await get_broadcaster().broadcast_state({
-        "role_mapping": registry.models,
-        "is_live": False
-    })
-
-def main():
-    """Main entrypoint for the MCP server."""
-    global _TELEMETRY_SERVER_RUNNING
-    
-    print("🚀 [SPECTER] Starting Qwen Engineering Engine Context...", file=sys.stderr)
-    
-    # Check if telemetry server is already running (shared across MCP instances)
-    if is_port_in_use(8878):
-        print("ℹ️ [SPECTER] Connecting to existing telemetry server on port 8878", file=sys.stderr)
-        _TELEMETRY_SERVER_RUNNING = True
-    else:
-        print("📡 [SPECTER] Starting telemetry sidecar on port 8878/ws", file=sys.stderr)
-        # Start telemetry in dedicated thread
-        sidecar = threading.Thread(target=run_telemetry_server, daemon=True)
-        sidecar.start()
-        # Wait briefly for server to start
-        threading.Event().wait(0.5)
-    
-    # Schedule initial state sync
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.create_task(sync_hud_state())
-    except Exception:
-        pass
-
-    mcp.run()
-
 
 @mcp.tool()
 async def qwen_init_request(ctx: Context = None) -> str:
@@ -467,19 +540,29 @@ async def qwen_init_request(ctx: Context = None) -> str:
     broadcaster = get_broadcaster()
     project_id = _get_tool_session_id(ctx, default_source="init")
     await broadcaster.start_request(project_id=project_id)
-    return f"✅ Specter HUD: 'This Prompt' counters reset for {project_id}. Ready for new engagement."
-
+    return f"OK: {project_id}"
 
 @mcp.tool()
-async def qwen_heal_registry() -> str:
+async def qwen_heal_registry(ctx: Context = None) -> str:
     """
     ⚡ SELF-HEALING: Analyzes available models and maps them to roles based on ROI and SOTA status.
     Use this if tools report 'Model not found' or if you want to upgrade to the latest versions.
     """
+    await _auto_init_request(ctx, "heal")
+    project_id = _get_tool_session_id(ctx, default_source="heal")
+    
+    if ctx:
+        await ctx.report_progress(progress=0, total=None, message="Healing model registry...")
+    
+    await get_broadcaster().broadcast_state({
+        "operation": "Self-healing registry...",
+        "progress": 0.0,
+        "is_live": True
+    }, project_id=project_id)
+    
     from qwen_mcp.api import DashScopeClient
     client = DashScopeClient()
     return await client.heal_registry()
-
 
 @mcp.tool()
 async def qwen_init_context_tool(
@@ -511,13 +594,17 @@ async def qwen_init_context_tool(
     """
     await _auto_init_request(ctx, "context_init")
     project_id = _get_tool_session_id(ctx, default_source="context_init")
+    
+    if ctx:
+        await ctx.report_progress(progress=0, total=None, message="Initializing project context...")
+    
     await get_broadcaster().broadcast_state({
-        "active_model": registry.get_best_model("scout"),
-        "role_mapping": registry.models,
+        "operation": "Initializing project context...",
+        "progress": 0.0,
         "is_live": True
     }, project_id=project_id)
+    
     return await qwen_init_context(workspace_root, ctx)
-
 
 @mcp.tool()
 async def qwen_update_session_context_tool(
@@ -548,15 +635,22 @@ async def qwen_update_session_context_tool(
             workspace_root="."
         )
     """
-    await _auto_init_request(ctx, "context_update")
-    project_id = _get_tool_session_id(ctx, default_source="context_update")
+    await _auto_init_request(ctx, "session_context")
+    project_id = _get_tool_session_id(ctx, default_source="session_context")
+    
+    if ctx:
+        await ctx.report_progress(progress=0, total=None, message="Updating session context...")
+    
     await get_broadcaster().broadcast_state({
-        "active_model": registry.get_best_model("scout"),
-        "role_mapping": registry.models,
+        "operation": "Updating session context...",
+        "progress": 0.0,
         "is_live": True
     }, project_id=project_id)
+    
     return await qwen_update_session_context(session_summary, workspace_root, ctx)
 
+def main():
+    mcp.run()
 
 if __name__ == "__main__":
     main()

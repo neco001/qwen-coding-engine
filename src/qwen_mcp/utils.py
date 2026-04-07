@@ -8,6 +8,10 @@ logger = logging.getLogger(__name__)
 
 def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
     """Utility to pull JSON blocks from LLM markdown responses."""
+    # Guard against None input (can happen on API errors or empty responses)
+    if text is None:
+        return None
+        
     try:
         # Try finding a ```json block first
         match = re.search(r'```json\n(.*?)\n```', text, re.DOTALL)

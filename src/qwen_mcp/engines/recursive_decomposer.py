@@ -78,7 +78,19 @@ class RecursiveDecomposer:
         
         # Use TokenScout for estimation
         estimation = self.scout.estimate_output_tokens(prompt, context)
-        estimated_tokens = estimation["estimated_tokens"]
+        
+        # Defensive check against NoneType from TokenScout
+        if not estimation:
+            logger.error(f"TokenScout returned None for prompt: {prompt[:100]}")
+            return {
+                "needs_decomposition": False,
+                "estimated_tokens": 1000,
+                "depth": 0,
+                "subtasks": [],
+                "factors": ["fallback: TokenScout failed"]
+            }
+            
+        estimated_tokens = estimation.get("estimated_tokens", 0)
         
         needs_decomposition = self.scout.should_decompose(estimated_tokens)
         
@@ -154,10 +166,16 @@ class RecursiveDecomposer:
             # Recursively decompose each subtask
             subtask_result = self.decompose(subtask_prompt, "", depth + 1)
             
+            # Defensive check against recursive NoneType return
+            if not subtask_result:
+                logger.error(f"Recursive call to decompose returned None for: {subtask_prompt[:50]}")
+                continue
+                
             # Flatten subtasks from recursive decomposition
-            for st in subtask_result["subtasks"]:
+            subtasks_list = subtask_result.get("subtasks", [])
+            for st in subtasks_list:
                 decomposed_subtasks.append(st)
-                total_tokens += st["estimated_tokens"]
+                total_tokens += st.get("estimated_tokens", 0)
         
         return {
             "subtasks": decomposed_subtasks,

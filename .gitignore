@@ -35,4 +35,5 @@ test_*.py
 *.checkpoint.json
 *.vsix
 temp/
+tmp/
 _archive/

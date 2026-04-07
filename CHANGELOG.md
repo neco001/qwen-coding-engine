@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.1] - 2026-04-07
+
+### 📦 Production Release
+
+**Documentation & README Updates:**
+- Updated README.md with comprehensive tool tables including Context and SOS categories
+- Added Context Tools section (qwen_init_context_tool, qwen_update_session_context_tool)
+- Added SOS Sync documentation (qwen_add_task, qwen_sync_state)
+- Added project structure diagram
+- Updated Sparring Engine documentation with session storage details and guided UX
+- Corrected Coder model reference to qwen3-coder-next
+
+**SOS Sync Engine:**
+- Automated BACKLOG.md and CHANGELOG.md synchronization with decision_log.parquet
+- Atomic writes with file-based locking
+- Auto-backlog integration from qwen_audit findings
+
+**Repository Maintenance:**
+- Added PLAN/ directory to .git/info/exclude
+- Removed PLAN/ from Git cache (git rm --cached)
+
+---
+
 ## [1.0.0] - 2026-04-03
 
 ### 🎉 Initial Public Release

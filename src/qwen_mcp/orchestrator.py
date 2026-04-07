@@ -209,13 +209,21 @@ class SwarmOrchestrator:
         
         # 0. Pre-flight analysis with RecursiveDecomposer
         decomposition_plan = self.decomposer.create_plan(prompt)
-        estimated_tokens = decomposition_plan["total_estimated_tokens"]
-        needs_decomposition = decomposition_plan.get("depth_exceeded", False) or estimated_tokens > self.decomposer.threshold
+        
+        # Defensive check against NoneType subscripting
+        if not decomposition_plan:
+            logger.error(f"RecursiveDecomposer returned None for prompt: {prompt[:100]}")
+            estimated_tokens = 1000  # Fallback estimate
+            needs_decomposition = False
+            decomposition_plan = {"subtasks": [{"prompt": prompt, "estimated_tokens": 1000}], "original_prompt": prompt}
+        else:
+            estimated_tokens = decomposition_plan.get("total_estimated_tokens", 0)
+            needs_decomposition = decomposition_plan.get("depth_exceeded", False) or estimated_tokens > self.decomposer.threshold
         
         logger.info(f"TokenScout estimate: {estimated_tokens} tokens, needs_decomposition: {needs_decomposition}")
         
         # If task is atomic (below threshold), skip swarm and use direct completion
-        if not needs_decomposition and len(decomposition_plan["subtasks"]) == 1:
+        if not needs_decomposition and len(decomposition_plan.get("subtasks", [])) == 1:
             logger.info("Task is atomic - using direct completion instead of swarm")
             return await self.completion_handler.generate_completion(
                 [{"role": "user", "content": prompt}]
