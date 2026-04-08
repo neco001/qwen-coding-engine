@@ -28,6 +28,65 @@ TIMEOUTS = {
 }
 
 # =============================================================================
+# STAGE WEIGHTS CONFIGURATION
+# =============================================================================
+# Default stage weights for BudgetManager in stage-based executors
+# Weights are normalized to sum to 1.0 for each mode
+#
+# pro (sparring3): 4 stages, 225s total budget
+# full (sparring2): 4 stages, 225s total budget (includes regeneration)
+# flash (sparring1): 2 stages, 60s total budget
+
+STAGE_WEIGHTS = {
+    "pro": {
+        "discovery": 0.15,  # 33.75s
+        "red": 0.28,        # 63s
+        "blue": 0.28,       # 63s
+        "white": 0.29,      # 65.25s
+    },
+    "full": {
+        "discovery": 0.15,
+        "red": 0.28,
+        "blue": 0.28,
+        "white": 0.29,  # includes regeneration budget
+    },
+    "flash": {
+        "analyst": 0.45,   # 27s
+        "drafter": 0.55,   # 33s
+    },
+}
+
+# =============================================================================
+# BUDGET CONFIGURATION
+# =============================================================================
+# Total timeout budgets for stage-based executors
+# These budgets are managed by BudgetManager with dynamic allocation
+
+BUDGET_CONFIG = {
+    "pro": 225,      # 225 seconds for 4-stage execution
+    "full": 225,     # 225 seconds (includes regeneration loop budget)
+    "flash": 60,     # 60 seconds for fast 2-step analysis
+}
+
+# =============================================================================
+# CIRCUIT BREAKER CONFIGURATION
+# =============================================================================
+# Circuit breaker settings for failure recovery in stage execution
+
+CIRCUIT_BREAKER_CONFIG = {
+    "failure_threshold": 3,   # Open circuit after 3 consecutive failures
+    "recovery_timeout": 60,   # Wait 60 seconds before attempting recovery
+}
+
+# =============================================================================
+# EPHEMERAL TTL CONFIGURATION
+# =============================================================================
+# TTL (Time-To-Live) for ephemeral checkpoints in flash mode
+# Flash mode checkpoints expire after this duration
+
+EPHEMERAL_TTL = 300  # 300 seconds (5 minutes) for flash mode
+
+# =============================================================================
 # MAX TOKENS CONFIGURATION
 # =============================================================================
 # Controls output length for each sparring mode/step

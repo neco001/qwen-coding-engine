@@ -9,6 +9,7 @@ DECISION_LOG_SCHEMA = pa.schema([
     pa.field("timestamp", pa.timestamp("ns")),
     pa.field("session_id", pa.string()),
     pa.field("decision_type", pa.string()),
+    pa.field("task_type", pa.string()),  # "pending", "completed", "decision"
     pa.field("complexity", pa.string()),
     pa.field("tokens_used", pa.int64()),
     pa.field("content", pa.string()),
@@ -22,6 +23,13 @@ DECISION_LOG_SCHEMA = pa.schema([
     pa.field("validator_triggers", pa.list_(pa.string())),
     pa.field("user_approval", pa.bool_()),
     pa.field("rationale", pa.string()),
+    # ADR Extension Fields (nullable for backward compatibility)
+    pa.field("adr_status", pa.string(), nullable=True),
+    pa.field("adr_context", pa.string(), nullable=True),
+    pa.field("adr_consequences", pa.string(), nullable=True),
+    pa.field("adr_alternatives", pa.string(), nullable=True),
+    pa.field("linked_code_nodes", pa.list_(pa.string()), nullable=True),
+    pa.field("depends_on_adr", pa.list_(pa.string()), nullable=True),
 ])
 
 class DecisionSchema:
@@ -33,7 +41,7 @@ class DecisionSchema:
     @staticmethod
     def validate_record(record: Dict[str, Any]) -> bool:
         """Validates if a record dictionary contains all mandatory fields."""
-        required_fields = ["decision_id", "timestamp", "session_id", "decision_type", "complexity", "tokens_used", "content"]
+        required_fields = ["decision_id", "timestamp", "session_id", "decision_type", "task_type", "complexity", "tokens_used", "content"]
         for field in required_fields:
             if field not in record:
                 return False

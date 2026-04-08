@@ -28,6 +28,7 @@ pytest_out.txt
 hf_output.txt
 hf_sync_res.txt
 .sparring_sessions/
+.decision_log/
 
 # Test files in root directory
 test_*.py

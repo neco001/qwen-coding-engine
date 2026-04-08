@@ -84,6 +84,10 @@ class SparringEngineV2:
         Returns:
             SparringResponse with execution results
         """
+        # Normalize empty strings to None for consistent handling
+        if session_id == "":
+            session_id = None
+        
         logger.info(f"Executing sparring mode={mode}, session_id={session_id}")
         start_time = time.time()
         
@@ -119,8 +123,8 @@ class SparringEngineV2:
             elif mode == "full":
                 return await executor.execute(topic=topic, context=context, ctx=ctx)
             elif mode == "pro":
-                # sparring3: Start step-by-step with discovery
-                return await executor.execute(topic=topic, context=context, ctx=ctx)
+                # sparring3: Start step-by-step with discovery (supports session resumption)
+                return await executor.execute(topic=topic, context=context, ctx=ctx, session_id=session_id)
             else:
                 return SparringResponse(
                     success=False,

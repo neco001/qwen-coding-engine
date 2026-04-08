@@ -20,6 +20,9 @@ class SparringResponse:
     next_command: Optional[str] = None
     result: Any = None
     error: Optional[str] = None
+    # Multi-turn tracking fields
+    messages_appended: int = 0  # Number of messages added in this turn
+    context_truncated: bool = False  # Indicates if context truncation occurred
     
     @classmethod
     def error(cls, message: str, error: str, session_id: Optional[str] = None,
@@ -28,17 +31,20 @@ class SparringResponse:
         return cls(
             success=False, message=message, session_id=session_id,
             step_completed=step, next_step=None, next_command=None,
-            result=None, error=error
+            result=None, error=error,
+            messages_appended=0, context_truncated=False
         )
     
     @classmethod
     def success(cls, session_id: str, step: str, next_step: Optional[str],
-                next_command: Optional[str], result: Any, message: str) -> "SparringResponse":
+                next_command: Optional[str], result: Any, message: str,
+                messages_appended: int = 0, context_truncated: bool = False) -> "SparringResponse":
         """Factory for success responses."""
         return cls(
             success=True, message=message, session_id=session_id,
             step_completed=step, next_step=next_step, next_command=next_command,
-            result=result, error=None
+            result=result, error=None,
+            messages_appended=messages_appended, context_truncated=context_truncated
         )
     
     def to_dict(self) -> Dict[str, Any]:
@@ -51,7 +57,9 @@ class SparringResponse:
             "next_command": self.next_command,
             "result": self.result,
             "message": self.message,
-            "error": self.error
+            "error": self.error,
+            "messages_appended": self.messages_appended,
+            "context_truncated": self.context_truncated
         }
     
     def to_markdown(self) -> str:
@@ -65,6 +73,13 @@ class SparringResponse:
         
         if self.session_id:
             lines.append(f"📋 **Session ID:** `{self.session_id}`")
+            lines.append("")
+        
+        # Multi-turn tracking info
+        if self.messages_appended > 0:
+            lines.append(f"💬 **Messages appended:** {self.messages_appended}")
+            if self.context_truncated:
+                lines.append("⚠️ **Context truncated:** Yes (rolling summary applied)")
             lines.append("")
         
         # Show result based on step

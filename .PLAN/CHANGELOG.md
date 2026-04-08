@@ -1,10 +1,4 @@
-# Changelog
-
-## [Full changelog](./.PLAN/CHANGELOG.md)
-
-## 1.1.0 Release
-
-CHANGELOG
+# CHANGELOG
 
 ## SOS Sync Architecture Redesign - 2026-04-08
 
@@ -358,3 +352,147 @@ The tests should cover:
 **Status**: ✅ Completed
 
 ---
+
+---
+
+## [1.0.1] - 2026-04-07
+
+### 📦 Production Release
+
+**Documentation & README Updates:**
+
+- Updated README.md with comprehensive tool tables including Context and SOS categories
+- Added Context Tools section (qwen_init_context_tool, qwen_update_session_context_tool)
+- Added SOS Sync documentation (qwen_add_task, qwen_sync_state)
+- Added project structure diagram
+- Updated Sparring Engine documentation with session storage details and guided UX
+- Corrected Coder model reference to qwen3-coder-next
+
+**SOS Sync Engine:**
+
+- Automated BACKLOG.md and CHANGELOG.md synchronization with decision_log.parquet
+- Atomic writes with file-based locking
+- Auto-backlog integration from qwen_audit findings
+
+**Repository Maintenance:**
+
+- Added PLAN/ directory to .git/info/exclude
+- Removed PLAN/ from Git cache (git rm --cached)
+
+---
+
+## 2026-04-06 - sparring3 (pro mode) Fix
+
+**Task**: Naprawić tryb sparring3 (pro) - brak executora w MODE_EXECUTORS
+
+**Changes**:
+
+- Created [`ProExecutor`](src/qwen_mcp/engines/sparring_v2/modes/pro.py) - new executor for true step-by-step sparring3 execution
+- Updated [`MODE_EXECUTORS`](src/qwen_mcp/engines/sparring_v2/engine.py:47) to use `ProExecutor` instead of `FullExecutor` for "pro" mode
+- Updated [`qwen_sparring`](src/qwen_mcp/server.py:227) documentation to explicitly list all modes (sparring1, sparring2, sparring3)
+
+**Technical Details**:
+| Aspect | Before (FullExecutor) | After (ProExecutor) |
+|--------|----------------------|---------------------|
+| Execution | 4 cells in one call | 4 cells separately |
+| Word limit | 100-200 words/cell | 800 words/cell |
+| Token budget | 512-1024 tokens/cell | 512-4096 tokens/cell |
+| Checkpointing | None | Between each cell |
+
+**Result**: sparring3 now runs each cell (discovery, red, blue, white) as separate MCP calls with higher token budgets for deep analysis.
+
+---
+
+## SOS Sync - 2026-04-06 21:39:44
+
+## [2026-04-04 22:57:48] 4c392b8c-a22c-4a37-9022-3a2e623d7f5c
+
+**Task**: Naprawić backlog_ref w decision log
+
+**Advice**: Automatically trigger qwen_sync_state after every significant file change to ensure project documentation is up to date.
+
+---
+
+## [2026-04-04 23:39:10] b91b301f-a319-43e2-a985-a12c58ae4406
+
+**Task**: Naprawić backlog_ref w decision log
+
+**Advice**: Restrict .lock file access to the current user only to prevent local privilege escalation during sync.
+
+## [1.0.0] - 2026-04-03
+
+### 🎉 Initial Public Release
+
+**The Lachman Protocol: Qwen Engineering Engine** - MCP server for architectural planning and code generation using specialized Qwen models.
+
+### ✨ Core Features
+
+- **The Lachman Protocol (LP)**: Self-healing architectural planning loop (Discovery → Architecting → Self-Verification)
+- **TDD-First Workflow**: RED (test) → GREEN (code) → REFACTOR (audit)
+- **Dynamic Model Registry**: Automatic model selection based on billing mode (`coding_plan`, `payg`, `hybrid`)
+- **Scout-Powered Context Discovery**: File/project analysis using kimi-k2.5 before planning/coding/auditing
+- **Swarm Orchestrator**: Parallel task decomposition and execution (max 5 concurrent tasks)
+- **Sparring Engine**: Adversarial multi-agent debate (sparring1/2/3 modes)
+- **DuckDB Billing Tracking**: Local token/cost reports via `qwen_usage_report`
+- **SPECTER Telemetry**: WebSocket server (port 8878) for real-time HUD streaming
+
+### 🛠️ Available Tools
+
+| Tool                | Role          | Default Model        |
+| ------------------- | ------------- | -------------------- |
+| `qwen_architect`    | Strategist    | qwen3.5-plus         |
+| `qwen_coder`        | Coder         | qwen3-coder-next     |
+| `qwen_coder_pro`    | Specialist    | qwen3-coder-plus     |
+| `qwen_audit`        | Analyst       | glm-5                |
+| `qwen_sparring`     | Debate Master | qwen3.5-plus / glm-5 |
+| `qwen_read_file`    | Scout         | kimi-k2.5            |
+| `qwen_list_files`   | Explorer      | kimi-k2.5            |
+| `qwen_usage_report` | Billing       | N/A (DuckDB)         |
+
+### 📦 Tech Stack
+
+- **Runtime**: Python 3.10+
+- **Protocol**: MCP (Model Context Protocol)
+- **Models**: Qwen via Alibaba DashScope
+- **Analytics**: DuckDB for billing/token tracking
+- **HUD**: React/Vite + VSCode Extension (qwen-hud-ui)
+- **Telemetry**: WebSocket server on port 8878
+
+### 📚 Documentation
+
+- [`README.md`](README.md) - Project overview and installation
+- [`docs/LP_SYSTEM_PROMPT.md`](docs/LP_SYSTEM_PROMPT.md) - System instructions for AI assistants
+- [`docs/TDD.md`](docs/TDD.md) - TDD-First workflow guide
+- [`docs/REPAIR_PROTOCOL.md`](docs/REPAIR_PROTOCOL.md) - Debugging and fixing regressions
+- [`docs/workflows/`](docs/workflows/) - Slash command workflows
+- [`AGENTS.md`](AGENTS.md) - Agent-specific guidance
+- [`BUILD_GUIDE.md`](BUILD_GUIDE.md) - Compilation and packaging
+
+### ⚠️ Known Issues
+
+- **HUD Streaming** (`qwen-hud-ui`): WebSocket connection in VSCode extension is currently broken. The MCP server works fully without the UI component. Use `qwen_usage_report()` for billing data.
+- **Looking for contributors**: If you can fix WebSocket streaming in VSCode extensions, please open a PR!
+
+### 🔧 Configuration
+
+**Environment Variables:**
+
+- `DASHSCOPE_API_KEY` - Required (Alibaba DashScope API key)
+- `BILLING_MODE` - Optional, default: `coding_plan` (`coding_plan`, `payg`, `hybrid`)
+- `LP_MAX_RETRIES` - Optional, default: `3` (circuit breaker for self-healing loop)
+
+**Billing Modes:**
+
+- `coding_plan` - Strict mode using only prepaid Alibaba Coding Plan models
+- `payg` - Pay-as-you-go via DashScope API
+- `hybrid` - Coding plan preferred, PAYG fallback for complex tasks
+
+---
+
+## [0.1.0] - 2026-03-28
+
+### 🐛 Development Version (Pre-Release)
+
+- Initial development version
+- Internal testing and iteration
+- **Not suitable for production use**

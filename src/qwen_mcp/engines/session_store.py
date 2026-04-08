@@ -40,6 +40,10 @@ class SessionCheckpoint:
         results: Results from each completed step
         loop_count: Number of regeneration loops (for blue/white cycle)
         error: Error message if status is 'failed'
+        messages: Conversation history for multi-turn support (filtered, no reasoning_content)
+        has_stages: Whether this session uses stage-based execution (for BaseStageExecutor)
+        stage_count: Total number of stages in the execution plan
+        ttl_expires_at: ISO timestamp for TTL expiration (ephemeral checkpoints)
     """
     session_id: str
     topic: str
@@ -50,10 +54,14 @@ class SessionCheckpoint:
     steps_completed: List[str] = None
     current_step: str = "discovery"
     roles: Dict[str, str] = None
-    models: Dict[str, str] = None  # New: stores red_model, blue_model, white_model
+    models: Dict[str, str] = None
     results: Dict[str, Any] = None
     loop_count: int = 0
     error: Optional[str] = None
+    messages: List[Dict[str, str]] = None
+    has_stages: bool = False  # Stage-based execution flag
+    stage_count: int = 4  # Default: 4 stages (discovery, red, blue, white)
+    ttl_expires_at: Optional[str] = None  # TTL expiration for ephemeral checkpoints
     
     def __post_init__(self):
         if self.steps_completed is None:
@@ -64,6 +72,8 @@ class SessionCheckpoint:
             self.models = {}
         if self.results is None:
             self.results = {}
+        if self.messages is None:
+            self.messages = []
         if not self.created_at:
             self.created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         if not self.updated_at:
@@ -77,7 +87,28 @@ class SessionCheckpoint:
         # Ensure loop_count is int (handle JSON deserialization edge cases)
         if 'loop_count' in data and isinstance(data['loop_count'], str):
             data['loop_count'] = int(data['loop_count'])
+        # Ensure has_stages is bool
+        if 'has_stages' in data and isinstance(data['has_stages'], str):
+            data['has_stages'] = data['has_stages'].lower() == 'true'
+        # Ensure stage_count is int
+        if 'stage_count' in data and isinstance(data['stage_count'], str):
+            data['stage_count'] = int(data['stage_count'])
         return cls(**data)
+    
+    def is_expired(self) -> bool:
+        """Check if this checkpoint has expired (TTL-based)."""
+        if not self.ttl_expires_at:
+            return False  # No TTL set - never expires
+        try:
+            expires = datetime.fromisoformat(self.ttl_expires_at.replace("Z", "+00:00"))
+            return datetime.now(timezone.utc) > expires
+        except Exception:
+            return False
+    
+    def set_ttl(self, ttl_seconds: int) -> None:
+        """Set TTL expiration for this checkpoint."""
+        from datetime import timedelta
+        self.ttl_expires_at = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat().replace("+00:00", "Z")
 
 
 # =============================================================================
@@ -97,8 +128,9 @@ class SessionStore:
     """
     
     DEFAULT_DIR = ".sparring_sessions"
+    DEFAULT_MAX_CONTEXT_LENGTH = 50  # Max messages to keep in history
     
-    def __init__(self, storage_dir: Optional[str] = None):
+    def __init__(self, storage_dir: Optional[str] = None, max_context_length: int = DEFAULT_MAX_CONTEXT_LENGTH):
         """
         Initialize the session store.
         
@@ -110,10 +142,12 @@ class SessionStore:
                         3. User-level directory (%APPDATA%\\qwen-mcp\\sparring_sessions on Windows,
                            ~/.qwen-mcp/sparring_sessions on Unix)
                         4. Fallback to .sparring_sessions in current working directory
+            max_context_length: Maximum number of messages to keep in conversation history
         """
         self.storage_dir = Path(self._resolve_storage_dir(storage_dir))
         self._ensure_storage_dir()
-        logger.info(f"SessionStore initialized at {self.storage_dir.absolute()}")
+        self.max_context_length = max_context_length
+        logger.info(f"SessionStore initialized at {self.storage_dir.absolute()} (max_context_length={max_context_length})")
     
     def _resolve_storage_dir(self, storage_dir: Optional[str]) -> str:
         """
@@ -270,7 +304,7 @@ class SessionStore:
             session_id: The session ID to load
             
         Returns:
-            SessionCheckpoint or None if not found
+            SessionCheckpoint or None if not found or expired
         """
         session_path = self._get_session_path(session_id)
         
@@ -282,6 +316,17 @@ class SessionStore:
             with open(session_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             checkpoint = SessionCheckpoint.from_dict(data)
+            
+            # Check TTL expiration for ephemeral checkpoints
+            if checkpoint.is_expired():
+                logger.info(f"Session expired (TTL): {session_id}")
+                # Delete expired checkpoint
+                try:
+                    session_path.unlink()
+                except Exception:
+                    pass
+                return None
+            
             logger.debug(f"Loaded checkpoint for session {session_id}")
             return checkpoint
         except Exception as e:
@@ -415,3 +460,83 @@ class SessionStore:
         if removed > 0:
             logger.info(f"Cleaned up {removed} old sessions")
         return removed
+    
+    def add_message(self, session_id: str, message: Dict[str, Any]) -> bool:
+        """
+        Add a message to the session history.
+        CRITICAL: Filters reasoning_content and applies truncation.
+        
+        Args:
+            session_id: The session ID
+            message: Message dict with role, content, and optionally reasoning_content
+            
+        Returns:
+            True if context was truncated, False otherwise
+        """
+        checkpoint = self.load(session_id)
+        if checkpoint is None:
+            # Initialize if missing - create minimal checkpoint
+            checkpoint = SessionCheckpoint(
+                session_id=session_id,
+                topic="multi_turn_session",
+                context="",
+                messages=[]  # Explicitly initialize messages list
+            )
+        
+        # Security: Sanitize message - ONLY keep role and content
+        sanitized_msg = {
+            "role": message.get("role", "user"),
+            "content": message.get("content", "")
+        }
+        # Explicitly exclude reasoning_content and other fields
+        
+        if checkpoint.messages is None:
+            checkpoint.messages = []
+        checkpoint.messages.append(sanitized_msg)
+        
+        # Context Truncation Logic
+        truncated = False
+        if len(checkpoint.messages) > self.max_context_length:
+            truncated = self._apply_rolling_summary(checkpoint)
+        
+        self.save(checkpoint)
+        return truncated
+    
+    def _apply_rolling_summary(self, checkpoint: SessionCheckpoint) -> bool:
+        """
+        Compress context when exceeding threshold.
+        Simple rolling window: Keep last N messages.
+        
+        In production, this could call LLM to summarize oldest messages,
+        but for now we just drop the oldest messages to fit the limit.
+        
+        Returns:
+            True if truncation occurred
+        """
+        overflow = len(checkpoint.messages) - self.max_context_length
+        if overflow > 0:
+            # Remove oldest messages to fit limit
+            checkpoint.messages = checkpoint.messages[overflow:]
+            logger.info(f"Truncated {overflow} oldest messages from session {checkpoint.session_id}")
+            return True
+        return False
+    
+    def get_messages_for_api(self, session_id: str) -> List[Dict[str, str]]:
+        """
+        Retrieve formatted messages for Qwen API call.
+        
+        Args:
+            session_id: The session ID
+            
+        Returns:
+            List of messages in Qwen API format (role + content only)
+        """
+        checkpoint = self.load(session_id)
+        if not checkpoint:
+            return []
+        
+        # Ensure strict format for API - only role and content
+        return [
+            {"role": m["role"], "content": m["content"]}
+            for m in checkpoint.messages
+        ]

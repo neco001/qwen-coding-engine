@@ -132,6 +132,9 @@ class DiscoveryExecutor(ModeExecutor):
         session.models = models
         self.session_store.save(session)
         
+        # CRITICAL: Log session_id for debugging
+        logger.info(f"DiscoveryExecutor created session: {session.session_id!r}")
+        
         return SparringResponse(
             success=True,
             session_id=session.session_id,

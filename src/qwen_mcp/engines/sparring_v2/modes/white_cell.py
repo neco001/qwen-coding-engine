@@ -81,6 +81,9 @@ class WhiteCellExecutor(ModeExecutor):
         if word_limit:
             white_prompt += get_word_limit_instruction(word_limit)
         
+        # Multi-turn support: Include conversation history from SessionStore
+        conversation_history = self.session_store.get_messages_for_api(session_id) if session_id else []
+        
         while loop_count < max_loops:
             loop_count += 1
             await self._report_progress(ctx, 0.0, f"[White Cell] {session.roles.get('white_role', 'White')} synthesizing (loop {loop_count})...")
@@ -89,6 +92,9 @@ class WhiteCellExecutor(ModeExecutor):
                 {"role": "system", "content": f"Jesteś {session.roles.get('white_role', 'White Cell')}. Profil: {session.roles.get('white_profile', '')}\n\nZADANIE:\n{white_prompt}"},
                 {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}\n\nRed Audit:\n{red_critique}\n\nBlue Defense:\n{blue_defense}"},
             ]
+            
+            # Append conversation history for multi-turn context
+            white_messages.extend(conversation_history)
             
             # Execute API call
             # Determine mode key based on word_limit (full mode uses word_limit, pro mode doesn't)
