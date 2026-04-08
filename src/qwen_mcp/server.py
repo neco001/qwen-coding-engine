@@ -152,6 +152,14 @@ async def qwen_coder(
     await _auto_init_request(ctx, "coder")
     project_id = _get_tool_session_id(ctx, default_source="coder")
     
+    # Extract workspace_root from MCP context
+    workspace_root = None
+    if ctx and hasattr(ctx, 'request_context') and ctx.request_context:
+        session = ctx.request_context.session
+        workspace_uri = getattr(session, 'root_uri', None)
+        if workspace_uri and workspace_uri.startswith('file:///'):
+            workspace_root = workspace_uri[8:]
+    
     # Report progress FIRST (before any broadcast_state to avoid double-response)
     if ctx:
         await ctx.report_progress(
@@ -166,7 +174,7 @@ async def qwen_coder(
         "operation": "Code generation in progress..."
     }, project_id=project_id)
     
-    return await generate_code_unified(prompt, mode, context, ctx, project_id=project_id)
+    return await generate_code_unified(prompt, mode, context, ctx, project_id=project_id, workspace_root=workspace_root)
 
 @mcp.tool()
 async def qwen_architect(
@@ -249,6 +257,14 @@ async def qwen_sparring(
     await _auto_init_request(ctx, "sparring")
     project_id = _get_tool_session_id(ctx, default_source="sparring")
     
+    # Extract workspace_root from MCP context
+    workspace_root = None
+    if ctx and hasattr(ctx, 'request_context') and ctx.request_context:
+        session = ctx.request_context.session
+        workspace_uri = getattr(session, 'root_uri', None)
+        if workspace_uri and workspace_uri.startswith('file:///'):
+            workspace_root = workspace_uri[8:]
+    
     # Report progress FIRST (before any broadcast_state to avoid double-response)
     if ctx:
         await ctx.report_progress(
@@ -263,7 +279,7 @@ async def qwen_sparring(
         "operation": f"Sparring session in progress (mode: {mode})..."
     }, project_id=project_id)
     
-    return await generate_sparring(topic, context, mode, session_id, ctx, project_id=project_id)
+    return await generate_sparring(topic, context, mode, session_id, ctx, project_id=project_id, workspace_root=workspace_root)
 
 @mcp.tool()
 async def qwen_swarm(

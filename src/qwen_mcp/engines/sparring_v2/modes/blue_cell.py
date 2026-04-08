@@ -70,10 +70,16 @@ class BlueCellExecutor(ModeExecutor):
         if word_limit:
             blue_prompt += get_word_limit_instruction(word_limit)
         
+        # Multi-turn support: Include conversation history from SessionStore
+        conversation_history = self.session_store.get_messages_for_api(session_id) if session_id else []
+        
         blue_messages = [
             {"role": "system", "content": f"Jesteś {session.roles.get('blue_role', 'Blue Cell')}. Profil: {session.roles.get('blue_profile', '')}\n\nZADANIE:\n{blue_prompt}"},
             {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}\n\nRed Critique:\n{red_critique}"},
         ]
+        
+        # Append conversation history for multi-turn context
+        blue_messages.extend(conversation_history)
         
         # Execute API call
         # Determine mode key based on word_limit (full mode uses word_limit, pro mode doesn't)

@@ -61,10 +61,16 @@ class RedCellExecutor(ModeExecutor):
         if word_limit:
             red_prompt += get_word_limit_instruction(word_limit)
         
+        # Multi-turn support: Include conversation history from SessionStore
+        conversation_history = self.session_store.get_messages_for_api(session_id) if session_id else []
+        
         red_messages = [
             {"role": "system", "content": f"Jesteś {session.roles.get('red_role', 'Red Cell')}. Profil: {session.roles.get('red_profile', '')}\n\nZADANIE:\n{red_prompt}"},
             {"role": "user", "content": f"Topic: {session.topic}\n\nContext: {session.context}"},
         ]
+        
+        # Append conversation history for multi-turn context
+        red_messages.extend(conversation_history)
         
         # Execute API call
         # Determine mode key based on word_limit (full mode uses word_limit, pro mode doesn't)

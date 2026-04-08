@@ -17,7 +17,7 @@ class DecisionLogWriter:
         Args:
             log_path: Path to decision_log.parquet
             backup_dir: Path to backup directory (APPDATA)
-            plan_dir: Path to project PLAN/ directory
+            plan_dir: Path to project .PLAN/ directory
         """
         self.log_path = Path(log_path)
         self.backup_dir = Path(backup_dir) if backup_dir else None

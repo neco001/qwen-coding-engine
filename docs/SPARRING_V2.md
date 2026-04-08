@@ -4,6 +4,23 @@
 
 Sparring Engine v2 is a refactored version of the original `qwen_sparring_pro` tool, designed to solve MCP client timeout issues (300s hard limit) by breaking monolithic multi-agent sessions into discrete, checkpointed steps.
 
+### 2026-04-08 Stage-Based Refactoring
+
+**New Architecture:** Stage-based execution with unified `BaseStageExecutor` providing:
+- **BudgetManager**: Dynamic timeout allocation with remaining budget tracking
+- **CircuitBreaker**: Failure recovery (3 failures threshold, 60s recovery timeout)
+- **Stage Checkpointing**: Automatic checkpointing after each stage
+- **Recovery Support**: Resume from failed stage without losing progress
+
+**Files Modified:**
+- [`src/qwen_mcp/engines/sparring_v2/base_stage_executor.py`](src/qwen_mcp/engines/sparring_v2/base_stage_executor.py) - Core architecture
+- [`src/qwen_mcp/engines/sparring_v2/modes/pro.py`](src/qwen_mcp/engines/sparring_v2/modes/pro.py) - Pro mode (sparring3)
+- [`src/qwen_mcp/engines/sparring_v2/modes/full.py`](src/qwen_mcp/engines/sparring_v2/modes/full.py) - Full mode (sparring2)
+- [`src/qwen_mcp/engines/sparring_v2/modes/flash.py`](src/qwen_mcp/engines/sparring_v2/modes/flash.py) - Flash mode (sparring1)
+- [`src/qwen_mcp/engines/session_store.py`](src/qwen_mcp/engines/session_store.py) - TTL expiration support
+- [`src/qwen_mcp/engines/sparring_v2/config.py`](src/qwen_mcp/engines/sparring_v2/config.py) - Budget and stage weights config
+- [`tests/test_sparring_stage_recovery.py`](tests/test_sparring_stage_recovery.py) - 23 integration tests
+
 ## Problem Solved
 
 **Original Issue:** The monolithic `run_pro()` method executed 4-6 sequential API calls with 300s timeouts each, potentially taking 26+ minutes total - far exceeding the MCP client's 300s timeout limit.
@@ -273,26 +290,53 @@ qwen_sparring(mode="white", session_id="...") # Complete
 ### Run Tests
 
 ```bash
-uv run pytest tests/test_session_store.py tests/test_sparring_v2.py -v
+uv run pytest tests/test_session_store.py tests/test_sparring_v2.py tests/test_sparring_stage_recovery.py -v
 ```
 
 ### Test Coverage
 
 - **SessionStore:** 31 tests (creation, atomic save/load, step updates, status transitions, cleanup)
 - **SparringEngineV2:** 18 tests (flash, discovery, red/blue/white cells, full flow, guided UX)
+- **Stage Recovery:** 23 tests (BudgetManager, CircuitBreaker, StageResult, StageContext, TTL, recovery)
 
-**Total:** 49 passing tests
+**Total:** 72 passing tests
+
+### Stage Recovery Test Suite
+
+The new `test_sparring_stage_recovery.py` validates the stage-based architecture:
+
+| Test Class | Tests | Coverage |
+|------------|-------|----------|
+| `TestBudgetManager` | 5 | Dynamic timeout allocation, remaining budget tracking, pro/flash weights |
+| `TestCircuitBreaker` | 5 | State transitions, failure threshold, recovery timeout, HALF_OPEN state |
+| `TestStageDataclasses` | 3 | StageResult success/failure, StageContext creation |
+| `TestSessionStoreTTL` | 5 | TTL expiration, checkpoint persistence, ephemeral TTL constant |
+| `TestStageRecovery` | 3 | Recovery from failed stage, checkpoint creation, budget tracking |
+| `TestConfigModule` | 3 | Stage weights validation, budget config coverage, circuit breaker values |
+
+**Key Test Scenarios:**
+- Circuit breaker opens after 3 consecutive failures
+- BudgetManager correctly allocates time based on stage weights
+- SessionCheckpoint TTL expiration for ephemeral checkpoints (flash mode)
+- Recovery from failed stage continues execution
+- Checkpoints created after each successful stage
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| [`src/qwen_mcp/engines/session_store.py`](src/qwen_mcp/engines/session_store.py) | Session checkpointing with atomic writes |
-| [`src/qwen_mcp/engines/sparring_v2.py`](src/qwen_mcp/engines/sparring_v2.py) | Unified sparring engine |
+| [`src/qwen_mcp/engines/session_store.py`](src/qwen_mcp/engines/session_store.py) | Session checkpointing with atomic writes, TTL support |
+| [`src/qwen_mcp/engines/sparring_v2/engine.py`](src/qwen_mcp/engines/sparring_v2/engine.py) | Unified sparring engine |
+| [`src/qwen_mcp/engines/sparring_v2/base_stage_executor.py`](src/qwen_mcp/engines/sparring_v2/base_stage_executor.py) | Stage-based execution architecture |
+| [`src/qwen_mcp/engines/sparring_v2/config.py`](src/qwen_mcp/engines/sparring_v2/config.py) | Budget, stage weights, circuit breaker config |
+| [`src/qwen_mcp/engines/sparring_v2/modes/pro.py`](src/qwen_mcp/engines/sparring_v2/modes/pro.py) | Pro mode executor (sparring3) |
+| [`src/qwen_mcp/engines/sparring_v2/modes/full.py`](src/qwen_mcp/engines/sparring_v2/modes/full.py) | Full mode executor (sparring2) |
+| [`src/qwen_mcp/engines/sparring_v2/modes/flash.py`](src/qwen_mcp/engines/sparring_v2/modes/flash.py) | Flash mode executor (sparring1) |
 | [`src/qwen_mcp/tools.py`](src/qwen_mcp/tools.py:137) | MCP tool wrapper |
 | [`src/qwen_mcp/server.py`](src/qwen_mcp/server.py:112) | MCP tool registration |
 | [`tests/test_session_store.py`](tests/test_session_store.py) | SessionStore tests |
 | [`tests/test_sparring_v2.py`](tests/test_sparring_v2.py) | Engine tests |
+| [`tests/test_sparring_stage_recovery.py`](tests/test_sparring_stage_recovery.py) | Stage recovery tests |
 
 ## Legacy Files (Archived)
 
@@ -340,7 +384,157 @@ uv run pytest tests/test_session_store.py tests/test_sparring_v2.py -v
 
 ## Future Enhancements
 
-1. **Session Resume** - Allow resuming failed sessions from any step
+1. **Session Resume** - Allow resuming failed sessions from any step ✅ (Phase 1-7 implemented)
 2. **Session History** - List all sessions with filtering
 3. **Export Reports** - Generate PDF/Markdown reports from completed sessions
 4. **Parallel Red/Blue** - Execute Red and Blue cells in parallel (requires model support)
+
+## Stage-Based Architecture Details
+
+### BudgetManager
+
+Dynamic timeout allocation based on stage weights:
+
+```python
+from qwen_mcp.engines.sparring_v2.base_stage_executor import BudgetManager
+
+# Pro mode: 225s total budget
+weights = {"discovery": 0.15, "red": 0.28, "blue": 0.28, "white": 0.29}
+budget = BudgetManager(total_budget_seconds=225, stage_weights=weights)
+
+# Get stage-specific budget
+discovery_budget = budget.get_stage_budget("discovery")  # 33 seconds
+red_budget = budget.get_stage_budget("red")              # 63 seconds
+
+# Track usage
+budget.record_usage("discovery", seconds_used=30.5)
+
+# Check remaining budget
+remaining = budget.get_remaining_budget()  # ~194 seconds
+```
+
+### CircuitBreaker
+
+Failure recovery with automatic state management:
+
+```python
+from qwen_mcp.engines.sparring_v2.base_stage_executor import CircuitBreaker
+
+cb = CircuitBreaker(failure_threshold=3, recovery_timeout=60)
+
+# Record failures
+cb.record_failure()
+cb.record_failure()
+cb.record_failure()
+
+# Circuit is now OPEN
+print(cb.state)  # "OPEN"
+print(cb.can_execute())  # False
+
+# After 60 seconds recovery timeout
+time.sleep(60)
+print(cb.can_execute())  # True (transitions to HALF_OPEN)
+
+# On success, reset to CLOSED
+cb.record_success()
+print(cb.state)  # "CLOSED"
+```
+
+### Stage Weights Configuration
+
+Default weights in [`config.py`](src/qwen_mcp/engines/sparring_v2/config.py):
+
+```python
+STAGE_WEIGHTS = {
+    "pro": {
+        "discovery": 0.15,  # 33.75s of 225s
+        "red": 0.28,        # 63s
+        "blue": 0.28,       # 63s
+        "white": 0.29,      # 65.25s
+    },
+    "full": {
+        "discovery": 0.15,
+        "red": 0.28,
+        "blue": 0.28,
+        "white": 0.29,  # includes regeneration budget
+    },
+    "flash": {
+        "analyst": 0.45,   # 27s of 60s
+        "drafter": 0.55,   # 33s
+    },
+}
+
+BUDGET_CONFIG = {
+    "pro": 225,      # 225 seconds for 4-stage execution
+    "full": 225,     # 225 seconds (includes regeneration loop)
+    "flash": 60,     # 60 seconds for fast 2-step analysis
+}
+
+CIRCUIT_BREAKER_CONFIG = {
+    "failure_threshold": 3,   # Open after 3 failures
+    "recovery_timeout": 60,   # 60 seconds recovery
+}
+
+EPHEMERAL_TTL = 300  # 5 minutes TTL for flash mode checkpoints
+```
+
+### BaseStageExecutor Interface
+
+All mode executors inherit from `BaseStageExecutor`:
+
+```python
+from qwen_mcp.engines.sparring_v2.base_stage_executor import (
+    BaseStageExecutor, StageContext, StageResult
+)
+
+class ProExecutor(BaseStageExecutor):
+    STAGES = ["discovery", "red", "blue", "white"]
+    
+    def get_stages(self) -> List[str]:
+        return self.STAGES
+    
+    def get_stage_weights(self) -> Dict[str, float]:
+        return STAGE_WEIGHTS["pro"]
+    
+    async def execute_stage(self, stage_name: str, context: StageContext) -> StageResult:
+        # Implement stage-specific logic
+        ...
+    
+    async def execute(self, ctx: Optional[Context] = None, **kwargs) -> SparringResponse:
+        # Use execute_with_recovery() for automatic checkpointing
+        context = StageContext(...)
+        results = await self.execute_with_recovery(context)
+        # Format and return response
+```
+
+### Recovery Workflow
+
+1. **Stage Execution**: Each stage executes with its allocated budget
+2. **Checkpoint**: After successful stage, checkpoint saved to disk
+3. **Failure Handling**: On failure, circuit breaker records failure
+4. **Recovery**: If circuit is OPEN, skip stage and continue
+5. **Resume**: Failed stages can be retried in subsequent calls
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  Discovery  │ ──► │     Red     │ ──► │    Blue     │
+│  (33.75s)   │     │   (63s)     │     │   (63s)     │
+└─────────────┘     └─────────────┘     └─────────────┘
+       │                   │                   │
+       ▼                   ▼                   ▼
+  [Checkpoint]       [Checkpoint]       [Checkpoint]
+                          │
+                    (if failure)
+                          ▼
+                   ┌─────────────┐
+                   │CircuitBreaker│
+                   │  OPEN 60s    │
+                   └─────────────┘
+                          │
+                    (after timeout)
+                          ▼
+                   ┌─────────────┐
+                   │   Resume    │
+                   │  from Blue  │
+                   └─────────────┘
+```

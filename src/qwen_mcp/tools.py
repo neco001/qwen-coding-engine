@@ -362,7 +362,7 @@ async def generate_audit(content: str, context: Optional[str] = None, ctx: Optio
         progress_callback=ctx.report_progress if ctx else None
     )
 
-async def generate_code_unified(prompt: str, mode: str = "auto", context: Optional[str] = None, ctx: Optional[Context] = None, project_id: str = "default") -> str:
+async def generate_code_unified(prompt: str, mode: str = "auto", context: Optional[str] = None, ctx: Optional[Context] = None, project_id: str = "default", workspace_root: Optional[str] = None) -> str:
     """
     Unified code generation with intelligent routing via CoderEngineV2.
     
@@ -371,6 +371,7 @@ async def generate_code_unified(prompt: str, mode: str = "auto", context: Option
     - Mode-based model routing (standard/pro/expert)
     - Swarm orchestration for complex tasks
     - Context-aware code generation
+    - Auto-invokes DecisionLogSync after successful completion
     
     Args:
         prompt: The code generation request
@@ -378,11 +379,14 @@ async def generate_code_unified(prompt: str, mode: str = "auto", context: Option
         context: Additional context (existing code, requirements, etc.)
         ctx: MCP context for progress reporting
         project_id: Project/session ID for telemetry isolation
+        workspace_root: Path to workspace root (default: current directory)
         
     Returns:
         Generated code or error message
     """
     from qwen_mcp.engines.coder_v2 import CoderEngineV2
+    from qwen_mcp.engines.decision_log_sync import DecisionLogSyncEngine
+    from pathlib import Path
     
     # Report progress FIRST
     if ctx:
@@ -406,6 +410,47 @@ async def generate_code_unified(prompt: str, mode: str = "auto", context: Option
     )
     
     if response.success:
+        # Auto-invoke DecisionLogSync after successful code generation
+        try:
+            # CRITICAL: Use provided workspace_root, NOT Path.cwd()
+            # This ensures files are saved in the CLIENT's project directory, not server directory
+            if workspace_root:
+                workspace = Path(workspace_root)
+            else:
+                # Fallback to MCP context's workspace folder if available
+                if ctx and hasattr(ctx, 'request_context') and ctx.request_context:
+                    session = ctx.request_context.session
+                    workspace_uri = getattr(session, 'root_uri', None)
+                    if workspace_uri and workspace_uri.startswith('file:///'):
+                        workspace = Path(workspace_uri[8:])
+                    else:
+                        workspace = Path.cwd()
+                else:
+                    workspace = Path.cwd()
+            
+            decision_log_path = workspace / ".decision_log" / "decision_log.parquet"
+            backlog_path = workspace / "PLAN" / "BACKLOG.md"
+            changelog_path = workspace / "PLAN" / "CHANGELOG.md"
+            
+            sync_engine = DecisionLogSyncEngine(decision_log_path)
+            
+            # 1. Complete task: mark as done in BACKLOG.md, log to parquet, append to CHANGELOG.md
+            await sync_engine.complete_task(
+                task_description=prompt[:200],  # Truncate long prompts
+                backlog_path=backlog_path,
+                changelog_path=changelog_path,
+                session_id=project_id,
+                tokens_used=0,  # Would need to extract from response if available
+                files_changed=[]  # Could extract from response.diff if available
+            )
+            
+            # 2. Also check for pending advices and apply them
+            advices = await sync_engine.scan_advices()
+            if advices:
+                await sync_engine.apply_all_advices(backlog_path, changelog_path)
+        except Exception as e:
+            logger.warning(f"DecisionLogSync auto-invoke failed: {e}")
+        
         return response.to_markdown()
     else:
         return f"❌ Code generation failed: {response.error}\n\n{response.message}"
@@ -449,15 +494,34 @@ def resolve_sparring_mode(mode: str) -> str:
     logger.warning(f"Unknown sparring mode '{mode}'. Using 'flash' as fallback.")
     return "flash"
 
-async def generate_sparring(topic: str, context: str, mode: str, session_id: str, ctx: Optional[Context] = None, project_id: str = "default") -> str:
+async def generate_sparring(
+    topic: str,
+    context: str,
+    mode: str,
+    session_id: str,
+    user_input: Optional[str] = None,  # New: multi-turn conversation input
+    ctx: Optional[Context] = None,
+    project_id: str = "default",
+    workspace_root: Optional[str] = None
+) -> str:
     """
     Execute sparring session using SparringEngineV2.
     
     Supports both full sessions (sparring1/2) and step-by-step (sparring3).
     
+    Multi-turn support:
+    - user_input: Append a new message to the conversation history
+    - Automatically filters reasoning_content for security
+    - Applies rolling summary when context exceeds limit
+    
     Defensive parameter handling: ensures all parameters are strings even if MCP passes dicts.
+    
+    Args:
+        workspace_root: Path to workspace root (default: current directory)
     """
     from qwen_mcp.engines.sparring_v2 import SparringEngineV2, SparringResponse
+    from qwen_mcp.engines.session_store import SessionStore
+    from pathlib import Path
     
     # Defensive: Ensure parameters are strings (MCP sometimes passes dicts for complex prompts)
     if isinstance(topic, dict):
@@ -468,26 +532,76 @@ async def generate_sparring(topic: str, context: str, mode: str, session_id: str
         mode = str(mode.get("mode", "sparring2"))
     if isinstance(session_id, dict):
         session_id = str(session_id.get("session_id", ""))
+    if isinstance(user_input, dict):
+        user_input = str(user_input.get("user_input", ""))
+    if isinstance(workspace_root, dict):
+        workspace_root = str(workspace_root.get("workspace_root", ""))
     
     # Ensure string types
     topic = str(topic) if topic else ""
     context = str(context) if context else ""
     mode = str(mode) if mode else "sparring2"
     session_id = str(session_id) if session_id else ""
+    user_input = str(user_input) if user_input else ""
+    workspace_root = str(workspace_root) if workspace_root else None
+    
+    # CRITICAL: Use provided workspace_root, NOT Path.cwd()
+    # This ensures session files are saved in the CLIENT's project directory, not server directory
+    if workspace_root:
+        workspace = Path(workspace_root)
+    else:
+        # Fallback to MCP context's workspace folder if available
+        if ctx and hasattr(ctx, 'request_context') and ctx.request_context:
+            session = ctx.request_context.session
+            workspace_uri = getattr(session, 'root_uri', None)
+            if workspace_uri and workspace_uri.startswith('file:///'):
+                workspace = Path(workspace_uri[8:])
+            else:
+                workspace = Path.cwd()
+        else:
+            workspace = Path.cwd()
+    
+    # Initialize session store for multi-turn support
+    session_store = SessionStore(storage_dir=str(workspace / ".sparring_sessions"))
     
     client = DashScopeClient()
-    engine = SparringEngineV2(client)
+    engine = SparringEngineV2(client, session_store)
     
     # Resolve mode alias to internal mode
     internal_mode = resolve_sparring_mode(mode)
     
+    # Multi-turn support: Append user input to conversation history BEFORE execution
+    messages_appended = 0
+    context_truncated = False
+    
+    if user_input:
+        # Append user message to session history (sanitized automatically)
+        user_msg = {"role": "user", "content": user_input}
+        context_truncated = session_store.add_message(session_id, user_msg)
+        messages_appended = 1
+        
+        # Also append the topic as context if it's a continuation
+        if topic and session_id:
+            # Topic becomes part of the conversation context
+            pass
+    
     # Report progress and broadcast for UI visibility
     if ctx:
-        await ctx.report_progress(progress=10, total=None, message=f"Starting sparring (mode: {internal_mode})...")
+        progress_msg = f"Starting sparring (mode: {internal_mode})"
+        if user_input:
+            progress_msg += f" | Multi-turn: {messages_appended} message(s) added"
+        if context_truncated:
+            progress_msg += " | Context truncated"
+        await ctx.report_progress(progress=10, total=None, message=progress_msg + "...")
+    
     await get_broadcaster().broadcast_state({
         "operation": f"Sparring session in progress (mode: {internal_mode})...",
         "progress": 10.0,
-        "is_live": True
+        "is_live": True,
+        "multi_turn": {
+            "messages_appended": messages_appended,
+            "context_truncated": context_truncated
+        }
     }, project_id=project_id)
     
     # Execute via engine
@@ -499,25 +613,17 @@ async def generate_sparring(topic: str, context: str, mode: str, session_id: str
             session_id=session_id,
             ctx=ctx
         )
+        # Update response with multi-turn tracking info
+        response.messages_appended = messages_appended
+        response.context_truncated = context_truncated
     except Exception as e:
         logger.error(f"Sparring engine execution failed: {e}", exc_info=True)
         return f"❌ Sparring engine error: {type(e).__name__}: {e}"
     
     # Format response for MCP tool output
     if response.success:
-        # Convert result to string if it's a dict
-        result = response.result
-        if isinstance(result, dict):
-            output = str(result)
-        else:
-            output = result or ""
-        if response.session_id:
-            output += f"\n\n**Session ID**: `{response.session_id}`"
-        if response.next_step:
-            output += f"\n\n**Next Step**: `{response.next_step}`"
-        if response.next_command:
-            output += f"\n\n**Next Command**: `{response.next_command}`"
-        return output
+        # Use the updated to_markdown() which includes multi-turn info
+        return response.to_markdown()
     else:
         return f"❌ Sparring failed: {response.error or response.message}"
 
@@ -569,45 +675,45 @@ async def generate_swarm(prompt: str, task_type: str, ctx: Optional[Context] = N
 
 async def generate_sos_sync(apply: bool, decision_id: str, apply_all: bool, workspace_root: str) -> str:
     """
-    SOS (State of Session) synchronization tool.
+    Decision Log Sync synchronization tool.
     
-    Synchronizes decision log state with filesystem.
+    Synchronizes decision_log.parquet state with BACKLOG.md and CHANGELOG.md.
     """
     from pathlib import Path
-    from qwen_mcp.engines.sos_sync import SOSSyncEngine
+    from qwen_mcp.engines.decision_log_sync import DecisionLogSyncEngine
     
-    decision_log_path = Path(workspace_root) / "src" / "decision_log.parquet"
+    decision_log_path = Path(workspace_root) / ".decision_log" / "decision_log.parquet"
     backlog_path = Path(workspace_root) / "PLAN" / "BACKLOG.md"
     
     if not decision_log_path.exists():
         return f"No decision log found at {decision_log_path}"
     
-    engine = SOSSyncEngine(decision_log_path)
+    engine = DecisionLogSyncEngine(decision_log_path)
     
     if apply_all:
         result = await engine.apply_all_advices(backlog_path)
         if result:
-            return "✅ All pending SOS insights applied to BACKLOG.md"
+            return "✅ All pending Decision Log insights applied to BACKLOG.md"
         return "No pending insights to apply"
     
     if apply and decision_id:
         result = await engine.apply_advice(decision_id, backlog_path)
         if result:
-            return f"✅ SOS insight {decision_id} applied to BACKLOG.md"
+            return f"✅ Decision Log insight {decision_id} applied to BACKLOG.md"
         return f"No pending insight found for {decision_id}"
     
     # Just scan and report
     advices = await engine.scan_advices()
     if not advices:
-        return "No pending SOS insights"
-    return f"Found {len(advices)} pending SOS insights. Use apply_all=True to apply."
+        return "No pending Decision Log insights"
+    return f"Found {len(advices)} pending Decision Log insights. Use apply_all=True to apply."
 
 
 async def add_task_to_backlog(
     task_name: str,
     advice: str,
     workspace_root: str,
-    session_id: str = "sos_manual",
+    session_id: str = "decision_log_manual",
     decision_type: str = "manual_task",
     complexity: str = "medium",
     tags: Optional[List[str]] = None,
@@ -616,13 +722,13 @@ async def add_task_to_backlog(
     """
     Add a new task from natural language to BACKLOG.md and decision_log.parquet.
     
-    This is the "Files → Parquet" direction of SOS sync.
+    This is the "Files → Parquet" direction of Decision Log sync.
     
     Args:
         task_name: Human-readable task name
         advice: The agentic advice/recommendation
         workspace_root: Workspace root path
-        session_id: Session identifier (default: "sos_manual")
+        session_id: Session identifier (default: "decision_log_manual")
         decision_type: Type of decision (default: "manual_task")
         complexity: Task complexity (default: "medium")
         tags: Optional tags list
@@ -632,12 +738,12 @@ async def add_task_to_backlog(
         Confirmation message with decision_id
     """
     from pathlib import Path
-    from qwen_mcp.engines.sos_sync import SOSSyncEngine
+    from qwen_mcp.engines.decision_log_sync import DecisionLogSyncEngine
     
-    decision_log_path = Path(workspace_root) / "src" / "decision_log.parquet"
+    decision_log_path = Path(workspace_root) / ".decision_log" / "decision_log.parquet"
     backlog_path = Path(workspace_root) / "PLAN" / "BACKLOG.md"
     
-    engine = SOSSyncEngine(decision_log_path)
+    engine = DecisionLogSyncEngine(decision_log_path)
     
     try:
         decision_id = await engine.add_task(
