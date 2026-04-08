@@ -20,7 +20,7 @@ class DecisionLogSyncEngine:
     Formerly known as SOSSyncEngine. Renamed for clarity.
     """
     
-    DEFAULT_DECISION_LOG_PATH = Path(".PLAN/decision_log.parquet")
+    DEFAULT_DECISION_LOG_PATH = Path(".decision_log/decision_log.parquet")
     
     def __init__(self, decision_log_path: Optional[Path] = None):
         self.decision_log_path = Path(decision_log_path) if decision_log_path else self.DEFAULT_DECISION_LOG_PATH
