@@ -5,6 +5,7 @@
 **Task**: Redesign SOS Sync architecture - BACKLOG.md vs decision_log.parquet granularity - 240730f0-5907-4d86-b717-f997a29706dd
 
 **Completed**:
+
 - Refactored [`src/qwen_mcp/engines/decision_log_sync.py`](src/qwen_mcp/engines/decision_log_sync.py):
   - Added `archive_completed: bool = True` parameter to [`complete_task()`](src/qwen_mcp/engines/decision_log_sync.py:484) - removes tasks from BACKLOG.md instead of just marking [x]
   - Created [`_remove_from_backlog()`](src/qwen_mcp/engines/decision_log_sync.py:583) - surgically removes completed tasks from BACKLOG.md
@@ -26,6 +27,7 @@
 - All 18 tests passing (100% coverage of SOS Sync redesign features)
 
 **Architecture Decision**:
+
 - **BACKLOG.md** = Pending tasks ONLY (clean, actionable list)
 - **CHANGELOG.md** = Completed history with full details from parquet
 - **decision_log.parquet** = Source of truth (23 fields, queryable)
@@ -37,6 +39,7 @@
 **Task**: Documentation and migration guide
 
 **Completed**:
+
 - Updated [`docs/SPARRING_V2.md`](docs/SPARRING_V2.md) with comprehensive stage-based architecture documentation:
   - Added "2026-04-08 Stage-Based Refactoring" section with architecture overview
   - Documented all modified files (base_stage_executor.py, modes/, config.py, session_store.py)
@@ -58,6 +61,7 @@
 **Task**: Integration testing - recovery from failed stage
 
 **Completed**:
+
 - Created `tests/test_sparring_stage_recovery.py` with 23 comprehensive tests:
   - `TestBudgetManager` (5 tests): Dynamic timeout allocation, remaining budget tracking, pro/flash mode weights
   - `TestCircuitBreaker` (5 tests): State transitions, failure threshold, recovery timeout, HALF_OPEN state
@@ -75,6 +79,7 @@
 **Task**: Update config.py with BudgetManager defaults and STAGE_WEIGHTS
 
 **Completed**:
+
 - Updated `src/qwen_mcp/engines/sparring_v2/config.py` with:
   - `STAGE_WEIGHTS` dictionary - default weights for pro (discovery=0.15, red=0.28, blue=0.28, white=0.29), full (same as pro), and flash (analyst=0.45, drafter=0.55)
   - `BUDGET_CONFIG` - total timeout budgets (pro=225s, full=225s, flash=60s)
@@ -89,6 +94,7 @@
 **Task**: Update SessionStore for stage metadata and TTL support
 
 **Completed**:
+
 - Updated `SessionCheckpoint` dataclass in `src/qwen_mcp/engines/session_store.py`:
   - Added `has_stages` field (bool) - stage-based execution flag
   - Added `stage_count` field (int) - total number of stages
@@ -105,6 +111,7 @@
 **Task**: Add ephemeral TTL checkpointing to FlashExecutor
 
 **Completed**:
+
 - Refactored `src/qwen_mcp/engines/sparring_v2/modes/flash.py` to inherit from `BaseStageExecutor`
 - Added ephemeral TTL checkpointing (300s TTL) for fast mode support
 - Stage weights: analyst=0.45, drafter=0.55
@@ -118,6 +125,7 @@
 **Task**: Split FullExecutor from monolithic to stage-based
 
 **Completed**:
+
 - Refactored `src/qwen_mcp/engines/sparring_v2/modes/full.py` to inherit from `BaseStageExecutor`
 - Split monolithic `execute()` method into 4 isolated stage executions via `execute_stage()`
 - Re-enabled White Cell regeneration loop (`allow_regeneration=True`, `max_loops=2`)
@@ -131,6 +139,7 @@
 **Task**: Refactor ProExecutor to inherit BaseStageExecutor
 
 **Completed**:
+
 - Refactored `src/qwen_mcp/engines/sparring_v2/modes/pro.py` to inherit from `BaseStageExecutor`
 - Implemented `get_stages()`, `execute_stage()`, `get_stage_weights()` methods
 - Stage weights: discovery=0.15, red=0.28, blue=0.28, white=0.29
@@ -144,6 +153,7 @@
 **Task**: Create BaseStageExecutor with BudgetManager and CircuitBreaker
 
 **Completed**:
+
 - Created `src/qwen_mcp/engines/sparring_v2/base_stage_executor.py` with:
   - `BudgetManager`: Dynamic timeout allocation with remaining budget tracking
   - `CircuitBreaker`: Failure threshold (3 failures) with recovery timeout (60s)
@@ -158,6 +168,7 @@
 **Task**: Migrate decision_log.parquet to .PLAN/ directory
 
 **Completed**:
+
 - Created `.PLAN/` directory (hidden convention for project metadata)
 - Copied all files from `PLAN/` to `.PLAN/` (BACKLOG.md, CHANGELOG.md, SOS_BLUEPRINT.md, sparring_engine.md)
 - Moved `decision_log.parquet` from `src/` to `.PLAN/`
@@ -271,12 +282,12 @@
 
 ---
 
-
 ## [2026-04-08 00:58:09] Phase 6: Async Enrichment Pipeline
 
 **Task**: Implement ADREnrichmentPipeline with queue-based processing, LRU caching, and graceful degradation
 
 **Changes**:
+
 - Created [`LRUCache`](src/qwen_mcp/engines/adr_enrichment.py:16) - LRU cache with OrderedDict (max_size=100)
 - Created [`ADREnrichmentPipeline`](src/qwen_mcp/engines/adr_enrichment.py:66) - async pipeline for non-blocking enrichment
 - Implemented [`enqueue_decision()`](src/qwen_mcp/engines/adr_enrichment.py:88) - queue decisions for async processing
@@ -300,12 +311,12 @@
 
 ---
 
-
 ## [2026-04-08 00:33:00] DecisionLog Auto-Logging Implementation
 
 **Task**: Implement comprehensive DecisionLog auto-logging system with task_type discrimination
 
 **Changes**:
+
 - Added `task_type` field to [`DECISION_LOG_SCHEMA`](src/decision_log/decision_schema.py:12) (23 fields total)
 - Renamed `SOSSyncEngine` → `DecisionLogSyncEngine` in [`decision_log_sync.py`](src/qwen_mcp/engines/decision_log_sync.py:16)
 - Moved parquet location from `src/decision_log.parquet` to `.decision_log/decision_log.parquet`
@@ -335,18 +346,47 @@
 **Task**: Write a comprehensive integration test file `tests/test_decision_log_auto_logging.py` that tests the new DecisionLog auto-logging functionality.
 
 The tests should cover:
+
 1. `test_task_type_field_exist
 
 **Status**: ✅ Completed
 
 ---
 
+---
+
+## [1.0.1] - 2026-04-07
+
+### 📦 Production Release
+
+**Documentation & README Updates:**
+
+- Updated README.md with comprehensive tool tables including Context and SOS categories
+- Added Context Tools section (qwen_init_context_tool, qwen_update_session_context_tool)
+- Added SOS Sync documentation (qwen_add_task, qwen_sync_state)
+- Added project structure diagram
+- Updated Sparring Engine documentation with session storage details and guided UX
+- Corrected Coder model reference to qwen3-coder-next
+
+**SOS Sync Engine:**
+
+- Automated BACKLOG.md and CHANGELOG.md synchronization with decision_log.parquet
+- Atomic writes with file-based locking
+- Auto-backlog integration from qwen_audit findings
+
+**Repository Maintenance:**
+
+- Added PLAN/ directory to .git/info/exclude
+- Removed PLAN/ from Git cache (git rm --cached)
+
+---
 
 ## 2026-04-06 - sparring3 (pro mode) Fix
 
 **Task**: Naprawić tryb sparring3 (pro) - brak executora w MODE_EXECUTORS
 
 **Changes**:
+
 - Created [`ProExecutor`](src/qwen_mcp/engines/sparring_v2/modes/pro.py) - new executor for true step-by-step sparring3 execution
 - Updated [`MODE_EXECUTORS`](src/qwen_mcp/engines/sparring_v2/engine.py:47) to use `ProExecutor` instead of `FullExecutor` for "pro" mode
 - Updated [`qwen_sparring`](src/qwen_mcp/server.py:227) documentation to explicitly list all modes (sparring1, sparring2, sparring3)
@@ -379,5 +419,80 @@ The tests should cover:
 
 **Advice**: Restrict .lock file access to the current user only to prevent local privilege escalation during sync.
 
+## [1.0.0] - 2026-04-03
+
+### 🎉 Initial Public Release
+
+**The Lachman Protocol: Qwen Engineering Engine** - MCP server for architectural planning and code generation using specialized Qwen models.
+
+### ✨ Core Features
+
+- **The Lachman Protocol (LP)**: Self-healing architectural planning loop (Discovery → Architecting → Self-Verification)
+- **TDD-First Workflow**: RED (test) → GREEN (code) → REFACTOR (audit)
+- **Dynamic Model Registry**: Automatic model selection based on billing mode (`coding_plan`, `payg`, `hybrid`)
+- **Scout-Powered Context Discovery**: File/project analysis using kimi-k2.5 before planning/coding/auditing
+- **Swarm Orchestrator**: Parallel task decomposition and execution (max 5 concurrent tasks)
+- **Sparring Engine**: Adversarial multi-agent debate (sparring1/2/3 modes)
+- **DuckDB Billing Tracking**: Local token/cost reports via `qwen_usage_report`
+- **SPECTER Telemetry**: WebSocket server (port 8878) for real-time HUD streaming
+
+### 🛠️ Available Tools
+
+| Tool                | Role          | Default Model        |
+| ------------------- | ------------- | -------------------- |
+| `qwen_architect`    | Strategist    | qwen3.5-plus         |
+| `qwen_coder`        | Coder         | qwen3-coder-next     |
+| `qwen_coder_pro`    | Specialist    | qwen3-coder-plus     |
+| `qwen_audit`        | Analyst       | glm-5                |
+| `qwen_sparring`     | Debate Master | qwen3.5-plus / glm-5 |
+| `qwen_read_file`    | Scout         | kimi-k2.5            |
+| `qwen_list_files`   | Explorer      | kimi-k2.5            |
+| `qwen_usage_report` | Billing       | N/A (DuckDB)         |
+
+### 📦 Tech Stack
+
+- **Runtime**: Python 3.10+
+- **Protocol**: MCP (Model Context Protocol)
+- **Models**: Qwen via Alibaba DashScope
+- **Analytics**: DuckDB for billing/token tracking
+- **HUD**: React/Vite + VSCode Extension (qwen-hud-ui)
+- **Telemetry**: WebSocket server on port 8878
+
+### 📚 Documentation
+
+- [`README.md`](README.md) - Project overview and installation
+- [`docs/LP_SYSTEM_PROMPT.md`](docs/LP_SYSTEM_PROMPT.md) - System instructions for AI assistants
+- [`docs/TDD.md`](docs/TDD.md) - TDD-First workflow guide
+- [`docs/REPAIR_PROTOCOL.md`](docs/REPAIR_PROTOCOL.md) - Debugging and fixing regressions
+- [`docs/workflows/`](docs/workflows/) - Slash command workflows
+- [`AGENTS.md`](AGENTS.md) - Agent-specific guidance
+- [`BUILD_GUIDE.md`](BUILD_GUIDE.md) - Compilation and packaging
+
+### ⚠️ Known Issues
+
+- **HUD Streaming** (`qwen-hud-ui`): WebSocket connection in VSCode extension is currently broken. The MCP server works fully without the UI component. Use `qwen_usage_report()` for billing data.
+- **Looking for contributors**: If you can fix WebSocket streaming in VSCode extensions, please open a PR!
+
+### 🔧 Configuration
+
+**Environment Variables:**
+
+- `DASHSCOPE_API_KEY` - Required (Alibaba DashScope API key)
+- `BILLING_MODE` - Optional, default: `coding_plan` (`coding_plan`, `payg`, `hybrid`)
+- `LP_MAX_RETRIES` - Optional, default: `3` (circuit breaker for self-healing loop)
+
+**Billing Modes:**
+
+- `coding_plan` - Strict mode using only prepaid Alibaba Coding Plan models
+- `payg` - Pay-as-you-go via DashScope API
+- `hybrid` - Coding plan preferred, PAYG fallback for complex tasks
+
 ---
 
+## [0.1.0] - 2026-03-28
+
+### 🐛 Development Version (Pre-Release)
+
+- Initial development version
+- Internal testing and iteration
+- **Not suitable for production use**
