@@ -10,7 +10,7 @@
 
 By offloading heavy architectural planning and raw coding to specialized Qwen models, you stop the "two steps forward, one step back" dance and start delivering finished applications.
 
-**Version:** 1.0.1 | **License:** MIT | **Python:** 3.10+
+**Version:** 1.1.0 | **License:** MIT | **Python:** 3.10+
 
 **[ See the Lachman Protocol Storyboard in action!](./docs/EXAMPLE.md)**
 
@@ -116,6 +116,8 @@ The engine automatically selects the best model for each task via **Qwen-Turbo M
 | **Code** | `qwen_coder` | **Coder**: Writing production-grade complete files. | `qwen3-coder-next` |
 | **Code** | `qwen_coder_pro` | **Specialist**: Expert in complex logic & Refactoring. | `qwen3-coder-plus` |
 | **SRE** | `qwen_audit` | **Analyst**: Reason-heavy SRE/Debugging. | `glm-5` |
+| **ADR** | `qwen_adr_manager` | **ADR Manager**: Schema-based parsing, linking, validation. | `qwen3.5-plus` |
+| **ADR** | `qwen_adr_enrich` | **ADR Enrichment**: Queue processing with LRU caching. | `qwen3-coder-next` |
 | **Strategy** | `qwen_sparring` (mode=`sparring1`) | **Flash**: Quick 2-step analysis. | `glm-5` → `qwen3.5-plus` |
 | **Strategy** | `qwen_sparring` (mode=`sparring2`) | **Normal**: Full 4-step session (DEFAULT). | `qwen3.5-plus` / `glm-5` |
 | **Strategy** | `qwen_sparring` (mode=`sparring3`) | **Pro**: Step-by-step with checkpointing. | `qwen3.5-plus` / `glm-5` |
@@ -125,6 +127,7 @@ The engine automatically selects the best model for each task via **Qwen-Turbo M
 | **Context** | `qwen_update_session_context_tool` | **Scribe**: Capture session insights. | N/A |
 | **SOS** | `qwen_add_task` | **Backlog**: Add task to BACKLOG.md + Parquet. | N/A |
 | **SOS** | `qwen_sync_state` | **Sync**: Apply pending advices to docs. | N/A |
+| **ADR** | `qwen_decision_log_sync` | **SyncEngine**: Parquet-markdown task synchronization. | N/A |
 | **Admin** | `qwen_usage_report`| **Billing**: Token/Cost report from DuckDB. | N/A |
 | **Admin** | `qwen_init_request`| **Telemetry**: Reset token counter for new tasks. | N/A |
 | **Logic** | `qwen_refresh_models`| **Intelligence**: Trigger meta-analysis update. | `kimi-k2.5` |
@@ -145,6 +148,7 @@ When `billing_mode="coding_plan"`, the engine uses **ONLY** these models:
 | **Code** | `qwen_coder` | **Coder** | `qwen3-coder-next` (fast, inline) |
 | **Code** | `qwen_coder_pro` | **Specialist** | `qwen3-coder-plus` (heavy refactor, huge context) |
 | **SRE** | `qwen_audit` | **Analyst** | `glm-5` |
+| **ADR** | `qwen_adr_manager` | **ADR Manager** | `qwen3.5-plus` |
 | **Data** | `qwen_read_file` | **Scout** | `kimi-k2.5` |
 | **Context** | `qwen_init_context_tool` | **Initializer** | Swarm (parallel analysis) |
 | **SOS** | `qwen_add_task` | **Backlog** | N/A |
@@ -171,9 +175,27 @@ The **Context Tools** automate creation and maintenance of project documentation
 
 ---
 
+### Sparring Engine v2: Modular Multi-Agent Architecture
+
+The Sparring Engine v2 features a modular architecture with specialized cell executors for adversarial auditing and synthesis.
+
+| Component | Role | Description |
+| :--- | :--- | :--- |
+| **Red Cell** | Adversary | Critical analysis and counter-arguments |
+| **Blue Cell** | Defender | Strategic defense and supporting arguments |
+| **White Cell** | Moderator | Synthesis and consensus building |
+
+**New Features in v2:**
+- Budget management with per-step token limits
+- Circuit breaker protection against runaway sessions
+- Decision logging integration with parquet backend
+- Guided UX with copy-paste ready next-step commands
+
+---
+
 ### Model Rotation in Sparring Engine
 
-The Sparring Engine uses **dynamic model rotation** within a single tool call. Use the `mode` parameter to select the sparring level:
+The Sparring Engine v2 uses **delegated mode-specific execution** within a single tool call. Use the `mode` parameter to select the sparring level:
 
 **`qwen_sparring(mode="sparring1")`** - Flash (2-turn analysis):
 | Turn | Role | Model |
