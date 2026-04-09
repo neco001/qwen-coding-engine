@@ -91,7 +91,7 @@ class BlueCellExecutor(ModeExecutor):
             task_type="audit",
             timeout=TIMEOUTS["blue_cell"],
             max_tokens=get_max_tokens_for_step(mode_key, "blue"),
-            thinking_budget=get_thinking_tokens_for_mode("sparring2" if word_limit else "sparring3"),
+            thinking_budget=get_thinking_tokens_for_mode("sparring2" if word_limit else "sparring3", "blue"),
             complexity="critical",
             tags=["sparring", "blue-cell"],
             include_reasoning=True,

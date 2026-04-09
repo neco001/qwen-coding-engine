@@ -319,7 +319,7 @@ If there is existing content, merge the new information while preserving histori
                         {"role": "system", "content": SESSION_SUPPLEMENT_SYSTEM_PROMPT},
                         {"role": "user", "content": user_prompt}
                     ],
-                    max_tokens=2048,
+                    max_tokens=0,  # unlimited - controlled by thinking_budget
                 )
                 session_content = response.choices[0].message.content
                 logger.info(f"Generated session supplement using LLM")

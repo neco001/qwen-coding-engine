@@ -83,7 +83,7 @@ class RedCellExecutor(ModeExecutor):
             task_type="audit",
             timeout=TIMEOUTS["red_cell"],
             max_tokens=get_max_tokens_for_step(mode_key, "red"),
-            thinking_budget=get_thinking_tokens_for_mode("sparring2" if word_limit else "sparring3"),
+            thinking_budget=get_thinking_tokens_for_mode("sparring2" if word_limit else "sparring3", "red"),
             complexity="critical",
             tags=["sparring", "red-cell"],
             include_reasoning=True,

@@ -66,8 +66,8 @@ class CompletionHandler(BaseDashScopeClient):
         
         scout = TokenScout()
         
-        if max_tokens:
-            # Explicit override - use it
+        if max_tokens is not None:
+            # Explicit override - use it (including max_tokens=0 for unlimited)
             force_max_tokens = max_tokens
         else:
             # Extract prompt from messages for estimation

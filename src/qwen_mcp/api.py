@@ -111,7 +111,7 @@ class DashScopeClient(CompletionHandler):
                 model="qwen3.5-plus",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0,
-                max_tokens=300,
+                max_tokens=0,  # unlimited - controlled by thinking_budget
                 timeout=20.0,
             )
 

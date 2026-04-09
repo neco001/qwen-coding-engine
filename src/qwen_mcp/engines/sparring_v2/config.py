@@ -21,10 +21,10 @@ Note: MODE_ALIASES and DEFAULT_SPARRING_MODE are defined in tools.py to avoid ci
 TIMEOUTS = {
     "flash_analyst": 90.0,       # sparring1: 180s total for 2 steps
     "flash_drafter": 90.0,       # sparring1: 180s total for 2 steps
-    "discovery": 100.0,          # sparring3: step-by-step, 100s per step
-    "red_cell": 100.0,           # sparring3: step-by-step, 100s per step
-    "blue_cell": 100.0,          # sparring3: step-by-step, 100s per step
-    "white_cell": 100.0,         # sparring3: step-by-step, 100s per step
+    "discovery": 120.0,          # sparring3: step-by-step, 120s per step
+    "red_cell": 180.0,           # sparring3: step-by-step, 180s per step (4096 tokens)
+    "blue_cell": 180.0,          # sparring3: step-by-step, 180s per step (4096 tokens)
+    "white_cell": 360.0,         # sparring3: step-by-step, 360s per step (8192 tokens + synthesis + artifact)
 }
 
 # =============================================================================
@@ -63,7 +63,7 @@ STAGE_WEIGHTS = {
 # These budgets are managed by BudgetManager with dynamic allocation
 
 BUDGET_CONFIG = {
-    "pro": 225,      # 225 seconds for 4-stage execution
+    "pro": 900,      # 900 seconds for 4-stage execution (120+180+180+360 = 840s + buffer)
     "full": 225,     # 225 seconds (includes regeneration loop budget)
     "flash": 60,     # 60 seconds for fast 2-step analysis
 }
@@ -89,29 +89,29 @@ EPHEMERAL_TTL = 300  # 300 seconds (5 minutes) for flash mode
 # =============================================================================
 # MAX TOKENS CONFIGURATION
 # =============================================================================
-# Controls output length for each sparring mode/step
-# Format: tokens per step
+# Controls max_tokens for each sparring mode and step.
+# max_tokens = thinking_budget + content_tokens (they share the same limit)
 #
-# sparring1 (flash): 1024 tokens total (fast 2-step analysis)
-# sparring2 (full): 3584 tokens total (512 + 1024*3, balanced for 180s timeout)
-# sparring3 (pro): 12800 tokens total (512 + 4096*3, deep analysis)
+# Content limits for white cell:
+# - sparring1/sparring2: 1024 content tokens
+# - sparring3: 2048 content tokens
 
 MAX_TOKENS_CONFIG = {
     "flash": {
-        "analyst": 1024,
-        "drafter": 1024,
+        "analyst": 0,  # unlimited - controlled by thinking_budget
+        "drafter": 0,  # unlimited - controlled by thinking_budget
     },
     "full": {
-        "discovery": 512,
-        "red": 1024,
-        "blue": 1024,
-        "white": 1024,
+        "discovery": 0,  # unlimited - controlled by thinking_budget
+        "red": 0,  # unlimited - controlled by thinking_budget
+        "blue": 0,  # unlimited - controlled by thinking_budget
+        "white": 0,  # unlimited - controlled by thinking_budget
     },
     "pro": {
-        "discovery": 512,
-        "red": 4096,
-        "blue": 4096,
-        "white": 4096,
+        "discovery": 0,  # unlimited - controlled by thinking_budget
+        "red": 0,  # unlimited - controlled by thinking_budget
+        "blue": 0,  # unlimited - controlled by thinking_budget
+        "white": 0,  # unlimited - controlled by thinking_budget
     },
 }
 
@@ -119,31 +119,47 @@ MAX_TOKENS_CONFIG = {
 # =============================================================================
 # MAX THINKING TOKENS CONFIGURATION
 # =============================================================================
-# Controls thinking tokens (enable_thinking output) for each sparring mode.
+# Controls thinking tokens (enable_thinking output) for each sparring mode and step.
 # Thinking tokens are used for the model's internal reasoning process.
 #
-# sparring1 (flash): 512 thinking tokens per step (fast 2-step analysis)
-# sparring2 (full): 256 thinking tokens per step (reduced to fix 180s timeout)
-# sparring3 (pro): 1024 thinking tokens per step (deep analysis, 100s per step)
+# sparring1 (flash): 1024 thinking tokens for all steps
+# sparring2 (full): 1024 for red/blue, 2048 for white
+# sparring3 (pro): 2048 for red/blue, 4096 for white
 
 MAX_THINKING_TOKENS_CONFIG = {
-    "sparring1": 512,
-    "sparring2": 256,
-    "sparring3": 1024,
+    "sparring1": {
+        "discovery": 1024,
+        "red": 1024,
+        "blue": 1024,
+        "white": 1024,
+    },
+    "sparring2": {
+        "discovery": 1024,
+        "red": 1024,
+        "blue": 1024,
+        "white": 2048,
+    },
+    "sparring3": {
+        "discovery": 2048,
+        "red": 2048,
+        "blue": 2048,
+        "white": 4096,
+    },
 }
 
 
-def get_thinking_tokens_for_mode(mode: str) -> int:
+def get_thinking_tokens_for_mode(mode: str, step: str = "white") -> int:
     """
-    Get max_thinking_tokens for a specific sparring mode.
+    Get max_thinking_tokens for a specific sparring mode and step.
     
     Args:
         mode: One of 'sparring1', 'sparring2', 'sparring3'
+        step: One of 'discovery', 'red', 'blue', 'white' (default: 'white')
     
     Returns:
-        max_thinking_tokens value (default: 256 if mode not found)
+        max_thinking_tokens value (default: 1024 if mode/step not found)
     """
-    return MAX_THINKING_TOKENS_CONFIG.get(mode, 256)
+    return MAX_THINKING_TOKENS_CONFIG.get(mode, {}).get(step, 1024)
 
 
 def get_max_tokens_for_step(mode: str, step: str) -> int:

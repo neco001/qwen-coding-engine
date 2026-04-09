@@ -72,7 +72,7 @@ class DiscoveryExecutor(ModeExecutor):
             task_type="scout",  # Use scout (kimi-k2.5) for fast JSON extraction
             timeout=TIMEOUTS["discovery"],
             max_tokens=get_max_tokens_for_step(mode_key, "discovery"),
-            thinking_budget=get_thinking_tokens_for_mode("sparring2" if word_limit else "sparring3"),
+            thinking_budget=get_thinking_tokens_for_mode("sparring2" if word_limit else "sparring3", "discovery"),
             complexity="low",
             tags=["sparring", "discovery"],
         )

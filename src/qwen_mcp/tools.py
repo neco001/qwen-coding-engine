@@ -562,7 +562,11 @@ async def generate_sparring(
             workspace = Path.cwd()
     
     # Initialize session store for multi-turn support
-    session_store = SessionStore(storage_dir=str(workspace / ".sparring_sessions"))
+    # Uses default storage directory resolution:
+    # 1. QWEN_SPARRING_SESSIONS_DIR env variable
+    # 2. %APPDATA%\qwen-mcp\sparring_sessions (Windows) / ~/.qwen-mcp/sparring_sessions (Unix)
+    # 3. Fallback to .sparring_sessions in current directory
+    session_store = SessionStore()
     
     client = DashScopeClient()
     engine = SparringEngineV2(client, session_store)

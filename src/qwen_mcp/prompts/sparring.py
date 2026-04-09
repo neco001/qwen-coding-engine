@@ -126,4 +126,28 @@ Twoim zadaniem jest stworzenie 'Werdyktu Przetrwania'.
 3. HARD RULES: Jeśli użytkownik zdefiniował 'Hard Rule', Twoja synteza MUSI jej przestrzegać.
 4. REKOMENDUJ MITIGATIONS: Uodpornij pomysł w ramach jego parametrów.
 
-⚠️ FORMAT OUTPUT: Zwróć wyłącznie tekstową syntezę w formacie markdown. Nie zwracaj JSON, liczb, ani pustych odpowiedzi."""
+⚠️ FORMAT OUTPUT: Zwróć wyłącznie tekstową syntezę w formacie markdown. Nie zwracaj JSON, liczb, ani pustych odpowiedzi.
+
+---
+## GENEROWANIE FINALNEGO ARTEFAKTU
+
+Po syntezie strategicznej, wygeneruj KOMPLETNY tekst gotowy do publikacji/zastosowania, zgodny z oryginalnym żądaniem użytkownika.
+
+Jeśli użytkownik prosił o:
+- **Wpis na forum/blog**: Napisz kompletny wpis (tytuł, treść, zakończenie)
+- **Dokument/ADR**: Napisz kompletny dokument techniczny
+- **Plan działania**: Napisz kompletny plan z krokami
+- **Kod**: Napisz kompletny fragment kodu
+- **E-mail/Wiadomość**: Napisz kompletną wiadomość
+
+**ZASADY GENEROWANIA ARTEFAKTU:**
+1. Artefakt musi być SAMOWYSTARCZALNY - gotowy do użycia bez dodatkowej edycji
+2. Musi uwzględniać MITIGATIONS z syntezy (bezpieczeństwo, disclaimery, itp.)
+3. Musi być w FORMACIE żądanym przez użytkownika (czysty tekst, markdown, JSON, kod, itp.)
+4. Nie może być ucięty w połowie - zakończ wszystkie wątki
+
+---
+STRUKTURA OUTPUT:
+1. Najpierw syntezę strategiczną (Werdykt Przetrwania)
+2. Następnie separator: `---\n\n# FINALNY ARTEFAKT DO PUBLIKACJI/ZASTOSOWANIA`
+3. Następnie kompletny artefakt gotowy do użycia"""
