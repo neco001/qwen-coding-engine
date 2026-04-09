@@ -11,9 +11,22 @@
 - Works with all storage directory resolution tiers (env, user-level, fallback)
 - Added 5 unit tests in `tests/test_sparring_session_path.py`
 
+**max_tokens=0 Truncation Fix**
+
+- Fixed Python falsy evaluation causing sparring3 (pro) responses to be truncated mid-sentence
+- Root cause: `if max_tokens:` in completions.py treated 0 as falsy, ignoring unlimited token setting
+- Fix: Changed to `if max_tokens is not None:` to properly handle max_tokens=0
+- Configuration: `MAX_TOKENS_CONFIG` set to 0 for all sparring modes (flash/full/pro)
+- Applied to: qwen_architect, qwen_coder, qwen_audit, qwen_sparring, qwen_update_session_context
+- Added unit tests in `tests/test_max_tokens_zero.py` for sparring3 verification
+
 **Files Changed:**
 - `src/qwen_mcp/engines/sparring_v2/models.py`: Added `storage_dir` parameter to `to_markdown()`
 - `src/qwen_mcp/tools.py`: Pass session store directory to response formatter
+- `src/qwen_mcp/completions.py`: Fixed max_tokens zero check (`is not None` instead of falsy check)
+- `src/qwen_mcp/engines/sparring_v2/config.py`: Set `MAX_TOKENS_CONFIG` to 0 for unlimited tokens
+- `src/qwen_mcp/api.py`: Set `max_tokens=0` for meta-analysis endpoint
+- `src/qwen_mcp/engines/context_builder.py`: Set `max_tokens=0` for session supplement generation
 
 ---
 
