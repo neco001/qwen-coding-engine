@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Release v1.1.1 - 2026-04-09
+
+**Sparring Session File Location Fix**
+
+- Fixed agent not knowing where to find sparring session results
+- Added session file path display to `SparringResponse.to_markdown()`
+- Agent now sees full path: `{storage_dir}/{session_id}.json`
+- Fixed file extension mismatch (.json vs .md confusion)
+- Works with all storage directory resolution tiers (env, user-level, fallback)
+- Added 5 unit tests in `tests/test_sparring_session_path.py`
+
+**Files Changed:**
+- `src/qwen_mcp/engines/sparring_v2/models.py`: Added `storage_dir` parameter to `to_markdown()`
+- `src/qwen_mcp/tools.py`: Pass session store directory to response formatter
+
+---
+
 ## SOS Sync - 2026-04-09 18:34:44
 
 ## [2026-04-09 18:24:49] 87722483-5a9b-4ebe-b331-c23fd41bec81
