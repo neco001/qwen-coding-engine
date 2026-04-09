@@ -10,7 +10,7 @@
 
 By offloading heavy architectural planning and raw coding to specialized Qwen models, you stop the "two steps forward, one step back" dance and start delivering finished applications.
 
-**Version:** 1.1.0 | **License:** MIT | **Python:** 3.10+
+**Version:** 1.1.1 | **License:** MIT | **Python:** 3.10+
 
 **[ See the Lachman Protocol Storyboard in action!](./docs/EXAMPLE.md)**
 
