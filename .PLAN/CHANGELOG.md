@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## SOS Sync - 2026-04-09 18:34:44
+
+## [2026-04-09 18:24:49] 87722483-5a9b-4ebe-b331-c23fd41bec81
+
+**Task**: Synchronizacja BACKLOG.md - dodać wszystkie pending z decision_log.parquet
+
+**Advice**: Run DecisionLogSyncEngine to sync all 11 pending tasks from decision_log.parquet to BACKLOG.md, including the max_tokens=0 sparring tasks (ca0d090b, 96730cc3, 3638bc26, ba042a98, e28078c9)
+
+---
+
+## SOS Sync - 2026-04-09 18:22:52
+
+## [2026-04-09 18:22:43] 1b7f8745-36e8-44fc-b773-132fed40036a
+
+**Advice**: Centralize SOS Sync paths using SOSPathsConfig Pydantic class instead of hardcoded strings in tools.py (3 functions) and decision_log_sync.py. Fix bug where qwen_sync_state wrote to PLAN/ instead of .PLAN/.
+
+---
+
 ## SOS Sync Architecture Redesign - 2026-04-08
 
 **Task**: Redesign SOS Sync architecture - BACKLOG.md vs decision_log.parquet granularity - 240730f0-5907-4d86-b717-f997a29706dd

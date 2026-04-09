@@ -62,8 +62,13 @@ class SparringResponse:
             "context_truncated": self.context_truncated
         }
     
-    def to_markdown(self) -> str:
-        """Convert to human-readable markdown for MCP output."""
+    def to_markdown(self, storage_dir: Optional[str] = None) -> str:
+        """
+        Convert to human-readable markdown for MCP output.
+        
+        Args:
+            storage_dir: Optional session storage directory path to display
+        """
         if not self.success:
             return f"❌ **Error:** {self.error}\n\n{self.message}"
         
@@ -73,6 +78,12 @@ class SparringResponse:
         
         if self.session_id:
             lines.append(f"📋 **Session ID:** `{self.session_id}`")
+            
+            # Show full session file path if storage_dir is provided
+            if storage_dir:
+                session_file_path = f"{storage_dir}/{self.session_id}.json"
+                lines.append(f"📁 **Session File:** `{session_file_path}`")
+            
             lines.append("")
         
         # Multi-turn tracking info

@@ -10,6 +10,7 @@ from qwen_mcp.base import set_billing_mode, get_billing_mode as get_current_bill
 from qwen_mcp.registry import registry
 from qwen_mcp.sanitizer import ContentValidator
 from qwen_mcp.specter.telemetry import get_broadcaster
+from qwen_mcp.config.sos_paths import DEFAULT_SOS_PATHS
 
 # Re-export billing mode functions for server.py
 __all__ = [
@@ -428,9 +429,9 @@ async def generate_code_unified(prompt: str, mode: str = "auto", context: Option
                 else:
                     workspace = Path.cwd()
             
-            decision_log_path = workspace / ".decision_log" / "decision_log.parquet"
-            backlog_path = workspace / "PLAN" / "BACKLOG.md"
-            changelog_path = workspace / "PLAN" / "CHANGELOG.md"
+            decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(workspace)
+            backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(workspace)
+            changelog_path = DEFAULT_SOS_PATHS.get_changelog_path(workspace)
             
             sync_engine = DecisionLogSyncEngine(decision_log_path)
             
@@ -626,8 +627,9 @@ async def generate_sparring(
     
     # Format response for MCP tool output
     if response.success:
-        # Use the updated to_markdown() which includes multi-turn info
-        return response.to_markdown()
+        # Use the updated to_markdown() which includes multi-turn info and session file path
+        # Pass the session store's storage directory so agent knows where to find the session file
+        return response.to_markdown(storage_dir=str(session_store.storage_dir))
     else:
         return f"❌ Sparring failed: {response.error or response.message}"
 
@@ -686,8 +688,8 @@ async def generate_sos_sync(apply: bool, decision_id: str, apply_all: bool, work
     from pathlib import Path
     from qwen_mcp.engines.decision_log_sync import DecisionLogSyncEngine
     
-    decision_log_path = Path(workspace_root) / ".decision_log" / "decision_log.parquet"
-    backlog_path = Path(workspace_root) / "PLAN" / "BACKLOG.md"
+    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(Path(workspace_root))
+    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(Path(workspace_root))
     
     if not decision_log_path.exists():
         return f"No decision log found at {decision_log_path}"
@@ -744,8 +746,8 @@ async def add_task_to_backlog(
     from pathlib import Path
     from qwen_mcp.engines.decision_log_sync import DecisionLogSyncEngine
     
-    decision_log_path = Path(workspace_root) / ".decision_log" / "decision_log.parquet"
-    backlog_path = Path(workspace_root) / "PLAN" / "BACKLOG.md"
+    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(Path(workspace_root))
+    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(Path(workspace_root))
     
     engine = DecisionLogSyncEngine(decision_log_path)
     

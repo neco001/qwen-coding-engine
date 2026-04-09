@@ -1,4 +1,5 @@
 import os
+from src.qwen_mcp.config.sos_paths import DEFAULT_SOS_PATHS
 import sys
 import asyncio
 import logging
@@ -20,7 +21,7 @@ class DecisionLogSyncEngine:
     Formerly known as SOSSyncEngine. Renamed for clarity.
     """
     
-    DEFAULT_DECISION_LOG_PATH = Path(".decision_log/decision_log.parquet")
+    DEFAULT_DECISION_LOG_PATH = DEFAULT_SOS_PATHS.get_decision_log_path()
     
     def __init__(self, decision_log_path: Optional[Path] = None):
         self.decision_log_path = Path(decision_log_path) if decision_log_path else self.DEFAULT_DECISION_LOG_PATH
@@ -720,21 +721,44 @@ class DecisionLogSyncEngine:
                 raise
     
     def _mark_task_completed(self, backlog_path: Path, decision_id: str) -> None:
-        """Mark a task as completed in BACKLOG.md by changing [ ] to [x] (legacy method)."""
+        """
+        Mark a task as completed in BACKLOG.md and migrate it to Completed section.
+        
+        Args:
+            backlog_path: Path to BACKLOG.md
+            decision_id: The UUID of the decision to mark as completed
+        """
         if not backlog_path.exists():
             return
         
         with open(backlog_path, 'r', encoding='utf-8') as f:
             backlog_content = f.read()
         
-        # Find and replace the task line
+        # Find the task in Pending section
         pattern = rf'(- \[ \]\s*.*?-\s*{re.escape(decision_id)}.*?(?=\n|$))'
         match = re.search(pattern, backlog_content)
         
         if match:
             old_line = match.group(1)
+            # Change checkbox to [x]
             new_line = old_line.replace('- [ ]', '- [x]', 1)
-            backlog_content = backlog_content.replace(old_line, new_line)
+            
+            # Check if Completed section exists
+            if '## Completed' not in backlog_content:
+                # Add Completed section before the end of file
+                backlog_content = backlog_content.rstrip() + '\n\n---\n\n## Completed\n'
+            
+            # Remove from Pending section
+            backlog_content = backlog_content.replace(old_line, '')
+            
+            # Clean up extra blank lines in Pending section
+            backlog_content = re.sub(r'\n{3,}', '\n\n', backlog_content)
+            
+            # Add to Completed section (after ## Completed header)
+            completed_section_match = re.search(r'(## Completed\n)', backlog_content)
+            if completed_section_match:
+                insert_pos = completed_section_match.end()
+                backlog_content = backlog_content[:insert_pos] + '\n' + new_line + backlog_content[insert_pos:]
             
             # Atomic write
             fd, tmp_path = tempfile.mkstemp(suffix=".md", dir=str(backlog_path.parent))
