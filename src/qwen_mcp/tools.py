@@ -685,7 +685,15 @@ async def generate_sos_sync(apply: bool, decision_id: str, apply_all: bool, work
     
     Synchronizes decision_log.parquet state with BACKLOG.md and CHANGELOG.md.
     """
+    import os
+    import sys
     from pathlib import Path
+    
+    # Add src directory to Python path for imports
+    src_path = Path(__file__).parent
+    if str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
+    
     from qwen_mcp.engines.decision_log_sync import DecisionLogSyncEngine
     
     decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(Path(workspace_root))
