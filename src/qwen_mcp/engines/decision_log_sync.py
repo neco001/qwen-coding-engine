@@ -1,6 +1,13 @@
 import os
-from src.qwen_mcp.config.sos_paths import DEFAULT_SOS_PATHS
 import sys
+from pathlib import Path
+
+# Add parent directory to path for imports when running from external projects
+_src_path = Path(__file__).parent.parent
+if str(_src_path) not in sys.path:
+    sys.path.insert(0, str(_src_path))
+
+from qwen_mcp.config.sos_paths import DEFAULT_SOS_PATHS
 import asyncio
 import logging
 import re
