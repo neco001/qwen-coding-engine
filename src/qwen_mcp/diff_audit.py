@@ -9,8 +9,8 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path
 from datetime import datetime, timezone
 
-from src.utils.git_diff_parser import GitDiffParser, GitDiffResult
-from src.graph.snapshot import FunctionalSnapshotGenerator
+from utils.git_diff_parser import GitDiffParser, GitDiffResult
+from graph.snapshot import FunctionalSnapshotGenerator
 
 
 class QwenDiffAuditTool:
