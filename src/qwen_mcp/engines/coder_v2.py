@@ -229,7 +229,7 @@ class CoderEngineV2:
                     use_swarm = False
                     routing_reason = "Local heuristics: simple task"
                     # Check for brownfield indicators in context
-                    is_brownfield = len(context) > 100  # Existing code context = brownfield
+                    is_brownfield = len(context or "") > 100  # Existing code context = brownfield
                     brownfield_reason = "Context-based heuristic"
             else:
                 # Opcja C: For non-auto modes, skip Scout entirely
@@ -243,7 +243,7 @@ class CoderEngineV2:
                     use_swarm = False
                     routing_reason = f"Local heuristics (mode={mode})"
                 # Check for brownfield indicators in context
-                is_brownfield = len(context) > 100  # Existing code context = brownfield
+                is_brownfield = len(context or "") > 100  # Existing code context = brownfield
                 brownfield_reason = "Context-based heuristic"
             
             logger.info(f"Coder routing: mode={mode}, complexity={scout_complexity}, use_swarm={use_swarm}")
