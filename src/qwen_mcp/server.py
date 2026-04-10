@@ -18,6 +18,9 @@ from qwen_mcp.tools import (
     qwen_init_context,
     qwen_update_session_context,
     generate_sos_sync,
+    qwen_list_tasks,
+    qwen_get_task,
+    qwen_update_task,
 )
 from qwen_mcp.specter.telemetry import get_broadcaster
 from qwen_mcp.specter.identity import get_current_project_id, get_session_id, get_or_create_instance_id
@@ -664,6 +667,62 @@ async def qwen_update_session_context_tool(
     }, project_id=project_id)
     
     return await qwen_update_session_context(session_summary, workspace_root, ctx)
+
+@mcp.tool()
+async def qwen_list_tasks_tool(
+    status: str = "pending",
+    tags: str = None,
+    workspace_root: str = "."
+) -> str:
+    """
+    List tasks from BACKLOG.md with optional filtering.
+    
+    Args:
+        status: Filter by status - "pending", "completed", or "all" (default: "pending")
+        tags: Optional comma-separated list of tags to filter by
+        workspace_root: Path to workspace root (default: current directory)
+        
+    Returns:
+        Formatted list of tasks with their details
+    """
+    tags_list = [t.strip() for t in tags.split(",")] if tags else None
+    return await qwen_list_tasks(status=status, tags=tags_list, workspace_root=workspace_root)
+
+@mcp.tool()
+async def qwen_get_task_tool(
+    decision_id: str,
+    workspace_root: str = "."
+) -> str:
+    """
+    Get detailed information about a specific task by decision_id.
+    
+    Args:
+        decision_id: The unique identifier of the task
+        workspace_root: Path to workspace root (default: current directory)
+        
+    Returns:
+        Detailed task information from decision_log.parquet
+    """
+    return await qwen_get_task(decision_id=decision_id, workspace_root=workspace_root)
+
+@mcp.tool()
+async def qwen_update_task_tool(
+    decision_id: str,
+    new_status: str,
+    workspace_root: str = "."
+) -> str:
+    """
+    Update the status of a task in both BACKLOG.md and decision_log.parquet.
+    
+    Args:
+        decision_id: The unique identifier of the task
+        new_status: New status - "pending", "in_progress", or "completed"
+        workspace_root: Path to workspace root (default: current directory)
+        
+    Returns:
+        Confirmation message with updated task details
+    """
+    return await qwen_update_task(decision_id=decision_id, new_status=new_status, workspace_root=workspace_root)
 
 def main():
     mcp.run()

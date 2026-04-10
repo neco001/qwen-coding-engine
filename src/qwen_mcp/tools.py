@@ -3,6 +3,7 @@ import json
 import re
 import os
 import glob
+import pandas as pd
 from typing import Optional, List, Dict, Any
 from mcp.server.fastmcp import Context
 from qwen_mcp.api import DashScopeClient
@@ -30,6 +31,9 @@ __all__ = [
     'qwen_update_session_context',
     'read_repo_file',
     'set_model_in_registry',
+    'qwen_list_tasks',
+    'qwen_get_task',
+    'qwen_update_task',
 ]
 
 # New modular imports
@@ -830,3 +834,178 @@ async def read_repo_file(path: str) -> str:
 async def list_repo_files(directory: str = ".", pattern: str = "**/*") -> str:
     files = glob.glob(os.path.join(directory, pattern), recursive=True)
     return "\n".join([f for f in files if os.path.isfile(f)][:100])
+
+
+async def qwen_list_tasks(
+    status: str = "pending",
+    tags: Optional[List[str]] = None,
+    workspace_root: str = "."
+) -> str:
+    """
+    List tasks from BACKLOG.md with optional filtering.
+    
+    Args:
+        status: Filter by status - "pending", "completed", or "all" (default: "pending")
+        tags: Optional list of tags to filter by
+        workspace_root: Path to workspace root (default: current directory)
+        
+    Returns:
+        Formatted list of tasks with their details
+    """
+    from pathlib import Path
+    
+    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(Path(workspace_root))
+    
+    if not backlog_path.exists():
+        return f"❌ BACKLOG.md not found at {backlog_path}"
+    
+    tasks = []
+    with open(backlog_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    # Parse tasks from BACKLOG.md
+    # Format: "- [ ] TaskName - decision_id" or "- [x] TaskName - decision_id"
+    import re
+    task_pattern = r"- \[([ x])\] (.+?) - ([a-f0-9\-]{36})"
+    matches = re.findall(task_pattern, content)
+    
+    for match in matches:
+        task_status = "completed" if match[0] == "x" else "pending"
+        task_name = match[1].strip()
+        decision_id = match[2]
+        
+        # Filter by status
+        if status != "all" and task_status != status:
+            continue
+        
+        tasks.append({
+            "status": task_status,
+            "name": task_name,
+            "decision_id": decision_id
+        })
+    
+    if not tasks:
+        return f"No tasks found with status: {status}"
+    
+    output = f"## 📋 Tasks ({status})\n\n"
+    for i, task in enumerate(tasks, 1):
+        status_icon = "✅" if task["status"] == "completed" else "⬜"
+        output += f"{i}. {status_icon} **{task['name']}**\n"
+        output += f"   - ID: `{task['decision_id']}`\n"
+    
+    output += f"\n**Total: {len(tasks)} tasks**"
+    return output
+
+
+async def qwen_get_task(
+    decision_id: str,
+    workspace_root: str = "."
+) -> str:
+    """
+    Get detailed information about a specific task by decision_id.
+    
+    Args:
+        decision_id: The unique identifier of the task
+        workspace_root: Path to workspace root (default: current directory)
+        
+    Returns:
+        Detailed task information from decision_log.parquet
+    """
+    from pathlib import Path
+    
+    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(Path(workspace_root))
+    
+    if not decision_log_path.exists():
+        return f"❌ decision_log.parquet not found at {decision_log_path}"
+    
+    try:
+        df = pd.read_parquet(decision_log_path)
+        
+        # Find the task by decision_id
+        matching = df[df['decision_id'] == decision_id]
+        
+        if matching.empty:
+            return f"❌ Task with decision_id `{decision_id}` not found"
+        
+        row = matching.iloc[0]
+        
+        output = f"## 📋 Task Details\n\n"
+        output += f"**Decision ID**: `{row.get('decision_id', 'N/A')}`\n"
+        output += f"**Task Name**: {row.get('task_name', 'N/A')}\n"
+        output += f"**Status**: {row.get('status', 'pending')}\n"
+        output += f"**Type**: {row.get('decision_type', 'N/A')}\n"
+        output += f"**Complexity**: {row.get('complexity', 'N/A')}\n"
+        output += f"**Risk Score**: {row.get('risk_score', 0)}\n"
+        output += f"**Session ID**: {row.get('session_id', 'N/A')}\n"
+        output += f"**Created**: {row.get('timestamp', 'N/A')}\n\n"
+        
+        if 'tags' in row and row['tags']:
+            output += f"**Tags**: {row['tags']}\n\n"
+        
+        if 'agentic_advice' in row:
+            output += f"### Advice\n\n{row['agentic_advice']}\n"
+        
+        return output
+        
+    except Exception as e:
+        return f"❌ Error reading decision_log.parquet: {e}"
+
+
+async def qwen_update_task(
+    decision_id: str,
+    new_status: str,
+    workspace_root: str = "."
+) -> str:
+    """
+    Update the status of a task in both BACKLOG.md and decision_log.parquet.
+    
+    Args:
+        decision_id: The unique identifier of the task
+        new_status: New status - "pending", "in_progress", or "completed"
+        workspace_root: Path to workspace root (default: current directory)
+        
+    Returns:
+        Confirmation message with updated task details
+    """
+    from pathlib import Path
+    
+    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(Path(workspace_root))
+    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(Path(workspace_root))
+    
+    # Update BACKLOG.md
+    if not backlog_path.exists():
+        return f"❌ BACKLOG.md not found at {backlog_path}"
+    
+    with open(backlog_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    # Find and update the task in BACKLOG.md
+    import re
+    task_pattern = rf"(- \[) ([ x]) (\] .+? - {re.escape(decision_id)})"
+    
+    def replace_status(match):
+        checkbox = "[x]" if new_status == "completed" else "[ ]"
+        return f"- {checkbox} {match.group(3)[3:]}"  # Keep task name and id
+    
+    new_content, count = re.subn(task_pattern, replace_status, content)
+    
+    if count == 0:
+        return f"❌ Task with decision_id `{decision_id}` not found in BACKLOG.md"
+    
+    with open(backlog_path, "w", encoding="utf-8") as f:
+        f.write(new_content)
+    
+    # Update decision_log.parquet
+    if decision_log_path.exists():
+        try:
+            df = pd.read_parquet(decision_log_path)
+            
+            mask = df['decision_id'] == decision_id
+            if mask.any():
+                df.loc[mask, 'status'] = new_status
+                df.to_parquet(decision_log_path, index=False)
+        except Exception as e:
+            return f"⚠️ Updated BACKLOG.md but failed to update decision_log.parquet: {e}"
+    
+    status_icon = "✅" if new_status == "completed" else "⬜" if new_status == "pending" else "🔄"
+    return f"{status_icon} Task `{decision_id}` updated to **{new_status}** in both BACKLOG.md and decision_log.parquet"

@@ -1,5 +1,92 @@
 # CHANGELOG
 
+## SOS Sync - 2026-04-10 12:10:06
+
+## [2026-04-10 11:38:36] 9ab88b43-1995-4bf2-ab47-5c56192002ad
+
+**Task**: T1: Content Hashing w Snapshotach
+
+**Advice**: Dodaj content_hash do function/class entries w _capture_file_snapshot() w src/graph/snapshot.py. Użyj SHA256 hash treści funkcji/klasy (body). Zmodyfikuj linie 75-81 dla functions i 93-99 dla classes. Wymagane: import hashlib, metoda _get_content_hash(node, source). Test: test_snapshot_hash_deterministic() musi przejść.
+
+---
+
+## [2026-04-10 11:38:46] d1d59443-1959-4695-841d-75bd907d7dfd
+
+**Task**: T2: Git Diff Parser
+
+**Advice**: Stwórz nowy moduł src/graph/git_diff_parser.py z klasą GitDiffParser. Metoda get_diff_between_refs(before_ref, after_ref, project_dir) zwraca dict z changed_files, added_lines, removed_lines, diff_content. Użyj subprocess do wywołania "git diff". Obsłuż brak git gracefully. Test: test_git_diff_parser() musi przejść.
+
+---
+
+## [2026-04-10 11:38:56] d95d55d3-b124-48e9-a89a-13ea050c66f3
+
+**Task**: T3: qwen_diff_audit MCP Tool
+
+**Advice**: Dodaj nowy MCP tool qwen_diff_audit w src/qwen_mcp/tools.py. Tool przyjmuje before_ref (default HEAD~1), after_ref (default HEAD), project_dir. Używa GitDiffParser i FunctionalSnapshotGenerator. Zwraca: changed_files, risk_score (0.0-1.0), removed_functions, removed_classes, signature_changes, regression_alerts. Dodaj do __all__ list. Rejestracja w MCP server. Test: test_qwen_diff_audit() musi przejść.
+
+---
+
+## [2026-04-10 11:39:06] 73421104-421d-4549-95a3-c372c8cb3b8f
+
+**Task**: T4: Pre-Commit Hook Script
+
+**Advice**: Stwórz scripts/pre_commit_degradation.py - lokalny hook do wykrywania degradacji. Używa FunctionalSnapshotGenerator do porównania z ostatnim snapshotem w .qwen/last_snapshot.json. SHADOW_MODE=True domyślnie (tylko ostrzeżenia, nie blokuje commit). Musi działać w <3 sekundy. Zapisuje current snapshot po każdym commicie. Test: test_pre_commit_hook() musi przejść.
+
+---
+
+## [2026-04-10 11:39:19] 343b1a3f-520f-4c8c-a786-1d30ff8da66e
+
+**Task**: T5: Shadow Mode Configuration
+
+**Advice**: Stwórz .qwen/config.yaml z konfiguracją anti-degradation: shadow_mode: true (domyślnie ostrzeżenia bez blokady), block_threshold: 0.7 (próg risk_score do blokady w trybie produkcyjnym), false_positive_log: .qwen/false_positives.log, snapshot_storage: .qwen/snapshots/. Konfiguracja musi być czytana przez T4 i T6.
+
+---
+
+## [2026-04-10 11:39:29] 8e4f115b-88f6-4ff7-9986-7a032580d3a9
+
+**Task**: T6: CI Workflow Integration
+
+**Advice**: Stwórz .github/workflows/degradation_check.yml - GitHub Actions workflow. Uruchamia się na push i pull_request. Krok "Setup Python" i "Install dependencies" (pip install -e .). Główny krok: uruchom python scripts/pre_commit_degradation.py. SHADOW_MODE kontrolowany przez env var (domyślnie true). Upload false-positive metrics jako artifact. Wymaga fetch-depth: 2 do porównania commitów.
+
+---
+
+## [2026-04-10 11:39:37] 6d3a5a83-321f-4ed8-aef0-4cd249c46f73
+
+**Task**: T7: Production Blocking Activation
+
+**Advice**: Aktywuj blokadę produkcyjną w CI po okresie Shadow Mode. Zmien SHADOW_MODE=false w .github/workflows/degradation_check.yml i .qwen/config.yaml. Wymagania: false-positive rate < 5% przez minimum 1 tydzień. Dokumentuj metryki w CHANGELOG.md. Dodaj dokumentację do docs/ANTI_DEGRADATION.md z instrukcją konfiguracji i interpretacji alertów.
+
+---
+
+## [2026-04-10 12:07:31] 00bee066-f4a4-4530-b731-c91b8813b4fe
+
+**Task**: MCP Task Management Tools: qwen_list_tasks, qwen_get_task, qwen_update_task
+
+**Advice**: Implementacja 3 nowych MCP toolow w src/qwen_mcp/tools.py: (1) qwen_list_tasks - listuje taski z BACKLOG.md z opcjonalnym filtrem tagow, zwraca JSON z taskami, (2) qwen_get_task - pobiera pojedynczy task po decision_id z decision_log.parquet, zwraca szczegoly tasku, (3) qwen_update_task - aktualizuje status tasku (pending/completed) w BACKLOG.md i decision_log.parquet. Uzyj dekoratora @mcp.tool() jak w innych toolach. Dodaj do __all__. Wymagany import pandas dla parquet. Struktura: __all__ linie 16-33, add_task_to_backlog linie 600+.
+
+---
+
+## 2026-04-10 12:10 - b4a7a837-ec00-4212-985c-bc3c4039f0ef
+
+**Task**: Implement 3 new MCP tools in src/qwen_mcp/tools.py:
+
+1. **qwen_list_tasks** - List all tasks from BACKLOG.md with optional tag filter
+   - Parse BACKLOG.md format: "- [ ] TaskName - decision_id" or "-
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-10 10:55 - e8408898-0a9c-4c90-ba97-e1ce4ecdcc9a
+
+**Task**: napisz funkcję Pythona: n = a^x + b^y
+
+**Status**: ✅ Completed
+
+---
+
+
 ## 2026-04-09 20:15 - 10fba463-b4a1-484e-a086-3a98bc030666
 
 **Task**: Extract and present the complete sparring analysis results from the session. The user wants to see the full findings from Red Cell, Blue Cell, and White Cell in a readable format. Present it as a comp
