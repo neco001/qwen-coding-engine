@@ -1,0 +1,34 @@
+# Anti-Degradation System Configuration
+# Controls shadow mode, production blocking, thresholds, and snapshot management.
+
+shadow_mode:
+  enabled: true
+  log_level: "warning"
+  audit_output: ".anti_degradation/audit_history.jsonl"
+
+production_mode:
+  enabled: false
+  block_on_regression: true
+  block_threshold: 0.7
+
+thresholds:
+  max_latency_seconds: 3.0
+  regression_risk_threshold: 0.7
+  min_files_for_baseline: 1
+
+file_patterns:
+  include:
+    - "**/*.py"
+  exclude:
+    - "**/test_*.py"
+    - "**/tests/**"
+    - "**/__pycache__/**"
+    - "**/*.pyc"
+    - ".git/**"
+    - ".venv/**"
+    - "**/migrations/**"
+
+snapshots:
+  storage_dir: ".anti_degradation/snapshots"
+  baseline_name: "main_baseline"
+  max_snapshots: 10

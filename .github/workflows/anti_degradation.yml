@@ -1,0 +1,56 @@
+# .github/workflows/anti_degradation.yml
+name: Anti-Degradation System CI
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  push:
+    branches:
+      - main
+
+jobs:
+  anti-degradation-check:
+    runs-on: ubuntu-latest
+    continue-on-error: true  # Allow failures in shadow mode for data collection
+    env:
+      ANTI_DEGRADATION_SHADOW_MODE: "true"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv pip install --system pyyaml
+          # Install project dependencies if pyproject.toml exists
+          if [ -f pyproject.toml ]; then
+            uv pip install --system -e .
+          fi
+
+      - name: Ensure anti-degradation directories
+        run: |
+          mkdir -p .anti_degradation/snapshots
+          mkdir -p .anti_degradation
+
+      - name: Run Anti-Degradation Pre-commit Hook
+        run: |
+          python scripts/pre_commit_hook.py
+
+      - name: Upload audit history artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: anti-degradation-audit-${{ github.run_id }}
+          path: |
+            .anti_degradation/audit_history.jsonl
+            .anti_degradation/snapshots/
+          retention-days: 30
+          if-no-files-found: ignore

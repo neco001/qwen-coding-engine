@@ -1,0 +1,74 @@
+name: Anti-Degradation Production Block
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Force run production blocking check'
+        required: false
+        default: 'false'
+
+env:
+  ANTI_DEGRADATION_PRODUCTION: "true"
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  production-blocking-check:
+    name: Production Regression Check
+    runs-on: ubuntu-latest
+    # NO continue-on-error - this workflow BLOCKS on regression
+    if: |
+      github.event_name == 'push' || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.force_run == 'true')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv pip install --system pyyaml
+          if [ -f pyproject.toml ]; then
+            uv pip install --system -e .
+          fi
+
+      - name: Ensure anti-degradation directories
+        run: |
+          mkdir -p .anti_degradation/snapshots
+          mkdir -p .anti_degradation
+
+      - name: Run Anti-Degradation Production Check
+        run: |
+          echo "Running in PRODUCTION BLOCKING mode"
+          echo "Regression detection will FAIL the workflow"
+          python scripts/pre_commit_hook.py
+        env:
+          ANTI_DEGRADATION_PRODUCTION: "true"
+
+      - name: Upload Regression Report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-report-production-${{ github.run_id }}
+          path: |
+            .anti_degradation/audit_history.jsonl
+            .anti_degradation/snapshots/
+          retention-days: 30
+
+      - name: Notify on Regression
+        if: failure()
+        run: |
+          echo "::error::Production regression detected! Build blocked."
+          echo "Please review .anti_degradation/audit_history.jsonl for details."
+          exit 1

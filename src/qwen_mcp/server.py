@@ -22,6 +22,13 @@ from qwen_mcp.tools import (
     qwen_get_task,
     qwen_update_task,
 )
+from qwen_mcp.diff_audit import (
+    qwen_diff_audit,
+    qwen_diff_audit_staged,
+    qwen_create_baseline,
+    qwen_compare_snapshots,
+    qwen_audit_history,
+)
 from qwen_mcp.specter.telemetry import get_broadcaster
 from qwen_mcp.specter.identity import get_current_project_id, get_session_id, get_or_create_instance_id
 from qwen_mcp.registry import registry
@@ -723,6 +730,123 @@ async def qwen_update_task_tool(
         Confirmation message with updated task details
     """
     return await qwen_update_task(decision_id=decision_id, new_status=new_status, workspace_root=workspace_root)
+
+@mcp.tool()
+async def qwen_diff_audit_tool(
+    from_ref: str = "HEAD~1",
+    to_ref: str = "HEAD",
+    baseline_snapshot: str = None,
+    shadow_mode: bool = False,
+    workspace_root: str = "."
+) -> str:
+    """
+    Audit git diff for potential regressions using Anti-Degradation System.
+    
+    Args:
+        from_ref: Source ref (commit, branch, or HEAD~N)
+        to_ref: Target ref
+        baseline_snapshot: Name of baseline snapshot (default: "latest")
+        shadow_mode: If True, warnings only - no blocking
+        workspace_root: Path to workspace root
+        
+    Returns:
+        Audit result with regression detection and risk assessment
+    """
+    import json
+    result = await qwen_diff_audit(
+        from_ref=from_ref,
+        to_ref=to_ref,
+        baseline_snapshot=baseline_snapshot,
+        shadow_mode=shadow_mode,
+        workspace_root=workspace_root
+    )
+    return json.dumps(result, indent=2)
+
+@mcp.tool()
+async def qwen_diff_audit_staged_tool(
+    baseline_snapshot: str = None,
+    shadow_mode: bool = False,
+    workspace_root: str = "."
+) -> str:
+    """
+    Audit staged changes for potential regressions (for pre-commit hook).
+    
+    Args:
+        baseline_snapshot: Name of baseline snapshot (default: "latest")
+        shadow_mode: If True, warnings only - no blocking
+        workspace_root: Path to workspace root
+        
+    Returns:
+        Audit result with blocking decision
+    """
+    import json
+    result = await qwen_diff_audit_staged(
+        baseline_snapshot=baseline_snapshot,
+        shadow_mode=shadow_mode,
+        workspace_root=workspace_root
+    )
+    return json.dumps(result, indent=2)
+
+@mcp.tool()
+async def qwen_create_baseline_tool(
+    name: str = "baseline",
+    workspace_root: str = "."
+) -> str:
+    """
+    Create a new baseline snapshot for Anti-Degradation System.
+    
+    Args:
+        name: Snapshot name (default: "baseline")
+        workspace_root: Path to workspace root
+        
+    Returns:
+        Path to saved snapshot file
+    """
+    return await qwen_create_baseline(name=name, workspace_root=workspace_root)
+
+@mcp.tool()
+async def qwen_compare_snapshots_tool(
+    snapshot1_name: str,
+    snapshot2_name: str,
+    workspace_root: str = "."
+) -> str:
+    """
+    Compare two snapshots for regression detection.
+    
+    Args:
+        snapshot1_name: First snapshot name
+        snapshot2_name: Second snapshot name
+        workspace_root: Path to workspace root
+        
+    Returns:
+        Comparison result with regression alerts
+    """
+    import json
+    result = await qwen_compare_snapshots(
+        snapshot1_name=snapshot1_name,
+        snapshot2_name=snapshot2_name,
+        workspace_root=workspace_root
+    )
+    return json.dumps(result, indent=2)
+
+@mcp.tool()
+async def qwen_audit_history_tool(
+    limit: int = 100,
+    workspace_root: str = "."
+) -> str:
+    """
+    Get recent audit history from Anti-Degradation System.
+    
+    Args:
+        limit: Maximum number of audits to return
+        workspace_root: Path to workspace root
+        
+    Returns:
+        List of recent audit results
+    """
+    import json
+    result = await qwen_audit_history(limit=limit, workspace_root=workspace_root)
+    return json.dumps(result, indent=2)
 
 def main():
     mcp.run()

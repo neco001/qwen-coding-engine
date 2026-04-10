@@ -336,6 +336,109 @@ The Auditor uses **heavy reasoning** to act as a Senior SRE (Site Reliability En
 
 ---
 
+## 🛡️ Anti-Degradation System: Regression Protection
+
+Automated code quality protection system that prevents regression through snapshot-based diff auditing. Implements a 7-stage pipeline (T1-T7) with shadow and production blocking modes.
+
+### System Overview
+
+The Anti-Degradation System monitors code changes through:
+- **Snapshot Generation**: ContentHash-based file state tracking ([`src/graph/snapshot.py`](src/graph/snapshot.py:15))
+- **Diff Parsing**: Git diff analysis with semantic understanding ([`src/utils/git_diff_parser.py`](src/utils/git_diff_parser.py:1))
+- **Audit Pipeline**: 7-stage quality gates via MCP tools ([`src/qwen_mcp/diff_audit.py`](src/qwen_mcp/diff_audit.py:1))
+- **CI Integration**: GitHub Actions workflows for automated enforcement
+
+**Architecture Flow:**
+```
+Commit → Pre-commit Hook → Snapshot → Diff Audit → MCP Tools → CI Gate → Merge/Block
+```
+
+### MCP Tools
+
+| Tool | Purpose | Usage |
+|------|---------|-------|
+| `qwen_diff_audit_tool` | Audit git diff for regressions | `from_ref="HEAD~1", to_ref="HEAD"` |
+| `qwen_diff_audit_staged_tool` | Audit staged changes (pre-commit) | `baseline_snapshot="latest"` |
+| `qwen_create_baseline_tool` | Create baseline snapshot | `name="baseline"` |
+| `qwen_compare_snapshots_tool` | Compare two snapshots | `snapshot1_name, snapshot2_name` |
+| `qwen_audit_history_tool` | Get audit history | `limit=100` |
+
+### Configuration
+
+Configuration file: [`.anti_degradation/config.yaml`](.anti_degradation/config.yaml:1)
+
+```yaml
+shadow_mode:
+  enabled: true          # Warnings only, no blocking
+  log_level: "warning"
+
+production_mode:
+  enabled: false         # Blocking mode (activate after validation)
+  block_threshold: 0.7   # Risk score threshold
+
+thresholds:
+  max_latency_seconds: 3.0
+  regression_risk_threshold: 0.7
+
+file_patterns:
+  include: ["**/*.py"]
+  exclude: ["**/test_*.py", "**/__pycache__/**"]
+```
+
+### CI Workflows
+
+| Workflow | File | Mode | Behavior |
+|----------|------|------|----------|
+| Shadow Mode | [`.github/workflows/anti_degradation.yml`](.github/workflows/anti_degradation.yml:1) | Warnings only | `continue-on-error: true` |
+| Production Blocking | [`.github/workflows/anti_degradation_production.yml`](.github/workflows/anti_degradation_production.yml:1) | Blocks on regression | Fails workflow on detection |
+
+### Activation Steps
+
+1. **Shadow Mode Validation** (2+ weeks recommended)
+   ```bash
+   # Verify shadow mode is active
+   grep "enabled: true" .anti_degradation/config.yaml
+   ```
+
+2. **Review Audit History**
+   ```bash
+   python scripts/pre_commit_hook.py
+   # Check .anti_degradation/audit_history.jsonl
+   ```
+
+3. **Enable Production Blocking**
+   ```bash
+   python scripts/activate_production_blocking.py
+   ```
+
+4. **Update Branch Protection Rules**
+   - Add status check: `anti-degradation-production`
+   - Require status check to pass before merging
+
+### File Structure
+
+```
+project-root/
+├── .anti_degradation/
+│   ├── config.yaml              # System configuration
+│   ├── audit_history.jsonl      # Audit log
+│   └── snapshots/               # Baseline snapshots
+├── .github/workflows/
+│   ├── anti_degradation.yml     # Shadow mode CI
+│   └── anti_degradation_production.yml
+├── scripts/
+│   ├── pre_commit_hook.py       # Pre-commit integration
+│   └── activate_production_blocking.py
+└── src/
+    ├── graph/snapshot.py        # ContentHash + FunctionalSnapshotGenerator
+    ├── utils/git_diff_parser.py # GitDiffParser
+    └── qwen_mcp/
+        ├── diff_audit.py        # QwenDiffAuditTool
+        └── anti_degradation_config.py
+```
+
+---
+
 ## 💰 Billing Modes: Financial Control
 
 The engine supports three billing modes to optimize costs based on your subscription:

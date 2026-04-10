@@ -4,13 +4,56 @@ Captures and compares functional snapshots of code to detect regressions.
 """
 
 import ast
+import hashlib
+import json
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Set, Tuple
 
 
+@dataclass
+class ContentHash:
+    """Semantic content hash for White Cell verification."""
+    file_path: str
+    hash_value: str
+    hash_algorithm: str = "sha256"
+    semantic_markers: List[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "file_path": self.file_path,
+            "hash_value": self.hash_value,
+            "hash_algorithm": self.hash_algorithm,
+            "semantic_markers": self.semantic_markers,
+            "created_at": self.created_at.isoformat().replace("+00:00", "Z"),
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ContentHash":
+        created_at = data.get("created_at", datetime.now(timezone.utc).isoformat())
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        return cls(
+            file_path=data["file_path"],
+            hash_value=data["hash_value"],
+            hash_algorithm=data.get("hash_algorithm", "sha256"),
+            semantic_markers=data.get("semantic_markers", []),
+            created_at=created_at,
+        )
+
+
 class FunctionalSnapshotGenerator:
     """Generate and compare functional snapshots of code."""
+    
+    def __init__(self, shadow_mode: bool = False):
+        """Initialize snapshot generator.
+        
+        Args:
+            shadow_mode: If True, warnings only - no blocking (mandatory before production)
+        """
+        self.shadow_mode = shadow_mode
     
     async def capture_snapshot(
         self, project_dir: Path, patterns: Optional[List[str]] = None
@@ -31,6 +74,8 @@ class FunctionalSnapshotGenerator:
             "functions": [],
             "classes": [],
             "mappings": {},
+            "content_hashes": [],
+            "shadow_mode": self.shadow_mode,
         }
         
         if not project_dir.exists():
@@ -55,6 +100,9 @@ class FunctionalSnapshotGenerator:
         
         # Extract mappings (function calls between modules)
         snapshot["mappings"] = self._extract_mappings(snapshot["files"])
+        
+        # Generate content hashes for semantic verification (White Cell requirement)
+        snapshot["content_hashes"] = await self._generate_content_hashes(project_dir, patterns)
         
         return snapshot
     
@@ -313,3 +361,205 @@ class FunctionalSnapshotGenerator:
             })
         
         return alerts
+    
+    async def _generate_content_hashes(
+        self, project_dir: Path, patterns: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """Generate content hashes for tracked files (White Cell verification).
+        
+        Args:
+            project_dir: Root directory of the project
+            patterns: Optional list of glob patterns to match files
+            
+        Returns:
+            List of content hash dictionaries
+        """
+        hashes = []
+        
+        # Default patterns for tracked files
+        if patterns is None:
+            patterns = ["**/*.py", "**/*.md", "**/*.yaml", "**/*.yml", "**/*.json"]
+        
+        for pattern in patterns:
+            for file_path in project_dir.glob(pattern):
+                if file_path.is_file() and ".snapshots" not in str(file_path):
+                    try:
+                        content_hash = self._compute_content_hash(file_path, project_dir)
+                        hashes.append(content_hash.to_dict())
+                    except (IOError, OSError):
+                        continue
+        
+        return hashes
+    
+    def _compute_content_hash(self, file_path: Path, project_dir: Path) -> ContentHash:
+        """Compute semantic content hash for a file.
+        
+        Args:
+            file_path: Path to the file
+            project_dir: Root directory for relative path calculation
+            
+        Returns:
+            ContentHash object with hash value and semantic markers
+        """
+        try:
+            with open(file_path, "rb") as f:
+                content = f.read()
+            
+            # Extract semantic markers (function defs, class defs, imports)
+            semantic_markers = self._extract_semantic_markers(content)
+            
+            # Compute hash of content + semantic markers for semantic verification
+            hash_input = content + b"".join([m.encode() for m in sorted(semantic_markers)])
+            hash_value = hashlib.sha256(hash_input).hexdigest()
+            
+            return ContentHash(
+                file_path=str(file_path.relative_to(project_dir)),
+                hash_value=hash_value,
+                semantic_markers=semantic_markers,
+            )
+        except Exception as e:
+            # Return error hash but don't fail snapshot generation
+            return ContentHash(
+                file_path=str(file_path),
+                hash_value="ERROR",
+                semantic_markers=[],
+            )
+    
+    def _extract_semantic_markers(self, content: bytes) -> List[str]:
+        """Extract semantic markers from file content for White Cell verification.
+        
+        Args:
+            content: Raw file content
+            
+        Returns:
+            List of semantic markers (func:name, class:name, import:module)
+        """
+        try:
+            text = content.decode("utf-8", errors="ignore")
+            markers = []
+            
+            # Extract function definitions
+            import re
+            func_pattern = r"^\s*def\s+(\w+)\s*\("
+            for match in re.finditer(func_pattern, text, re.MULTILINE):
+                markers.append(f"func:{match.group(1)}")
+            
+            # Extract class definitions
+            class_pattern = r"^\s*class\s+(\w+)"
+            for match in re.finditer(class_pattern, text, re.MULTILINE):
+                markers.append(f"class:{match.group(1)}")
+            
+            # Extract import statements
+            import_pattern = r"^(?:from|import)\s+([\w.]+)"
+            for match in re.finditer(import_pattern, text, re.MULTILINE):
+                markers.append(f"import:{match.group(1)}")
+            
+            return markers[:50]  # Limit to prevent bloat
+        except Exception:
+            return []
+    
+    def compare_content_hashes(
+        self, before_hashes: List[Dict[str, Any]], after_hashes: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Compare content hashes between snapshots.
+        
+        Args:
+            before_hashes: Content hashes from before snapshot
+            after_hashes: Content hashes from after snapshot
+            
+        Returns:
+            Dictionary with hash changes analysis
+        """
+        before_map = {h["file_path"]: h for h in before_hashes}
+        after_map = {h["file_path"]: h for h in after_hashes}
+        
+        changes = {
+            "added_files": [],
+            "removed_files": [],
+            "modified_files": [],
+            "semantic_changes": [],
+        }
+        
+        before_paths = set(before_map.keys())
+        after_paths = set(after_map.keys())
+        
+        # Added files
+        for path in after_paths - before_paths:
+            changes["added_files"].append({
+                "file": path,
+                "hash": after_map[path]["hash_value"][:16],
+            })
+        
+        # Removed files
+        for path in before_paths - after_paths:
+            changes["removed_files"].append({
+                "file": path,
+                "hash": before_map[path]["hash_value"][:16],
+            })
+        
+        # Modified files
+        for path in before_paths & after_paths:
+            before_hash = before_map[path]["hash_value"]
+            after_hash = after_map[path]["hash_value"]
+            
+            if before_hash != after_hash:
+                # Check semantic markers change
+                before_markers = set(before_map[path].get("semantic_markers", []))
+                after_markers = set(after_map[path].get("semantic_markers", []))
+                
+                semantic_changed = before_markers != after_markers
+                
+                changes["modified_files"].append({
+                    "file": path,
+                    "old_hash": before_hash[:16],
+                    "new_hash": after_hash[:16],
+                    "semantic_markers_changed": semantic_changed,
+                })
+                
+                if semantic_changed:
+                    changes["semantic_changes"].append({
+                        "file": path,
+                        "added_markers": list(after_markers - before_markers),
+                        "removed_markers": list(before_markers - after_markers),
+                    })
+        
+        return changes
+    
+    def save_snapshot(self, snapshot: Dict[str, Any], project_dir: Path, name: str = "latest") -> Path:
+        """Save snapshot to disk.
+        
+        Args:
+            snapshot: Snapshot dictionary
+            project_dir: Project root directory
+            name: Snapshot name
+            
+        Returns:
+            Path to saved snapshot file
+        """
+        snapshots_dir = project_dir / ".snapshots"
+        snapshots_dir.mkdir(parents=True, exist_ok=True)
+        
+        snapshot_path = snapshots_dir / f"{name}.json"
+        
+        with open(snapshot_path, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, indent=2)
+        
+        return snapshot_path
+    
+    def load_snapshot(self, project_dir: Path, name: str = "latest") -> Optional[Dict[str, Any]]:
+        """Load snapshot from disk.
+        
+        Args:
+            project_dir: Project root directory
+            name: Snapshot name
+            
+        Returns:
+            Snapshot dictionary or None if not found
+        """
+        snapshot_path = project_dir / ".snapshots" / f"{name}.json"
+        
+        if not snapshot_path.exists():
+            return None
+        
+        with open(snapshot_path, "r", encoding="utf-8") as f:
+            return json.load(f)
