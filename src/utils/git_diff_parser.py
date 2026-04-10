@@ -76,7 +76,7 @@ class GitDiffParser:
         """Run git command and return stdout, stderr, returncode."""
         try:
             result = subprocess.run(
-                ["git"] + args,
+                ["git", "--no-pager"] + args,
                 cwd=self.repo_path,
                 capture_output=True,
                 text=True,
