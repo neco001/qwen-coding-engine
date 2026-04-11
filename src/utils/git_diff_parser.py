@@ -81,6 +81,7 @@ class GitDiffParser:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                stdin=subprocess.DEVNULL,
             )
             return result.stdout, result.stderr, result.returncode
         except subprocess.TimeoutExpired:

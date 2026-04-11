@@ -700,8 +700,8 @@ async def generate_sos_sync(apply: bool, decision_id: str, apply_all: bool, work
     
     from qwen_mcp.engines.decision_log_sync import DecisionLogSyncEngine
     
-    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(Path(workspace_root))
-    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(Path(workspace_root))
+    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(workspace_root)
+    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(workspace_root)
     
     if not decision_log_path.exists():
         return f"No decision log found at {decision_log_path}"
@@ -758,8 +758,8 @@ async def add_task_to_backlog(
     from pathlib import Path
     from qwen_mcp.engines.decision_log_sync import DecisionLogSyncEngine
     
-    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(Path(workspace_root))
-    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(Path(workspace_root))
+    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(workspace_root)
+    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(workspace_root)
     
     engine = DecisionLogSyncEngine(decision_log_path)
     
@@ -854,7 +854,7 @@ async def qwen_list_tasks(
     """
     from pathlib import Path
     
-    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(Path(workspace_root))
+    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(workspace_root)
     
     if not backlog_path.exists():
         return f"❌ BACKLOG.md not found at {backlog_path}"
@@ -913,7 +913,7 @@ async def qwen_get_task(
     """
     from pathlib import Path
     
-    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(Path(workspace_root))
+    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(workspace_root)
     
     if not decision_log_path.exists():
         return f"❌ decision_log.parquet not found at {decision_log_path}"
@@ -969,8 +969,8 @@ async def qwen_update_task(
     """
     from pathlib import Path
     
-    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(Path(workspace_root))
-    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(Path(workspace_root))
+    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(workspace_root)
+    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(workspace_root)
     
     # Update BACKLOG.md
     if not backlog_path.exists():

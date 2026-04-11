@@ -4,12 +4,15 @@ Captures and compares functional snapshots of code to detect regressions.
 """
 
 import ast
+import asyncio
 import hashlib
 import json
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Set, Tuple
+from qwen_mcp.anti_degradation_config import get_config
 
 
 @dataclass
@@ -47,22 +50,135 @@ class ContentHash:
 class FunctionalSnapshotGenerator:
     """Generate and compare functional snapshots of code."""
     
-    def __init__(self, shadow_mode: bool = False):
+    def __init__(self, shadow_mode: bool = False, storage_dir: Optional[str] = None):
         """Initialize snapshot generator.
         
         Args:
             shadow_mode: If True, warnings only - no blocking (mandatory before production)
+            storage_dir: Directory for storing snapshots. Defaults to config.snapshots.storage_dir
         """
         self.shadow_mode = shadow_mode
+        self._git_available: Optional[bool] = None
+        
+        if storage_dir is None:
+            config = get_config()
+            self.storage_dir = config.snapshots.storage_dir
+        else:
+            self.storage_dir = storage_dir
+    
+    def _check_git_available(self) -> bool:
+        """Check if git is available in environment."""
+        if self._git_available is not None:
+            return self._git_available
+        try:
+            subprocess.run(['git', '--version'], capture_output=True, check=True, timeout=5, stdin=subprocess.DEVNULL)
+            self._git_available = True
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+            self._git_available = False
+        return self._git_available
+    
+    def _get_changed_files(
+        self,
+        project_dir: Path,
+        commit_range: str = "HEAD~1..HEAD"
+    ) -> List[Path]:
+        """Get Python files changed in git diff.
+        
+        Args:
+            project_dir: Root directory
+            commit_range: Git diff range (e.g., "HEAD~1..HEAD")
+            
+        Returns:
+            List of changed Python file paths
+        """
+        if not self._check_git_available():
+            return list(project_dir.rglob("*.py"))
+        
+        try:
+            result = subprocess.run(
+                ["git", "--no-pager", "diff", "--name-only", commit_range],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                stdin=subprocess.DEVNULL
+            )
+            
+            if result.returncode != 0:
+                return list(project_dir.rglob("*.py"))
+            
+            changed_files = [
+                project_dir / f
+                for f in result.stdout.splitlines()
+                if f.endswith(".py") and (project_dir / f).exists()
+            ]
+            
+            return changed_files if changed_files else list(project_dir.rglob("*.py"))
+            
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+            return list(project_dir.rglob("*.py"))
+    
+    def _get_tracked_files(
+        self,
+        project_dir: Path,
+        file_pattern: str = "*.py"
+    ) -> List[Path]:
+        """Get Python files respecting .gitignore and git exclude rules.
+        
+        Uses 'git ls-files --exclude-standard' which respects:
+        - .gitignore files at all levels
+        - .git/info/exclude
+        - core.excludesFile (global git exclude)
+        
+        Args:
+            project_dir: Root directory of the project
+            file_pattern: File pattern to filter (default: "*.py")
+            
+        Returns:
+            List of Python file paths respecting git ignore rules
+        """
+        if not self._check_git_available():
+            return list(project_dir.rglob(file_pattern))
+        
+        try:
+            result = subprocess.run(
+                ["git", "ls-files", "--exclude-standard", "--cached", "--others"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                stdin=subprocess.DEVNULL
+            )
+            
+            if result.returncode != 0:
+                return list(project_dir.rglob(file_pattern))
+            
+            pattern_suffix = file_pattern.lstrip("*.")
+            tracked_files = [
+                project_dir / f
+                for f in result.stdout.splitlines()
+                if f.endswith(f".{pattern_suffix}") and (project_dir / f).exists()
+            ]
+            
+            return tracked_files if tracked_files else list(project_dir.rglob(file_pattern))
+            
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+            return list(project_dir.rglob(file_pattern))
     
     async def capture_snapshot(
-        self, project_dir: Path, patterns: Optional[List[str]] = None
+        self,
+        project_dir: Path,
+        patterns: Optional[List[str]] = None,
+        commit_range: Optional[str] = None,
+        changed_files: Optional[List[Path]] = None
     ) -> Dict[str, Any]:
         """Capture a functional snapshot of a project.
         
         Args:
             project_dir: Root directory of the project
             patterns: Optional list of glob patterns to match files
+            commit_range: Git diff range (e.g., "HEAD~1..HEAD") for changed file detection
+            changed_files: Optional list of pre-computed changed files
             
         Returns:
             Snapshot dictionary with functions, classes, and mappings
@@ -81,28 +197,54 @@ class FunctionalSnapshotGenerator:
         if not project_dir.exists():
             return snapshot
         
-        # Find Python files
-        if patterns:
+        # Find Python files - use changed files if provided
+        if changed_files:
+            python_files = changed_files
+        elif commit_range:
+            python_files = await asyncio.to_thread(self._get_changed_files, project_dir, commit_range)
+        elif patterns:
             python_files = []
             for pattern in patterns:
                 python_files.extend(project_dir.glob(pattern))
         else:
-            python_files = list(project_dir.rglob("*.py"))
+            python_files = await asyncio.to_thread(self._get_tracked_files, project_dir)
         
-        for file_path in python_files:
+        # Parallel file capture with asyncio.gather
+        async def _capture_file_snapshot_async(file_path: Path) -> Tuple[Path, Optional[Dict[str, Any]]]:
+            """Async wrapper for _capture_file_snapshot."""
             try:
-                file_snapshot = self._capture_file_snapshot(file_path)
+                result = await asyncio.to_thread(self._capture_file_snapshot, file_path)
+                return (file_path, result)
+            except (SyntaxError, IOError, OSError):
+                return (file_path, None)
+        
+        tasks = [
+            _capture_file_snapshot_async(file_path)
+            for file_path in python_files
+        ]
+        results = []
+        chunk_size = 20
+        for i in range(0, len(tasks), chunk_size):
+            chunk = tasks[i:i + chunk_size]
+            chunk_results = await asyncio.gather(*chunk, return_exceptions=True)
+            results.extend(chunk_results)
+            await asyncio.sleep(0.01)  # Force yield to let MCP server respond to pings
+        
+        for file_path, file_snapshot in results:
+            if file_snapshot is not None:
                 snapshot["files"][str(file_path)] = file_snapshot
                 snapshot["functions"].extend(file_snapshot.get("functions", []))
                 snapshot["classes"].extend(file_snapshot.get("classes", []))
-            except (SyntaxError, IOError, OSError):
-                continue
         
         # Extract mappings (function calls between modules)
-        snapshot["mappings"] = self._extract_mappings(snapshot["files"])
+        snapshot["mappings"] = await asyncio.to_thread(self._extract_mappings, snapshot["files"])
         
         # Generate content hashes for semantic verification (White Cell requirement)
-        snapshot["content_hashes"] = await self._generate_content_hashes(project_dir, patterns)
+        snapshot["content_hashes"] = await self._generate_content_hashes(
+            project_dir,
+            patterns,
+            changed_files=python_files if changed_files else None
+        )
         
         return snapshot
     
@@ -363,31 +505,48 @@ class FunctionalSnapshotGenerator:
         return alerts
     
     async def _generate_content_hashes(
-        self, project_dir: Path, patterns: Optional[List[str]] = None
+        self,
+        project_dir: Path,
+        patterns: Optional[List[str]] = None,
+        changed_files: Optional[List[Path]] = None
     ) -> List[Dict[str, Any]]:
         """Generate content hashes for tracked files (White Cell verification).
         
         Args:
             project_dir: Root directory of the project
             patterns: Optional list of glob patterns to match files
+            changed_files: Optional list of files to hash (optimization)
             
         Returns:
             List of content hash dictionaries
         """
         hashes = []
         
-        # Default patterns for tracked files
-        if patterns is None:
-            patterns = ["**/*.py", "**/*.md", "**/*.yaml", "**/*.yml", "**/*.json"]
-        
-        for pattern in patterns:
-            for file_path in project_dir.glob(pattern):
-                if file_path.is_file() and ".snapshots" not in str(file_path):
+        # If changed_files provided, only hash those
+        if changed_files:
+            for file_path in changed_files:
+                if file_path.is_file() and ".snapshots" not in str(file_path) and ".venv" not in str(file_path):
                     try:
-                        content_hash = self._compute_content_hash(file_path, project_dir)
+                        content_hash = await asyncio.to_thread(self._compute_content_hash, file_path, project_dir)
                         hashes.append(content_hash.to_dict())
+                        await asyncio.sleep(0)  # Yield to event loop
                     except (IOError, OSError):
                         continue
+            return hashes
+        
+        # Use git-aware file discovery instead of glob patterns to respect .gitignore
+        if patterns is None:
+            patterns = []
+        # Get git-tracked files to avoid .venv inclusion
+        tracked_files = self._get_tracked_files(project_dir)
+        for file_path in tracked_files:
+            if file_path.is_file() and ".snapshots" not in str(file_path):
+                try:
+                    content_hash = await asyncio.to_thread(self._compute_content_hash, file_path, project_dir)
+                    hashes.append(content_hash.to_dict())
+                    await asyncio.sleep(0)  # Yield to event loop
+                except (IOError, OSError):
+                    continue
         
         return hashes
     
@@ -536,7 +695,7 @@ class FunctionalSnapshotGenerator:
         Returns:
             Path to saved snapshot file
         """
-        snapshots_dir = project_dir / ".snapshots"
+        snapshots_dir = project_dir / self.storage_dir
         snapshots_dir.mkdir(parents=True, exist_ok=True)
         
         snapshot_path = snapshots_dir / f"{name}.json"
@@ -556,7 +715,7 @@ class FunctionalSnapshotGenerator:
         Returns:
             Snapshot dictionary or None if not found
         """
-        snapshot_path = project_dir / ".snapshots" / f"{name}.json"
+        snapshot_path = project_dir / self.storage_dir / f"{name}.json"
         
         if not snapshot_path.exists():
             return None

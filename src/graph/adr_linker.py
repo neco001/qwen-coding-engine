@@ -99,7 +99,8 @@ class SmartCodeLinker:
                 ['rg', '--version'],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
+                stdin=subprocess.DEVNULL  # Prevent stdin leakage in MCP context
             )
             self._ripgrep_available = result.returncode == 0
         except (FileNotFoundError, subprocess.TimeoutExpired):

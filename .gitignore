@@ -38,3 +38,4 @@ test_*.py
 temp/
 tmp/
 _archive/
+*.tmp

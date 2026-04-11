@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from utils.git_diff_parser import GitDiffParser, GitDiffResult
 from graph.snapshot import FunctionalSnapshotGenerator
+from qwen_mcp.anti_degradation_config import get_config
 
 
 class QwenDiffAuditTool:
@@ -19,7 +20,11 @@ class QwenDiffAuditTool:
     def __init__(self, repo_path: Optional[str] = None, shadow_mode: bool = False):
         self.repo_path = Path(repo_path) if repo_path else Path.cwd()
         self.git_parser = GitDiffParser(str(self.repo_path))
-        self.snapshot_generator = FunctionalSnapshotGenerator(shadow_mode=shadow_mode)
+        config = get_config()
+        self.snapshot_generator = FunctionalSnapshotGenerator(
+            shadow_mode=shadow_mode,
+            storage_dir=config.snapshots.storage_dir
+        )
         self.shadow_mode = shadow_mode
         self.audit_log_path = self.repo_path / ".anti_degradation" / "audit_log.jsonl"
         self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -29,6 +34,7 @@ class QwenDiffAuditTool:
         from_ref: str = "HEAD~1",
         to_ref: str = "HEAD",
         baseline_snapshot: Optional[str] = None,
+        shadow_mode: bool = False,
     ) -> Dict[str, Any]:
         """
         Audit git diff for potential regressions.
@@ -37,6 +43,7 @@ class QwenDiffAuditTool:
             from_ref: Source ref
             to_ref: Target ref
             baseline_snapshot: Name of baseline snapshot (default: "latest")
+            shadow_mode: If True, warnings only - no blocking
             
         Returns:
             Audit result with regression detection and risk assessment
@@ -49,12 +56,24 @@ class QwenDiffAuditTool:
         # Analyze change impact
         impact_analysis = self.git_parser.analyze_change_impact(diff_result)
         
+        # Extract changed files from diff_result for optimized snapshot capture
+        commit_range = f"{from_ref}..{to_ref}"
+        changed_files = [
+            self.repo_path / file_diff.file_path
+            for file_diff in diff_result.files
+            if file_diff.status != "deleted"  # Skip deleted files
+        ]
+        
         # Load baseline snapshot
         baseline_name = baseline_snapshot or "latest"
         baseline = self.snapshot_generator.load_snapshot(self.repo_path, baseline_name)
         
-        # Generate current snapshot
-        current = await self.snapshot_generator.capture_snapshot(self.repo_path)
+        # Generate current snapshot with only changed files
+        current = await self.snapshot_generator.capture_snapshot(
+            self.repo_path,
+            commit_range=commit_range,
+            changed_files=changed_files
+        )
         
         # Detect regression
         regression_detected = False

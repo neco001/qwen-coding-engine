@@ -46,9 +46,12 @@ class DecisionLogSyncEngine:
             time.sleep(0.1)
         
         try:
+            # Defensive: ensure parent directory exists before touch
+            self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+            self.decision_log_path.parent.mkdir(parents=True, exist_ok=True)
             self.lock_path.touch()
         except Exception as e:
-            logger.error(f"Failed to create lock file: {e}")
+            logger.error(f"Failed to create lock file at {self.lock_path}: {e}")
             raise
         return True
 

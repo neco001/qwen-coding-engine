@@ -1,5 +1,79 @@
 # CHANGELOG
 
+## SOS Sync - 2026-04-11 18:59:07
+
+## [2026-04-11 18:56:44] 096f6e58-d2a0-458f-bde5-49c007cf5091
+
+**Task**: Fix snapshot storage location to use .anti_degradation/snapshots from config
+
+**Advice**: FunctionalSnapshotGenerator.save_snapshot() and load_snapshot() use hardcoded '.snapshots' path (lines 680, 700) instead of reading storage_dir from AntiDegradationConfig (line 57). This causes snapshots to be saved in wrong location. Fix by: (1) Add storage_dir parameter to FunctionalSnapshotGenerator.__init__(), (2) Update save_snapshot() and load_snapshot() to use config-based path, (3) Update QwenDiffAuditTool and PreCommitHook to load config and pass storage_dir, (4) Migrate existing snapshots from .snapshots/ to .anti_degradation/snapshots/
+
+---
+
+## 2026-04-11 18:59 - 73735cea-d502-4f06-848f-c2ae60d055e4
+
+**Task**: Implement fix for snapshot storage location in src/graph/snapshot.py:
+
+1. Update FunctionalSnapshotGenerator.__init__() to accept optional storage_dir parameter
+2. Import get_config from qwen_mcp.anti
+
+**Status**: ✅ Completed
+
+---
+
+
+## SOS Sync - 2026-04-10 22:18:11
+
+## [2026-04-10 22:11:58] b5e595af-8949-4393-acc6-d85277225af8
+
+**Task**: T8: Optimize FunctionalSnapshotGenerator.capture_snapshot() to use git diff for file selection
+
+**Advice**: Add _get_changed_files() method to FunctionalSnapshotGenerator that uses git diff --name-only to get only changed Python files. Modify capture_snapshot() signature to accept commit_range and changed_files parameters. Fallback to rglob if no files changed or git fails.
+
+---
+
+## [2026-04-10 22:12:06] fcd7e99c-4160-47c8-bd66-84cb3a10e869
+
+**Task**: T9: Add parallel processing with asyncio.gather for file snapshots
+
+**Advice**: Add _capture_file_snapshot_async() helper method to FunctionalSnapshotGenerator. Refactor capture_snapshot() to use asyncio.gather() for parallel file processing instead of sequential loop. This will provide 4x speedup for large file sets.
+
+---
+
+## [2026-04-10 22:12:15] 475ef705-4a2c-4ca7-b205-c4095d233cce
+
+**Task**: T10: Optimize _generate_content_hashes() to only hash changed files
+
+**Advice**: Modify _generate_content_hashes() signature to accept changed_files parameter. When changed_files is provided, only hash those files instead of scanning all files with glob patterns. This reduces content hash generation from ~30s to ~3s for typical changes.
+
+---
+
+## [2026-04-10 22:12:23] 00d85a74-48b1-4ea7-9f35-3861ec1dd24d
+
+**Task**: T11: Update qwen_diff_audit to pass changed files to capture_snapshot
+
+**Advice**: Update QwenDiffAuditTool.audit_diff() to extract changed files from GitDiffResult and pass them to snapshot_generator.capture_snapshot(). Also update qwen_diff_audit() wrapper function to support the changed_files parameter flow.
+
+---
+
+## [2026-04-10 22:12:31] 87e79cef-c7f1-4dc6-b0a9-a280a1fe6a93
+
+**Task**: T12: Test optimized snapshot capture performance
+
+**Advice**: Test the optimized FunctionalSnapshotGenerator with git diff integration and parallel processing. Verify that snapshot capture completes in <10s for typical changes (1-5 files) and <60s for larger changes (10-20 files). Compare before/after performance metrics.
+
+---
+
+## 2026-04-10 22:18 - 8ad48368-ed9d-4fad-b8ed-9fbfebebc1a0
+
+**Original Task**: T8: Optimize FunctionalSnapshotGenerator.capture_snapshot() to use git diff for file selection  
+**Decision ID**: `b5e595af-8949-4393-acc6-d85277225af8` → `8ad48368-ed9d-4fad-b8ed-9fbfebebc1a0`
+
+**Status**: ✅ Completed
+
+---
+
+
 ## 2026-04-10 14:39 - a5145df9-86f6-4e11-b44c-ba1c7e5af956
 
 **Task**: Create production blocking components for the Anti-Degradation System.
