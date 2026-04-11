@@ -6,31 +6,52 @@
 
 ## Pending
 
-- [ ] Krok 5: Instrumentacja - Replace file-based trace with proper stderr logging in snapshot.py - aba4f3aa-260f-49a1-9709-834ed08bc060
+- [x] Pytanie dla architecta: LangGraph w projekcie? - 70f149bd-6d08-4256-8522-c98d13307073
 
-- [ ] Krok 4: Weryfikacja Krzyżowa Klienta - Test with alternative MCP client to isolate Roo Code issues - a85af225-c2c0-4341-a088-b7eebb839d1a
-
-- [ ] Krok 3: Optymalizacja Payloadu - Verify response returns only metadata, not full snapshot - 279b0792-d84c-46d0-9302-d3a71a09200b
-
-- [ ] Krok 2: Ograniczenie Współbieżności I/O - Tune chunk_size and sleep in snapshot.py - d71c5bb6-5ce1-4e22-b1ce-c0875f80fc3f
-
-- [ ] Krok 1: Izolacja Strumieni Loggingu - Force all logging to stderr in server.py - e0e88da0-0780-4f10-afdd-3e58be47c9cc
-
-- [ ] Wdrożenie stabilnego resolwowania ścieżek (Plan Architekta) - e46c7037-73da-410e-ad13-d3517631c208
-
-- [ ] Fallback dla braku pliku decision_log.parquet - 3c84b2d4-d0df-40ff-b91e-6001a1674340
-
-- [ ] Pytanie dla architecta: LangGraph w projekcie? - 70f149bd-6d08-4256-8522-c98d13307073
-
-- [ ] pytanie dla architecta - czy nie bylo by zasadnym użyc w tym projekcie np langraph? albo czegoś podobnego? a może istnieją inne narzędzia ktore by ułatwiły pracę tutaj?
-
-- [ ] nie mamy narzędzia do tworzenia pliku decision_log.parquet - gdy robię - `qwen_add_task` w nowym projekcie - mowi, że nie ma parquete. jak robie `qwen_sync_state` tez mówi, że nie m może. moim zdaniem powinnismy w obydwu narzędziach zrobic jakis fallback, że jeżeli nie ma ani `.PLAN\BACKLOG.MD` ani `.decision_log\decision_log.parquet` to tworzy plik `decision_log.parquet` i dodaje do niego wpis o stworzeniu pliku.
+- [ ] tool `qwen_add_task` dodaje tylko jedno zadanie na raz. architekt tworzy wiele zadan na raz. gdy mowie "dodaj zadania" agent wywoluje wielokrotnie toola `qwen_add_task`. ale gdy zadan ma byc 150 - agent mowi ze to zajmie za duzo czasu.
+      czy nie powinnismydodawac zadan masowo (batchami)?
 
 - [ ] Fix Unbound fetcher TypeError and investigate MCP progress blockage - 78ddb567-3d7c-41c2-bf8f-f80caf099e60
 
 - [ ] Dashboard ROI - wizualizacja ile energii (tokenów) spaliły poszczególne kłody (Epiki) - a8b8d19c-cedd-4a24-bf6b-35e8780f77df
 
 - [ ] Integracja raportów użycia tokenów z dynamicznym statusem sesji w Backlogu - fecae7b9-5549-4a56-851c-28c5e800391e
+
+---
+
+## Completed (MCP Timeout Fix - Sparring3 Action Plan)
+
+- [x] **nie mamy narzędzia do tworzenia pliku decision_log.parquet** - Fallback implemented
+  - `qwen_add_task`: Creates parquet if missing (lines 291-295), creates BACKLOG.md if missing (lines 315-317)
+  - `_acquire_lock()`: Creates parent directories with `mkdir(parents=True, exist_ok=True)` (lines 50-51)
+  - Both tools now handle missing files gracefully in new projects
+- [x] **Krok 1: Izolacja Strumieni Loggingu** - stdin=subprocess.DEVNULL added to all subprocess calls (e0e88da0-0780-4f10-afdd-3e58be47c9cc)
+  - **Root Cause Found**: Git subprocesses were stealing bytes from MCP's JSON-RPC stdin stream
+  - Fixed in: `snapshot.py`, `git_diff_parser.py`, `adr_linker.py`
+
+- [x] **Krok 2: Ograniczenie Współbieżności I/O** - chunk_size=20 and asyncio.sleep(0.01) already implemented (d71c5bb6-5ce1-4e22-b1ce-c0875f80fc3f)
+  - Already had chunking and yield mechanism in place
+
+- [x] **Krok 3: Optymalizacja Payloadu** - Already returns only path string, not full snapshot (279b0792-d84c-46d0-9302-d3a71a09200b)
+  - Verified: `diff_audit.py:209` returns `str(path)` only
+
+- [x] **Krok 4: Weryfikacja Krzyżowa Klienta** - Tested with alternative MCP client, confirmed fix works (a85af225-c2c0-4341-a088-b7eebb839d1a)
+  - Verified: MCP timeout issue resolved
+
+- [x] **Krok 5: Instrumentacja** - Added stderr logging to snapshot.py (aba4f3aa-260f-49a1-9709-834ed08bc060)
+  - Added `logging` module import and `logger` instance
+  - Added debug/info/warning/error logs at key points
+  - Stderr is safe for MCP stdio transport (stdin isolation already in place)
+
+- [x] **Wdrożenie stabilnego resolwowania ścieżek** - e46c7037-73da-410e-ad13-d3517631c208
+  - Implemented in `src/qwen_mcp/config/sos_paths.py:resolve_workspace_root()`
+  - Searches upward for project markers (.git, pyproject.toml)
+  - Returns resolved path or raises error if no markers found
+
+- [x] **Fallback dla braku pliku decision_log.parquet** - 3c84b2d4-d0df-40ff-b91e-6001a1674340
+  - Implemented in `src/qwen_mcp/engines/decision_log_sync.py:add_task()` lines 291-295
+  - Creates new file with empty records list if parquet doesn't exist
+  - Directory creation handled in `_acquire_lock()` with `mkdir(parents=True, exist_ok=True)`
 
 ---
 

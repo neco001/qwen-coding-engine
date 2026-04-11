@@ -16,7 +16,7 @@ from datetime import datetime
 import pyarrow as pa
 import pyarrow.parquet as pq
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import tempfile
 
 logger = logging.getLogger(__name__)
@@ -360,6 +360,211 @@ class DecisionLogSyncEngine:
         
         logger.info(f"Added task '{task_name}' with decision_id {decision_id} to BACKLOG.md and parquet")
         return decision_id
+
+    async def add_tasks(
+        self,
+        tasks: List[Dict[str, Any]],
+        backlog_path: Path,
+        workspace_root: Optional[str] = None,
+        session_id: str = "decision_log_manual",
+        decision_type: str = "manual_task",
+        chunk_size: int = 20,
+        user_approval: bool = True,
+        adr_status: Optional[str] = None,
+        adr_context: Optional[str] = None,
+        adr_consequences: Optional[str] = None,
+        adr_alternatives: Optional[str] = None,
+        linked_code_nodes: Optional[List[str]] = None,
+        depends_on_adr: Optional[List[str]] = None
+    ) -> List[str]:
+        """
+        Add multiple tasks in batch with chunking to avoid MCP timeout.
+        
+        Args:
+            tasks: List of task dictionaries with keys:
+                - task_name (required): Name of the task
+                - advice (required): Agentic advice for the task
+                - complexity (optional): Task complexity, default "medium"
+                - tags (optional): List of tags
+                - risk_score (optional): Risk score, default 0.0
+            backlog_path: Path to BACKLOG.md
+            workspace_root: Optional workspace root path
+            session_id: Session identifier
+            decision_type: Type of decision record
+            chunk_size: Number of tasks to process per chunk
+            user_approval: Whether user has approved the tasks
+            adr_status: ADR status if applicable
+            adr_context: ADR context if applicable
+            adr_consequences: ADR consequences if applicable
+            adr_alternatives: ADR alternatives if applicable
+            linked_code_nodes: List of linked code nodes
+            depends_on_adr: List of dependent ADR IDs
+            
+        Returns:
+            List of decision_ids for all added tasks
+        """
+        if not tasks:
+            return []
+        
+        all_decision_ids: List[str] = []
+        all_records: List[Dict[str, Any]] = []
+        
+        # Process tasks in chunks to avoid MCP timeout
+        for i in range(0, len(tasks), chunk_size):
+            chunk = tasks[i:i + chunk_size]
+            chunk_records = []
+            chunk_decision_ids = []
+            
+            for task in chunk:
+                task_name = task.get("task_name")
+                advice = task.get("advice")
+                
+                if not task_name or not advice:
+                    logger.warning(f"Skipping task missing required fields: {task}")
+                    continue
+                
+                complexity = task.get("complexity", "medium")
+                tags = task.get("tags")
+                risk_score = task.get("risk_score", 0.0)
+                
+                # Generate decision ID and timestamp
+                decision_id = str(uuid.uuid4())
+                timestamp = datetime.now()
+                
+                # Create decision record with same schema as add_task
+                record = {
+                    "decision_id": decision_id,
+                    "timestamp": timestamp,
+                    "session_id": session_id,
+                    "decision_type": decision_type,
+                    "task_type": "pending",
+                    "complexity": complexity,
+                    "tokens_used": 0,
+                    "content": f"Task: {task_name}",
+                    "tags": tags or [],
+                    "backlog_ref": task_name,
+                    "context_version": "1.0",
+                    "patch_applied": False,
+                    "agentic_advice": advice,
+                    "risk_score": float(risk_score),
+                    "validator_triggers": [],
+                    "user_approval": user_approval,
+                    "rationale": f"Batch added task: {task_name}",
+                    "adr_status": adr_status,
+                    "adr_context": adr_context,
+                    "adr_consequences": adr_consequences,
+                    "adr_alternatives": adr_alternatives,
+                    "linked_code_nodes": linked_code_nodes or [],
+                    "depends_on_adr": depends_on_adr or []
+                }
+                
+                chunk_records.append(record)
+                chunk_decision_ids.append(decision_id)
+            
+            # Write chunk atomically with lock
+            if chunk_records:
+                def write_chunk():
+                    lock = self._acquire_lock(timeout=5)
+                    try:
+                        # Read existing or create empty
+                        if self.decision_log_path.exists():
+                            table = pq.read_table(str(self.decision_log_path))
+                            records = table.to_pylist()
+                        else:
+                            records = []
+                        
+                        # Append chunk records
+                        records.extend(chunk_records)
+                        
+                        # Atomic write using tempfile + os.replace
+                        from decision_log.decision_schema import DECISION_LOG_SCHEMA
+                        fd, temp_path = tempfile.mkstemp(suffix=".parquet", dir=str(self.decision_log_path.parent))
+                        os.close(fd)
+                        updated_table = pa.Table.from_pylist(records, schema=DECISION_LOG_SCHEMA)
+                        pq.write_table(updated_table, temp_path)
+                        os.replace(temp_path, str(self.decision_log_path))
+                    finally:
+                        self._release_lock()
+                
+                await asyncio.to_thread(write_chunk)
+                
+                all_decision_ids.extend(chunk_decision_ids)
+                all_records.extend(chunk_records)
+                
+                logger.info(f"Added {len(chunk_records)} tasks in chunk ({i // chunk_size + 1})")
+                
+                # Small delay between chunks to avoid timeout
+                if i + chunk_size < len(tasks):
+                    await asyncio.sleep(0.1)
+        
+        # Update BACKLOG.md once at the end with all tasks
+        if all_records:
+            await self._add_tasks_to_backlog(all_records, backlog_path)
+        
+        return all_decision_ids
+
+    async def _add_tasks_to_backlog(
+        self,
+        records: List[Dict[str, Any]],
+        backlog_path: Path
+    ) -> None:
+        """
+        Update BACKLOG.md with multiple tasks at once.
+        
+        Args:
+            records: List of decision records to add to backlog
+            backlog_path: Path to BACKLOG.md file
+        """
+        if not records:
+            return
+        
+        try:
+            # Read existing backlog content or create new
+            if not backlog_path.exists():
+                backlog_path.parent.mkdir(parents=True, exist_ok=True)
+                backlog_content = "# BACKLOG\n\n## Pending\n\n"
+            else:
+                with open(backlog_path, "r", encoding="utf-8") as f:
+                    backlog_content = f.read()
+            
+            # Find "## Pending" section
+            pending_match = re.search(r'^## Pending\s*$', backlog_content, re.MULTILINE)
+            if not pending_match:
+                # Create Pending section
+                backlog_content += "\n## Pending\n\n"
+                insert_pos = len(backlog_content)
+            else:
+                insert_pos = pending_match.end()
+            
+            # Generate task entries
+            tasks_content = ""
+            for record in records:
+                task_name = record.get("backlog_ref", "Unknown Task")
+                decision_id = record.get("decision_id", "unknown")
+                
+                # Sanitize task_name
+                safe_name = task_name.replace('\n', ' ').replace('\r', ' ')[:200]
+                tasks_content += f"- [ ] {safe_name} - {decision_id}\n"
+            
+            # Insert tasks after ## Pending
+            new_content = backlog_content[:insert_pos] + "\n" + tasks_content + backlog_content[insert_pos:]
+            
+            # Atomic write
+            fd, tmp_path = tempfile.mkstemp(suffix=".md", dir=str(backlog_path.parent))
+            try:
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    f.write(new_content)
+                os.replace(tmp_path, str(backlog_path))
+            except Exception:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                raise
+            
+            logger.info(f"Updated BACKLOG.md with {len(records)} tasks")
+            
+        except Exception as e:
+            logger.error(f"Failed to update BACKLOG.md: {e}")
+            raise
 
     async def log_completed_task(
         self,

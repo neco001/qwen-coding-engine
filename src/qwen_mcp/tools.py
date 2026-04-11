@@ -780,20 +780,68 @@ async def add_task_to_backlog(
         return f"❌ Invalid input: {e}"
     except Exception as e:
         return f"❌ Failed to add task: {e}"
-        if result:
-            return f"✅ SOS insight {decision_id} applied to BACKLOG.md"
-        return f"❌ Failed to apply insight {decision_id}"
+
+
+async def add_tasks_to_backlog_batch(
+    tasks: List[Dict[str, Any]],
+    workspace_root: str,
+    session_id: str = "sos_manual",
+    decision_type: str = "manual_task",
+    chunk_size: int = 20
+) -> str:
+    """
+    Add multiple tasks from natural language to BACKLOG.md and decision_log.parquet.
     
-    # Scan for pending insights
-    pending = await engine.scan_advices()
-    if not pending:
-        return "No pending SOS insights found"
+    This is the batch version of add_task_to_backlog for handling large task lists.
+    Processes tasks in chunks to avoid MCP timeout.
     
-    output = "## 📋 Pending SOS Insights\n\n"
-    for item in pending[:10]:  # Limit to 10 for readability
-        output += f"- **{item.get('decision_id', 'unknown')}**: {item.get('agentic_advice', '')[:100]}...\n"
+    Args:
+        tasks: List of task dictionaries with keys:
+            - task_name (required): Human-readable task name
+            - advice (required): The agentic advice/recommendation
+            - complexity (optional): Task complexity (default: "medium")
+            - tags (optional): Tags list
+            - risk_score (optional): Risk assessment (default: 0.0)
+        workspace_root: Workspace root path
+        session_id: Session identifier (default: "sos_manual")
+        decision_type: Type of decision (default: "manual_task")
+        chunk_size: Number of tasks per batch (default: 20)
     
-    return output
+    Returns:
+        Confirmation message with count of added tasks
+    """
+    from pathlib import Path
+    from qwen_mcp.engines.decision_log_sync import DecisionLogSyncEngine
+    
+    if not tasks:
+        return "❌ No tasks provided"
+    
+    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(workspace_root)
+    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(workspace_root)
+    
+    engine = DecisionLogSyncEngine(decision_log_path)
+    
+    try:
+        decision_ids = await engine.add_tasks(
+            tasks=tasks,
+            backlog_path=backlog_path,
+            workspace_root=workspace_root,
+            session_id=session_id,
+            decision_type=decision_type,
+            chunk_size=chunk_size
+        )
+        
+        # Format response
+        ids_preview = decision_ids[:5]
+        ids_str = ", ".join(ids_preview)
+        if len(decision_ids) > 5:
+            ids_str += f"... (+{len(decision_ids) - 5} more)"
+        
+        return f"✅ Added {len(decision_ids)} tasks to BACKLOG.md\n\nDecision IDs: {ids_str}"
+    except ValueError as e:
+        return f"❌ Invalid input: {e}"
+    except Exception as e:
+        return f"❌ Failed to add tasks: {e}"
 
 async def list_available_models() -> str:
     client = DashScopeClient()

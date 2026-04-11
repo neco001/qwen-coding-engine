@@ -7,12 +7,16 @@ import ast
 import asyncio
 import hashlib
 import json
+import logging
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Set, Tuple
 from qwen_mcp.anti_degradation_config import get_config
+
+# Module-level logger - writes to stderr, safe for MCP stdio transport
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -70,11 +74,14 @@ class FunctionalSnapshotGenerator:
         """Check if git is available in environment."""
         if self._git_available is not None:
             return self._git_available
+        logger.debug("Checking git availability")
         try:
             subprocess.run(['git', '--version'], capture_output=True, check=True, timeout=5, stdin=subprocess.DEVNULL)
             self._git_available = True
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+            logger.debug("Git is available")
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
             self._git_available = False
+            logger.warning(f"Git not available: {e}")
         return self._git_available
     
     def _get_changed_files(
@@ -91,7 +98,9 @@ class FunctionalSnapshotGenerator:
         Returns:
             List of changed Python file paths
         """
+        logger.debug(f"Getting changed files for commit_range={commit_range}")
         if not self._check_git_available():
+            logger.debug("Git not available, returning all .py files")
             return list(project_dir.rglob("*.py"))
         
         try:
@@ -105,6 +114,7 @@ class FunctionalSnapshotGenerator:
             )
             
             if result.returncode != 0:
+                logger.warning(f"Git diff returned {result.returncode}, falling back to all .py files")
                 return list(project_dir.rglob("*.py"))
             
             changed_files = [
@@ -113,9 +123,11 @@ class FunctionalSnapshotGenerator:
                 if f.endswith(".py") and (project_dir / f).exists()
             ]
             
+            logger.debug(f"Found {len(changed_files)} changed .py files")
             return changed_files if changed_files else list(project_dir.rglob("*.py"))
             
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
+            logger.error(f"Error getting changed files: {e}")
             return list(project_dir.rglob("*.py"))
     
     def _get_tracked_files(
@@ -137,7 +149,9 @@ class FunctionalSnapshotGenerator:
         Returns:
             List of Python file paths respecting git ignore rules
         """
+        logger.debug(f"Getting tracked files with pattern={file_pattern}")
         if not self._check_git_available():
+            logger.debug("Git not available, returning all files matching pattern")
             return list(project_dir.rglob(file_pattern))
         
         try:
@@ -151,6 +165,7 @@ class FunctionalSnapshotGenerator:
             )
             
             if result.returncode != 0:
+                logger.warning(f"Git ls-files returned {result.returncode}, falling back to rglob")
                 return list(project_dir.rglob(file_pattern))
             
             pattern_suffix = file_pattern.lstrip("*.")
@@ -160,9 +175,11 @@ class FunctionalSnapshotGenerator:
                 if f.endswith(f".{pattern_suffix}") and (project_dir / f).exists()
             ]
             
+            logger.debug(f"Found {len(tracked_files)} tracked files")
             return tracked_files if tracked_files else list(project_dir.rglob(file_pattern))
             
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
+            logger.error(f"Error getting tracked files: {e}")
             return list(project_dir.rglob(file_pattern))
     
     async def capture_snapshot(
@@ -183,6 +200,7 @@ class FunctionalSnapshotGenerator:
         Returns:
             Snapshot dictionary with functions, classes, and mappings
         """
+        logger.info(f"Starting snapshot capture for {project_dir}")
         snapshot = {
             "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "project_dir": str(project_dir),
@@ -195,19 +213,24 @@ class FunctionalSnapshotGenerator:
         }
         
         if not project_dir.exists():
+            logger.warning(f"Project directory does not exist: {project_dir}")
             return snapshot
         
         # Find Python files - use changed files if provided
         if changed_files:
             python_files = changed_files
+            logger.debug(f"Using {len(python_files)} pre-computed changed files")
         elif commit_range:
             python_files = await asyncio.to_thread(self._get_changed_files, project_dir, commit_range)
+            logger.debug(f"Found {len(python_files)} changed files for commit_range={commit_range}")
         elif patterns:
             python_files = []
             for pattern in patterns:
                 python_files.extend(project_dir.glob(pattern))
+            logger.debug(f"Found {len(python_files)} files matching patterns")
         else:
             python_files = await asyncio.to_thread(self._get_tracked_files, project_dir)
+            logger.debug(f"Found {len(python_files)} tracked files")
         
         # Parallel file capture with asyncio.gather
         async def _capture_file_snapshot_async(file_path: Path) -> Tuple[Path, Optional[Dict[str, Any]]]:
@@ -380,6 +403,7 @@ class FunctionalSnapshotGenerator:
         Returns:
             Diff dictionary with added, removed, and modified items
         """
+        logger.info("Comparing snapshots")
         diff = {
             "added_functions": [],
             "removed_functions": [],
@@ -699,10 +723,12 @@ class FunctionalSnapshotGenerator:
         snapshots_dir.mkdir(parents=True, exist_ok=True)
         
         snapshot_path = snapshots_dir / f"{name}.json"
+        logger.debug(f"Saving snapshot to {snapshot_path}")
         
         with open(snapshot_path, "w", encoding="utf-8") as f:
             json.dump(snapshot, f, indent=2)
         
+        logger.info(f"Snapshot saved: {snapshot_path}")
         return snapshot_path
     
     def load_snapshot(self, project_dir: Path, name: str = "latest") -> Optional[Dict[str, Any]]:
@@ -716,9 +742,13 @@ class FunctionalSnapshotGenerator:
             Snapshot dictionary or None if not found
         """
         snapshot_path = project_dir / self.storage_dir / f"{name}.json"
+        logger.debug(f"Loading snapshot from {snapshot_path}")
         
         if not snapshot_path.exists():
+            logger.debug(f"Snapshot not found: {snapshot_path}")
             return None
         
         with open(snapshot_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            snapshot = json.load(f)
+        logger.debug(f"Snapshot loaded successfully: {snapshot_path}")
+        return snapshot

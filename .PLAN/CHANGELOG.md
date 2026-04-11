@@ -1,5 +1,202 @@
 # CHANGELOG
 
+## SOS Sync - 2026-04-11 23:57:42
+
+## [2026-04-11 21:09:54] 70f149bd-6d08-4256-8522-c98d13307073
+
+**Task**: Pytanie dla architecta: LangGraph w projekcie?
+
+**Advice**: Analiza zasadności LangGraph.
+
+---
+
+## [2026-04-11 21:09:54] 3c84b2d4-d0df-40ff-b91e-6001a1674340
+
+**Task**: Fallback dla braku pliku decision_log.parquet
+
+**Advice**: Implementacja fallbacku dla .parquet w qwen_add_task i qwen_sync_state.
+
+---
+
+## [2026-04-11 21:46:13] e46c7037-73da-410e-ad13-d3517631c208
+
+**Task**: Wdrożenie stabilnego resolwowania ścieżek (Plan Architekta)
+
+**Advice**: Wdrożyć poprawki ścieżek wg projektu architekta: inteligentne wykrywanie roota projektu (.git/pyproject.toml) oraz defensywne tworzenie katalogów w mechanizmie lockowania.
+
+---
+
+## [2026-04-11 22:19:21] e0e88da0-0780-4f10-afdd-3e58be47c9cc
+
+**Task**: Krok 1: Izolacja Strumieni Loggingu - Force all logging to stderr in server.py
+
+**Advice**: ## Problem
+MCP protocol requires stdout to be used exclusively for JSON-RPC communication. Any logging on stdout breaks the protocol.
+
+## Implementation
+In `src/qwen_mcp/server.py`:
+1. Add explicit logging configuration before FastMCP initialization (line ~45)
+2. Force all handlers to use `stream=sys.stderr`
+3. Verify no `print()` statements in production code
+
+## Code Change
+```python
+# After imports, before logger = logging.getLogger(__name__)
+import logging
+import sys
+
+# Force logging to stderr (MCP requirement)
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stderr,  # NEVER stdout - MCP uses stdout for JSON-RPC
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+```
+
+## Verification
+Run server and check that no output appears on stdout before JSON-RPC messages.
+
+---
+
+## [2026-04-11 22:19:35] d71c5bb6-5ce1-4e22-b1ce-c0875f80fc3f
+
+**Task**: Krok 2: Ograniczenie Współbieżności I/O - Tune chunk_size and sleep in snapshot.py
+
+**Advice**: ## Problem
+`asyncio.gather()` on 107 files can starve the event loop, preventing MCP heartbeat handling. The current implementation already has chunking (chunk_size=20) and `asyncio.sleep(0.01)` - this is good but may need tuning.
+
+## Current State (snapshot.py:235-240)
+```python
+chunk_size = 20
+for i in range(0, len(tasks), chunk_size):
+    chunk = tasks[i:i + chunk_size]
+    chunk_results = await asyncio.gather(*chunk, return_exceptions=True)
+    results.extend(chunk_results)
+    await asyncio.sleep(0.01)  # Force yield to let MCP server respond to pings
+```
+
+## Potential Improvements
+1. Reduce chunk_size from 20 to 10 for more frequent yields
+2. Increase sleep from 0.01 to 0.05 for better heartbeat response
+3. Add explicit semaphore for controlled concurrency
+
+## Verification
+Test with MCP client and monitor event loop latency during execution.
+
+---
+
+## [2026-04-11 22:19:49] 279b0792-d84c-46d0-9302-d3a71a09200b
+
+**Task**: Krok 3: Optymalizacja Payloadu - Verify response returns only metadata, not full snapshot
+
+**Advice**: ## Problem
+Returning full snapshot content in JSON-RPC response may exceed stdio buffer limits (64KB on Linux/Unix). The current implementation returns the full path string, but the snapshot itself contains 107 files' data.
+
+## Current State (diff_audit.py:205-209)
+```python
+async def create_baseline_snapshot(self, name: str = "baseline") -> str:
+    """Create a new baseline snapshot."""
+    snapshot = await self.snapshot_generator.capture_snapshot(self.repo_path)
+    path = self.snapshot_generator.save_snapshot(snapshot, self.repo_path, name)
+    return str(path)  # Already returns path only - GOOD!
+```
+
+## Analysis
+The current implementation already returns only the path string, not the full snapshot content. This is correct! The snapshot is saved to disk and only the path is returned via JSON-RPC.
+
+## Potential Issue
+The snapshot file itself may be large, but that's saved to disk, not transmitted via stdio. The current design is already optimized.
+
+## Verification
+Check if any other tools return large payloads. Monitor actual JSON-RPC response size.
+
+---
+
+## [2026-04-11 22:20:03] a85af225-c2c0-4341-a088-b7eebb839d1a
+
+**Task**: Krok 4: Weryfikacja Krzyżowa Klienta - Test with alternative MCP client to isolate Roo Code issues
+
+**Advice**: ## Problem
+Need to isolate whether the timeout issue is specific to Roo Code client or a general MCP server problem.
+
+## Implementation
+1. Test with alternative MCP client (Claude Desktop, mcp-inspector, or raw stdio test)
+2. If alternative client works, issue is in Roo Code client implementation
+3. If alternative client also fails, issue is in server code
+
+## Test Procedure
+```bash
+# Option 1: Use mcp-inspector
+npx @modelcontextprotocol/inspector python -m qwen_mcp.server
+
+# Option 2: Raw stdio test (already done in scratch/test_mcp_stdio.py)
+# This showed SUCCESS in 0.80s
+
+# Option 3: Claude Desktop (if available)
+# Configure MCP server in Claude Desktop settings
+```
+
+## Current Evidence
+The scratch/test_mcp_stdio.py test already passed (0.80s), suggesting the server works correctly when called directly via stdio simulation.
+
+## Verification
+If alternative client works, document Roo Code-specific timeout behavior and recommend client-side configuration changes.
+
+---
+
+## [2026-04-11 22:20:19] aba4f3aa-260f-49a1-9709-834ed08bc060
+
+**Task**: Krok 5: Instrumentacja - Replace file-based trace with proper stderr logging in snapshot.py
+
+**Advice**: ## Problem
+Need visibility into the execution process for future debugging. Currently there's a debug trace function in snapshot.py that writes to a file, but we need proper stderr logging.
+
+## Current State (snapshot.py:186-188)
+```python
+def trace(msg):
+    with open("debug_trace.log", "a") as f:
+        f.write(f"{datetime.now().time()}: {msg}\n")
+```
+
+## Implementation
+1. Replace file-based trace with proper stderr logging
+2. Add timing logs at key points:
+   - Start of capture_snapshot
+   - After file gathering
+   - After asyncio.gather
+   - End of operation
+3. Log snapshot size before returning
+
+## Code Change
+```python
+import logging
+import sys
+
+logger = logging.getLogger(__name__)
+
+# Replace trace() with:
+def trace(msg):
+    logger.info(f"[SNAPSHOT] {msg}")
+```
+
+## Verification
+Run tool and check stderr logs show timing information without polluting stdout.
+
+---
+
+## 2026-04-11 23:57 - 7a654cc9-f300-4065-b666-ece2540e2647
+
+**Task**: Implement the `add_tasks` method (batch version) in `src/qwen_mcp/engines/decision_log_sync.py`. 
+
+The method should be added after the existing `add_task` method (around line 362). It should:
+
+1. Acc
+
+**Status**: ✅ Completed
+
+---
+
+
 ## SOS Sync - 2026-04-11 18:59:07
 
 ## [2026-04-11 18:56:44] 096f6e58-d2a0-458f-bde5-49c007cf5091

@@ -429,6 +429,82 @@ async def qwen_add_task(
 
 
 @mcp.tool()
+async def qwen_add_tasks(
+    tasks: List[Dict[str, Any]],
+    workspace_root: str = ".",
+    session_id: str = "sos_manual",
+    decision_type: str = "manual_task",
+    chunk_size: int = 20,
+    ctx: Context = None
+) -> str:
+    """
+    Add multiple tasks from natural language to BACKLOG.md and decision_log.parquet.
+    
+    This is the batch version of qwen_add_task for handling large task lists.
+    Processes tasks in chunks to avoid MCP timeout.
+    
+    Args:
+        tasks: List of task dictionaries with keys:
+            - task_name (required): Human-readable task name
+            - advice (required): The agentic advice/recommendation
+            - complexity (optional): Task complexity (default: "medium")
+            - tags (optional): Tags list
+            - risk_score (optional): Risk assessment (default: 0.0)
+        workspace_root: Path to workspace root (default: ".")
+        session_id: Session identifier (default: "sos_manual")
+        decision_type: Type of decision (default: "manual_task")
+        chunk_size: Number of tasks per batch write (default: 20)
+        ctx: MCP context for progress reporting
+    
+    Returns:
+        Confirmation message with count of added tasks
+    """
+    await _auto_init_request(ctx, "add_tasks")
+    project_id = _get_tool_session_id(ctx, default_source="add_tasks")
+    
+    # Report progress FIRST
+    if ctx:
+        await ctx.report_progress(
+            progress=0,
+            total=len(tasks) if tasks else 0,
+            message=f"Adding {len(tasks) if tasks else 0} tasks to backlog..."
+        )
+    
+    # Broadcast for UI visibility
+    await get_broadcaster().broadcast_state({
+        "operation": f"Adding {len(tasks) if tasks else 0} tasks to backlog...",
+        "progress": 0.0,
+        "is_live": True
+    }, project_id=project_id)
+    
+    from qwen_mcp.tools import add_tasks_to_backlog_batch
+    
+    result = await add_tasks_to_backlog_batch(
+        tasks=tasks,
+        workspace_root=workspace_root,
+        session_id=session_id,
+        decision_type=decision_type,
+        chunk_size=chunk_size
+    )
+    
+    # Update progress on completion
+    if ctx:
+        await ctx.report_progress(
+            progress=len(tasks) if tasks else 0,
+            total=len(tasks) if tasks else 0,
+            message="Tasks added successfully"
+        )
+    
+    await get_broadcaster().broadcast_state({
+        "operation": "Tasks added to backlog",
+        "progress": 100.0,
+        "is_live": False
+    }, project_id=project_id)
+    
+    return result
+
+
+@mcp.tool()
 async def qwen_refresh_models(ctx: Context = None) -> str:
     """
     🔄 REFRESH MODELS: Syncs model registry with DashScope and HuggingFace.
