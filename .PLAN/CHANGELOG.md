@@ -1,5 +1,47 @@
 # CHANGELOG
 
+## 2026-04-12 22:38 - 1e0906a8-efb9-4a7d-a781-0b3a4a0c2cf6
+
+**Task**: Add progress tracking to McpExecution
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-12 22:38 - 7d67964a-7d4d-4bb0-9261-8308efd5206a
+
+**Task**: Write a function to add two numbers
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-12 22:36 - 83627d6c-7ca6-44a4-bd5c-313aaac2738c
+
+**Task**: Modify the `to_markdown()` method in `src/qwen_mcp/engines/sparring_v2/models.py` (lines 65-136) to include full session content when a `session_store` parameter is provided.
+
+Current implementation o
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-12 22:33 - ffe3900b-da31-4793-9644-b94f5ce56851
+
+**Task**: Modify SparringResponse.to_markdown() to include full session content in the output.
+
+CURRENT PROBLEM:
+- to_markdown() only returns session_id and file path
+- Agent must manually read the session file
+
+**Status**: ✅ Completed
+
+---
+
+
 doc: backlog and changelog update
 
 ## SOS Sync - 2026-04-12 21:20:19

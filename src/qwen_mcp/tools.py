@@ -633,7 +633,7 @@ async def generate_sparring(
     if response.success:
         # Use the updated to_markdown() which includes multi-turn info and session file path
         # Pass the session store's storage directory so agent knows where to find the session file
-        return response.to_markdown(storage_dir=str(session_store.storage_dir))
+        return response.to_markdown(storage_dir=str(session_store.storage_dir), session_store=session_store)
     else:
         return f"❌ Sparring failed: {response.error or response.message}"
 

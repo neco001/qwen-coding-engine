@@ -5,8 +5,11 @@ This module provides the SparringResponse dataclass with factory methods
 for structured responses in the guided sparring UX.
 """
 
-from typing import Optional, Dict, Any
+from typing import TYPE_CHECKING, Optional, Dict, Any
 from dataclasses import dataclass
+
+if TYPE_CHECKING:
+    from qwen_mcp.engines.session_store import SessionStore
 
 
 @dataclass
@@ -62,12 +65,17 @@ class SparringResponse:
             "context_truncated": self.context_truncated
         }
     
-    def to_markdown(self, storage_dir: Optional[str] = None) -> str:
+    def to_markdown(
+        self,
+        storage_dir: Optional[str] = None,
+        session_store: Optional["SessionStore"] = None
+    ) -> str:
         """
         Convert to human-readable markdown for MCP output.
         
         Args:
             storage_dir: Optional session storage directory path to display
+            session_store: Optional SessionStore instance to load full session content
         """
         if not self.success:
             return f"❌ **Error:** {self.error}\n\n{self.message}"
@@ -132,5 +140,73 @@ class SparringResponse:
         if self.next_command:
             lines.append(f"📋 **Command:** `{self.next_command}`")
             lines.append("")
+        
+        # Full session content section (when session_store is provided)
+        if session_store and self.session_id:
+            try:
+                checkpoint = session_store.load(self.session_id)
+                if checkpoint:
+                    lines.append("---")
+                    lines.append("")
+                    lines.append("## 📚 Session Content")
+                    lines.append("")
+                    
+                    # Topic
+                    if checkpoint.topic:
+                        lines.append(f"**Topic:** {checkpoint.topic}")
+                        lines.append("")
+                    
+                    # Context
+                    if checkpoint.context:
+                        lines.append("**Context:**")
+                        lines.append("```")
+                        context_display = checkpoint.context[:1000]
+                        if len(checkpoint.context) > 1000:
+                            context_display += "..."
+                        lines.append(context_display)
+                        lines.append("```")
+                        lines.append("")
+                    
+                    # Roles from checkpoint
+                    if checkpoint.roles:
+                        lines.append("**Roles:**")
+                        if "red_role" in checkpoint.roles:
+                            lines.append(f"   • Red:  \"{checkpoint.roles['red_role']}\"")
+                        if "blue_role" in checkpoint.roles:
+                            lines.append(f"   • Blue: \"{checkpoint.roles['blue_role']}\"")
+                        if "white_role" in checkpoint.roles:
+                            lines.append(f"   • White: \"{checkpoint.roles['white_role']}\"")
+                        lines.append("")
+                    
+                    # Models used
+                    if checkpoint.models:
+                        lines.append("**Models:**")
+                        for model_key, model_value in checkpoint.models.items():
+                            lines.append(f"   • {model_key.replace('_', ' ').title()}: `{model_value}`")
+                        lines.append("")
+                    
+                    # Results from each step
+                    if checkpoint.results:
+                        lines.append("**Step Results:**")
+                        for step_name, step_result in checkpoint.results.items():
+                            lines.append(f"   • **{step_name.title()}:**")
+                            if isinstance(step_result, dict):
+                                for key, value in step_result.items():
+                                    if isinstance(value, str) and len(value) > 200:
+                                        lines.append(f"      - {key}: {value[:200]}...")
+                                    else:
+                                        lines.append(f"      - {key}: {value}")
+                            else:
+                                result_str = str(step_result)[:200]
+                                lines.append(f"      {result_str}...")
+                        lines.append("")
+                    
+                    # Steps completed
+                    if checkpoint.steps_completed:
+                        lines.append(f"**Steps Completed:** {', '.join(checkpoint.steps_completed)}")
+                        lines.append("")
+            except Exception:
+                # Silently fail if checkpoint cannot be loaded
+                pass
         
         return "\n".join(lines)

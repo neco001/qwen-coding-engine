@@ -6,6 +6,8 @@
 
 ## Pending
 
+- [ ] dodaj task: architect podaje kod. czy powinien?
+- [ ] tworzenie session context skutkuje produkcją plikow tmp w katalogu .\.context. a te nie są wymazywane.
 - [x] Snapshot naming convention and auto-selection - f4b59636-2c52-4488-aa32-be6efd91245f
 
 - [x] Pytanie dla architecta: LangGraph w projekcie? - 70f149bd-6d08-4256-8522-c98d13307073
