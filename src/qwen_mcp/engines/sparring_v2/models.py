@@ -185,20 +185,18 @@ class SparringResponse:
                             lines.append(f"   • {model_key.replace('_', ' ').title()}: `{model_value}`")
                         lines.append("")
                     
-                    # Results from each step
+                    # Results from each step - show full content, no truncation
                     if checkpoint.results:
                         lines.append("**Step Results:**")
                         for step_name, step_result in checkpoint.results.items():
                             lines.append(f"   • **{step_name.title()}:**")
                             if isinstance(step_result, dict):
                                 for key, value in step_result.items():
-                                    if isinstance(value, str) and len(value) > 200:
-                                        lines.append(f"      - {key}: {value[:200]}...")
-                                    else:
-                                        lines.append(f"      - {key}: {value}")
+                                    # Show full content without truncation
+                                    lines.append(f"      - {key}: {value}")
                             else:
-                                result_str = str(step_result)[:200]
-                                lines.append(f"      {result_str}...")
+                                # Show full content without truncation
+                                lines.append(f"      {step_result}")
                         lines.append("")
                     
                     # Steps completed
