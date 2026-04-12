@@ -9,7 +9,7 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path
 from datetime import datetime, timezone
 
-from utils.git_diff_parser import GitDiffParser, GitDiffResult
+from qwen_utils.git_diff_parser import GitDiffParser, GitDiffResult
 from graph.snapshot import FunctionalSnapshotGenerator
 from qwen_mcp.anti_degradation_config import get_config
 

@@ -6,8 +6,12 @@
 
 ## Pending
 
+- [x] Rename utils module to qwen_utils to avoid namespace conflicts - bd0cb9b5-6e17-42e8-84b8-5ea51c5a3502
+
 - [ ] dodaj task: architect podaje kod. czy powinien?
 - [ ] tworzenie session context skutkuje produkcją plikow tmp w katalogu .\.context. a te nie są wymazywane.
+- [ ] czy narzędzie `qwen_init_request` jest potrzebne - miało być wywoływane w każdym z narzędzi.
+- [ ] nie działa HUD (wtyczka vsc)
 - [x] Snapshot naming convention and auto-selection - f4b59636-2c52-4488-aa32-be6efd91245f
 
 - [x] Pytanie dla architecta: LangGraph w projekcie? - 70f149bd-6d08-4256-8522-c98d13307073
