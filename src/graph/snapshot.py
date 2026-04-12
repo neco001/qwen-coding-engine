@@ -87,7 +87,8 @@ class FunctionalSnapshotGenerator:
     def _get_changed_files(
         self,
         project_dir: Path,
-        commit_range: str = "HEAD~1..HEAD"
+        commit_range: str = "HEAD~1..HEAD",
+        staged: bool = False
     ) -> List[Path]:
         """Get Python files changed in git diff.
         
@@ -104,8 +105,14 @@ class FunctionalSnapshotGenerator:
             return list(project_dir.rglob("*.py"))
         
         try:
+            diff_args = ["git", "--no-pager", "diff", "--name-only"]
+            if staged:
+                diff_args.append("--cached")
+            else:
+                diff_args.append(commit_range)
+                
             result = subprocess.run(
-                ["git", "--no-pager", "diff", "--name-only", commit_range],
+                diff_args,
                 cwd=project_dir,
                 capture_output=True,
                 text=True,
@@ -187,7 +194,8 @@ class FunctionalSnapshotGenerator:
         project_dir: Path,
         patterns: Optional[List[str]] = None,
         commit_range: Optional[str] = None,
-        changed_files: Optional[List[Path]] = None
+        changed_files: Optional[List[Path]] = None,
+        staged: bool = False
     ) -> Dict[str, Any]:
         """Capture a functional snapshot of a project.
         
@@ -220,9 +228,14 @@ class FunctionalSnapshotGenerator:
         if changed_files:
             python_files = changed_files
             logger.debug(f"Using {len(python_files)} pre-computed changed files")
-        elif commit_range:
-            python_files = await asyncio.to_thread(self._get_changed_files, project_dir, commit_range)
-            logger.debug(f"Found {len(python_files)} changed files for commit_range={commit_range}")
+        elif staged or commit_range:
+            python_files = await asyncio.to_thread(
+                self._get_changed_files, 
+                project_dir, 
+                commit_range or "HEAD~1..HEAD",
+                staged=staged
+            )
+            logger.debug(f"Found {len(python_files)} changed files (staged={staged})")
         elif patterns:
             python_files = []
             for pattern in patterns:
@@ -708,17 +721,92 @@ class FunctionalSnapshotGenerator:
         
         return changes
     
-    def save_snapshot(self, snapshot: Dict[str, Any], project_dir: Path, name: str = "latest") -> Path:
+    @staticmethod
+    def _generate_timestamped_name() -> str:
+        """Generate a timestamped snapshot name in format baseline-YYYYMMDD_HHMMSS using UTC."""
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        return f"baseline-{timestamp}"
+    
+    def list_snapshots(self, project_dir: Path) -> List[Dict[str, Any]]:
+        """
+        List all snapshot files in storage directory.
+        
+        Returns:
+            List of dicts with keys: name, path, timestamp
+            Sorted by timestamp descending (newest first)
+        """
+        snapshots_dir = project_dir / self.storage_dir
+        snapshots = []
+        
+        if not snapshots_dir.exists():
+            return snapshots
+        
+        for snapshot_file in snapshots_dir.glob("*.json"):
+            name = snapshot_file.stem
+            timestamp = None
+            
+            # Try to parse timestamp from filename (baseline-YYYYMMDD_HHMMSS format)
+            if name.startswith("baseline-") and len(name) == 24:
+                try:
+                    timestamp_str = name[9:]  # Remove "baseline-" prefix
+                    timestamp = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    pass
+            
+            # If no timestamp from filename, try to load from snapshot content
+            if timestamp is None:
+                try:
+                    with open(snapshot_file, 'r', encoding='utf-8') as f:
+                        snapshot_data = json.load(f)
+                        if 'timestamp' in snapshot_data:
+                            ts_str = snapshot_data['timestamp']
+                            if isinstance(ts_str, str):
+                                timestamp = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                except (json.JSONDecodeError, KeyError, IOError):
+                    pass
+            
+            snapshots.append({
+                'name': name,
+                'path': str(snapshot_file),
+                'timestamp': timestamp
+            })
+        
+        # Sort by timestamp descending (newest first), None timestamps at end
+        snapshots.sort(
+            key=lambda x: x['timestamp'] if x['timestamp'] else datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True
+        )
+        
+        return snapshots
+    
+    def get_two_newest_snapshots(self, project_dir: Path) -> Optional[Tuple[str, str]]:
+        """
+        Get the two newest snapshot names.
+        
+        Returns:
+            Tuple of (newest_name, second_newest_name) or None if less than 2 snapshots exist
+        """
+        snapshots = self.list_snapshots(project_dir)
+        if len(snapshots) < 2:
+            return None
+        return (snapshots[0]['name'], snapshots[1]['name'])
+    
+    def save_snapshot(self, snapshot: Dict[str, Any], project_dir: Path, name: Optional[str] = "latest") -> Path:
         """Save snapshot to disk.
         
         Args:
             snapshot: Snapshot dictionary
             project_dir: Project root directory
-            name: Snapshot name
+            name: Snapshot name. If "auto" or None, generates timestamped name.
             
         Returns:
             Path to saved snapshot file
         """
+        # Auto-generate timestamped name if "auto" or None
+        if name is None or name == "auto":
+            name = self._generate_timestamped_name()
+        
         snapshots_dir = project_dir / self.storage_dir
         snapshots_dir.mkdir(parents=True, exist_ok=True)
         
@@ -736,13 +824,22 @@ class FunctionalSnapshotGenerator:
         
         Args:
             project_dir: Project root directory
-            name: Snapshot name
+            name: Snapshot name (supports timestamped names like "baseline-20260412_153719")
             
         Returns:
             Snapshot dictionary or None if not found
         """
         snapshot_path = project_dir / self.storage_dir / f"{name}.json"
         logger.debug(f"Loading snapshot from {snapshot_path}")
+        
+        # Support loading by timestamped name (backward compatible)
+        if not snapshot_path.exists():
+            # Try with baseline- prefix if not already present
+            if not name.startswith("baseline-"):
+                alt_path = project_dir / self.storage_dir / f"baseline-{name}.json"
+                if alt_path.exists():
+                    snapshot_path = alt_path
+                    logger.debug(f"Found snapshot with baseline- prefix: {snapshot_path}")
         
         if not snapshot_path.exists():
             logger.debug(f"Snapshot not found: {snapshot_path}")

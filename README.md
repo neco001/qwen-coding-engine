@@ -10,7 +10,7 @@
 
 By offloading heavy architectural planning and raw coding to specialized Qwen models, you stop the "two steps forward, one step back" dance and start delivering finished applications.
 
-**Version:** 1.1.1 | **License:** MIT | **Python:** 3.10+
+**Version:** 1.2.0 | **License:** MIT | **Python:** 3.10+
 
 **[ See the Lachman Protocol Storyboard in action!](./docs/EXAMPLE.md)**
 
@@ -125,7 +125,8 @@ The engine automatically selects the best model for each task via **Qwen-Turbo M
 | **Data** | `qwen_list_files` | **Explorer**: Map project structure. | `kimi-k2.5` |
 | **Context** | `qwen_init_context_tool` | **Initializer**: Generate project context files. | `kimi-k2.5` (Swarm for large projects) |
 | **Context** | `qwen_update_session_context_tool` | **Scribe**: Capture session insights. | N/A |
-| **SOS** | `qwen_add_task` | **Backlog**: Add task to BACKLOG.md + Parquet. | N/A |
+| **SOS** | `qwen_add_task` | **Backlog**: Add single task to BACKLOG.md + Parquet. | N/A |
+| **SOS** | `qwen_add_tasks` | **Batch**: Add multiple tasks (chunk-based). | N/A |
 | **SOS** | `qwen_sync_state` | **Sync**: Apply pending advices to docs. | N/A |
 | **ADR** | `qwen_decision_log_sync` | **SyncEngine**: Parquet-markdown task synchronization. | N/A |
 | **Admin** | `qwen_usage_report`| **Billing**: Token/Cost report from DuckDB. | N/A |
@@ -151,7 +152,8 @@ When `billing_mode="coding_plan"`, the engine uses **ONLY** these models:
 | **ADR** | `qwen_adr_manager` | **ADR Manager** | `qwen3.5-plus` |
 | **Data** | `qwen_read_file` | **Scout** | `kimi-k2.5` |
 | **Context** | `qwen_init_context_tool` | **Initializer** | Swarm (parallel analysis) |
-| **SOS** | `qwen_add_task` | **Backlog** | N/A |
+| **SOS** | `qwen_add_task` | **Backlog** (single) | N/A |
+| **SOS** | `qwen_add_tasks` | **Batch** | N/A |
 | **SOS** | `qwen_sync_state` | **Sync** | N/A |
 
 > **Important**: In `coding_plan` mode, sparring tools use `glm-5` for audit tasks, and `kimi-k2.5` for scouting.
@@ -359,9 +361,15 @@ Commit → Pre-commit Hook → Snapshot → Diff Audit → MCP Tools → CI Gate
 |------|---------|-------|
 | `qwen_diff_audit_tool` | Audit git diff for regressions | `from_ref="HEAD~1", to_ref="HEAD"` |
 | `qwen_diff_audit_staged_tool` | Audit staged changes (pre-commit) | `baseline_snapshot="latest"` |
-| `qwen_create_baseline_tool` | Create baseline snapshot | `name="baseline"` |
-| `qwen_compare_snapshots_tool` | Compare two snapshots | `snapshot1_name, snapshot2_name` |
+| `qwen_create_baseline_tool` | Create baseline snapshot | `name="auto"` → `baseline-YYYYMMDD_HHMMSS.json` |
+| `qwen_compare_snapshots_tool` | Compare two snapshots | `snapshot1_name="auto", snapshot2_name="auto"` → auto-selects two newest |
 | `qwen_audit_history_tool` | Get audit history | `limit=100` |
+
+**Snapshot Naming Convention (v1.2.0):**
+- Snapshots are named `baseline-YYYYMMDD_HHMMSS.json` (UTC timestamp)
+- `qwen_create_baseline_tool()` auto-generates timestamped name when `name="auto"`
+- `qwen_compare_snapshots_tool()` auto-selects two newest snapshots when names are `"auto"`
+- Explicit names still supported for backward compatibility
 
 ### Configuration
 

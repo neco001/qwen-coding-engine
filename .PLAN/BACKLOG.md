@@ -7,9 +7,14 @@
 ## Pending
 
 - [x] Pytanie dla architecta: LangGraph w projekcie? - 70f149bd-6d08-4256-8522-c98d13307073
+  - **Answer**: LangGraph not needed - current architecture with specialized engines (CoderV2, SparringV2, Swarm) is sufficient for MCP server use case
 
-- [ ] tool `qwen_add_task` dodaje tylko jedno zadanie na raz. architekt tworzy wiele zadan na raz. gdy mowie "dodaj zadania" agent wywoluje wielokrotnie toola `qwen_add_task`. ale gdy zadan ma byc 150 - agent mowi ze to zajmie za duzo czasu.
-      czy nie powinnismydodawac zadan masowo (batchami)?
+- [x] tool `qwen_add_task` dodaje tylko jedno zadanie na raz - **SOLVED v1.2.0**
+  - Implemented `qwen_add_tasks` batch tool in server.py (lines 431-504)
+  - Added `add_tasks()` method in decision_log_sync.py (lines 364-504)
+  - Added `add_tasks_to_backlog_batch()` in tools.py (lines 785-844)
+  - Chunk-based processing (default: 20 tasks per chunk) to avoid MCP timeout
+  - Full test coverage in tests/test_batch_tasks.py (8 tests passing)
 
 - [ ] Fix Unbound fetcher TypeError and investigate MCP progress blockage - 78ddb567-3d7c-41c2-bf8f-f80caf099e60
 

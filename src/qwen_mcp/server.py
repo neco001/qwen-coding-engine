@@ -865,14 +865,14 @@ async def qwen_diff_audit_staged_tool(
 
 @mcp.tool()
 async def qwen_create_baseline_tool(
-    name: str = "baseline",
+    name: Optional[str] = "auto",
     workspace_root: str = "."
 ) -> str:
     """
     Create a new baseline snapshot for Anti-Degradation System.
     
     Args:
-        name: Snapshot name (default: "baseline")
+        name: Snapshot name. If "auto" or None, generates timestamped name (baseline-YYYYMMDD_HHMMSS).
         workspace_root: Path to workspace root
         
     Returns:
@@ -882,16 +882,16 @@ async def qwen_create_baseline_tool(
 
 @mcp.tool()
 async def qwen_compare_snapshots_tool(
-    snapshot1_name: str,
-    snapshot2_name: str,
+    snapshot1_name: Optional[str] = "auto",
+    snapshot2_name: Optional[str] = "auto",
     workspace_root: str = "."
 ) -> str:
     """
     Compare two snapshots for regression detection.
     
     Args:
-        snapshot1_name: First snapshot name
-        snapshot2_name: Second snapshot name
+        snapshot1_name: First snapshot name. If "auto", selects newest snapshot.
+        snapshot2_name: Second snapshot name. If "auto", selects second newest snapshot.
         workspace_root: Path to workspace root
         
     Returns:

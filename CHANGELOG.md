@@ -2,6 +2,27 @@
 
 ## [Full changelog](./.PLAN/CHANGELOG.md)
 
+## 1.2.0 Release
+
+**Date:** 2026-04-12
+
+### New Features
+
+- **Batch Task Creation (`qwen_add_tasks`)**: Add multiple tasks to BACKLOG.md and decision_log.parquet in a single call
+  - New MCP tool `qwen_add_tasks` in [`server.py`](src/qwen_mcp/server.py:431-504)
+  - New function `add_tasks_to_backlog_batch()` in [`tools.py`](src/qwen_mcp/tools.py:785-844)
+  - New method `add_tasks()` in [`decision_log_sync.py`](src/qwen_mcp/engines/decision_log_sync.py:364-504)
+  - Chunk-based processing (default: 20 tasks per chunk) to avoid MCP timeout
+  - Full test coverage in [`tests/test_batch_tasks.py`](tests/test_batch_tasks.py) (8 tests passing)
+  - Handles new projects (creates files if missing) and preserves existing records
+
+### Changes
+
+- Test files moved from root directory to `tests/` for better organization
+- BACKLOG.md updated with completed batch task creation task
+
+---
+
 ## 1.1.1 Release
 
 **Date:** 2026-04-09

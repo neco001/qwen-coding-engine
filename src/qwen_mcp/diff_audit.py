@@ -35,6 +35,7 @@ class QwenDiffAuditTool:
         to_ref: str = "HEAD",
         baseline_snapshot: Optional[str] = None,
         shadow_mode: bool = False,
+        staged: bool = False,
     ) -> Dict[str, Any]:
         """
         Audit git diff for potential regressions.
@@ -51,13 +52,13 @@ class QwenDiffAuditTool:
         start_time = datetime.now(timezone.utc)
         
         # Get git diff
-        diff_result = self.git_parser.get_diff(from_ref, to_ref)
+        diff_result = self.git_parser.get_diff(from_ref, to_ref, staged=staged)
         
         # Analyze change impact
         impact_analysis = self.git_parser.analyze_change_impact(diff_result)
         
         # Extract changed files from diff_result for optimized snapshot capture
-        commit_range = f"{from_ref}..{to_ref}"
+        commit_range = None if staged else f"{from_ref}..{to_ref}"
         changed_files = [
             self.repo_path / file_diff.file_path
             for file_diff in diff_result.files
@@ -72,7 +73,8 @@ class QwenDiffAuditTool:
         current = await self.snapshot_generator.capture_snapshot(
             self.repo_path,
             commit_range=commit_range,
-            changed_files=changed_files
+            changed_files=changed_files,
+            staged=staged
         )
         
         # Detect regression
@@ -126,9 +128,8 @@ class QwenDiffAuditTool:
     async def audit_staged(self, baseline_snapshot: Optional[str] = None) -> Dict[str, Any]:
         """Audit staged changes (for pre-commit hook)."""
         return await self.audit_diff(
-            from_ref="HEAD",
-            to_ref="INDEX",
             baseline_snapshot=baseline_snapshot,
+            staged=True
         )
     
     def _generate_recommendation(
@@ -202,21 +203,47 @@ class QwenDiffAuditTool:
         
         return audits[-limit:]
     
-    async def create_baseline_snapshot(self, name: str = "baseline") -> str:
-        """Create a new baseline snapshot."""
+    async def create_baseline_snapshot(self, name: Optional[str] = "auto") -> str:
+        """Create a new baseline snapshot.
+        
+        Args:
+            name: Snapshot name. If "auto" or None, generates timestamped name.
+            
+        Returns:
+            Path to saved snapshot file
+        """
         snapshot = await self.snapshot_generator.capture_snapshot(self.repo_path)
         path = self.snapshot_generator.save_snapshot(snapshot, self.repo_path, name)
         return str(path)
     
     async def compare_snapshots(
-        self, snapshot1_name: str, snapshot2_name: str
+        self, snapshot1_name: Optional[str] = "auto", snapshot2_name: Optional[str] = "auto"
     ) -> Dict[str, Any]:
-        """Compare two snapshots."""
+        """Compare two snapshots.
+        
+        Args:
+            snapshot1_name: First snapshot name. If "auto", selects newest.
+            snapshot2_name: Second snapshot name. If "auto", selects second newest.
+            
+        Returns:
+            Comparison result with regression alerts
+        """
+        # Auto-select two newest snapshots if "auto" specified
+        if snapshot1_name == "auto" or snapshot2_name == "auto":
+            newest = self.snapshot_generator.get_two_newest_snapshots(self.repo_path)
+            if newest is None:
+                return {"error": "Less than 2 snapshots available for auto-comparison"}
+            
+            if snapshot1_name == "auto":
+                snapshot1_name = newest[0]
+            if snapshot2_name == "auto":
+                snapshot2_name = newest[1]
+        
         snap1 = self.snapshot_generator.load_snapshot(self.repo_path, snapshot1_name)
         snap2 = self.snapshot_generator.load_snapshot(self.repo_path, snapshot2_name)
         
         if not snap1 or not snap2:
-            return {"error": "One or both snapshots not found"}
+            return {"error": f"One or both snapshots not found: {snapshot1_name}, {snapshot2_name}"}
         
         diff = await self.snapshot_generator.compare_snapshots(snap1, snap2)
         alerts = await self.snapshot_generator.detect_regression(diff)
@@ -225,6 +252,7 @@ class QwenDiffAuditTool:
             "snapshot1": snapshot1_name,
             "snapshot2": snapshot2_name,
             "regression_detected": len(alerts) > 0,
+            "alerts_count": len(alerts),
             "alerts": alerts,
             "diff": diff,
         }
@@ -276,14 +304,14 @@ async def qwen_diff_audit_staged(
 
 
 async def qwen_create_baseline(
-    name: str = "baseline",
+    name: Optional[str] = "auto",
     workspace_root: str = ".",
 ) -> str:
     """
     Create a new baseline snapshot for Anti-Degradation System.
     
     Args:
-        name: Snapshot name (default: "baseline")
+        name: Snapshot name. If "auto" or None, generates timestamped name (baseline-YYYYMMDD_HHMMSS).
         workspace_root: Path to workspace root
         
     Returns:
@@ -294,16 +322,16 @@ async def qwen_create_baseline(
 
 
 async def qwen_compare_snapshots(
-    snapshot1_name: str,
-    snapshot2_name: str,
+    snapshot1_name: Optional[str] = "auto",
+    snapshot2_name: Optional[str] = "auto",
     workspace_root: str = ".",
 ) -> Dict[str, Any]:
     """
     Compare two snapshots for regression detection.
     
     Args:
-        snapshot1_name: First snapshot name
-        snapshot2_name: Second snapshot name
+        snapshot1_name: First snapshot name. If "auto", selects newest snapshot.
+        snapshot2_name: Second snapshot name. If "auto", selects second newest snapshot.
         workspace_root: Path to workspace root
         
     Returns:
