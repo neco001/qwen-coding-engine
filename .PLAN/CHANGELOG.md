@@ -1,5 +1,108 @@
 # CHANGELOG
 
+doc: backlog and changelog update
+
+## SOS Sync - 2026-04-12 21:20:19
+
+## [2026-04-12 21:16:51] f4b59636-2c52-4488-aa32-be6efd91245f
+
+**Task**: Snapshot naming convention and auto-selection
+
+**Advice**: ## Problem
+Current snapshot naming is inconsistent (e.g., 'baseline', 'batch-task-feature', 'final_perf_test_devnull', 'baseline_20260412'). Users cannot easily identify which snapshots to compare, and manual selection is error-prone.
+
+## Proposed Solution
+
+### 1. Standardized Naming Convention
+
+**Format:** `baseline-YYYYMMDD_HHMMSS.json`
+
+- Example: `baseline-20260412_153719.json`
+- Timestamp in UTC for consistency
+- Generated automatically when creating baseline
+
+### 2. Auto-Selection Logic for `qwen_compare_snapshots_tool`
+
+**Default behavior (no parameters):**
+
+- Automatically select two newest snapshots by timestamp
+- Compare them and return results
+
+**Explicit selection (parameters provided):**
+
+- Allow user to specify snapshot1_name and snapshot2_name
+- Validate both snapshots exist before comparison
+
+### 3. Implementation Changes
+
+#### A. `src/graph/snapshot.py` - FunctionalSnapshotGenerator
+
+- Modify `save_snapshot()` to auto-generate timestamped name if name='auto' or None
+- Add `list_snapshots()` method to return sorted list of available snapshots
+- Add `get_two_newest_snapshots()` helper method
+
+#### B. `src/qwen_mcp/diff_audit.py` - QwenDiffAuditTool
+
+- Update `compare_snapshots()` to support auto-selection
+- Add logic to detect 'auto' parameter and select two newest
+
+#### C. `src/qwen_mcp/server.py` - MCP Tool
+
+- Update `qwen_compare_snapshots_tool()` signature:
+  ```python
+  async def qwen_compare_snapshots_tool(
+      snapshot1_name: Optional[str] = "auto",
+      snapshot2_name: Optional[str] = "auto",
+      workspace_root: str = "."
+  ) -> str:
+  ```
+- When both are "auto", automatically select two newest snapshots
+- When one or both specified, use explicit names
+
+#### D. `src/qwen_mcp/anti_degradation_config.py`
+
+- Add config option for snapshot naming pattern
+- Add config for auto-compare default behavior
+
+### 4. Migration/Cleanup
+
+- Add utility to rename existing snapshots to new format (optional)
+- Document new naming convention in README.md
+
+### 5. Testing
+
+- Test auto-selection with various snapshot counts (0, 1, 2, 10+)
+- Test explicit selection still works
+- Test edge cases (missing snapshots, corrupted files)
+
+## Files to Modify
+
+1. `src/graph/snapshot.py` - Core snapshot management
+2. `src/qwen_mcp/diff_audit.py` - Comparison logic
+3. `src/qwen_mcp/server.py` - MCP tool interface
+4. `src/qwen_mcp/anti_degradation_config.py` - Configuration
+5. `README.md` - Documentation update
+
+## Risk Assessment
+
+- **Risk:** Low - changes are additive, existing explicit selection still works
+- **Backward Compatibility:** Maintained - default 'auto' behavior is new, explicit names still work
+- **Testing:** Unit tests for auto-selection logic required
+
+---
+
+## 2026-04-12 21:20 - 2bd2e4d8-da2f-4bc2-a3e7-cc77df24bcf3
+
+**Task**: Implement snapshot naming convention changes in src/graph/snapshot.py:
+
+1. Add a static method `_generate_timestamped_name()` that returns format `baseline-YYYYMMDD_HHMMSS` using UTC datetime
+
+2. Add
+
+**Status**: ✅ Completed
+
+---
+
 ## SOS Sync - 2026-04-11 23:57:42
 
 ## [2026-04-11 21:09:54] 70f149bd-6d08-4256-8522-c98d13307073
@@ -34,12 +137,15 @@
 MCP protocol requires stdout to be used exclusively for JSON-RPC communication. Any logging on stdout breaks the protocol.
 
 ## Implementation
+
 In `src/qwen_mcp/server.py`:
+
 1. Add explicit logging configuration before FastMCP initialization (line ~45)
 2. Force all handlers to use `stream=sys.stderr`
 3. Verify no `print()` statements in production code
 
 ## Code Change
+
 ```python
 # After imports, before logger = logging.getLogger(__name__)
 import logging
@@ -54,6 +160,7 @@ logging.basicConfig(
 ```
 
 ## Verification
+
 Run server and check that no output appears on stdout before JSON-RPC messages.
 
 ---
@@ -66,6 +173,7 @@ Run server and check that no output appears on stdout before JSON-RPC messages.
 `asyncio.gather()` on 107 files can starve the event loop, preventing MCP heartbeat handling. The current implementation already has chunking (chunk_size=20) and `asyncio.sleep(0.01)` - this is good but may need tuning.
 
 ## Current State (snapshot.py:235-240)
+
 ```python
 chunk_size = 20
 for i in range(0, len(tasks), chunk_size):
@@ -76,11 +184,13 @@ for i in range(0, len(tasks), chunk_size):
 ```
 
 ## Potential Improvements
+
 1. Reduce chunk_size from 20 to 10 for more frequent yields
 2. Increase sleep from 0.01 to 0.05 for better heartbeat response
 3. Add explicit semaphore for controlled concurrency
 
 ## Verification
+
 Test with MCP client and monitor event loop latency during execution.
 
 ---
@@ -93,6 +203,7 @@ Test with MCP client and monitor event loop latency during execution.
 Returning full snapshot content in JSON-RPC response may exceed stdio buffer limits (64KB on Linux/Unix). The current implementation returns the full path string, but the snapshot itself contains 107 files' data.
 
 ## Current State (diff_audit.py:205-209)
+
 ```python
 async def create_baseline_snapshot(self, name: str = "baseline") -> str:
     """Create a new baseline snapshot."""
@@ -102,12 +213,15 @@ async def create_baseline_snapshot(self, name: str = "baseline") -> str:
 ```
 
 ## Analysis
+
 The current implementation already returns only the path string, not the full snapshot content. This is correct! The snapshot is saved to disk and only the path is returned via JSON-RPC.
 
 ## Potential Issue
+
 The snapshot file itself may be large, but that's saved to disk, not transmitted via stdio. The current design is already optimized.
 
 ## Verification
+
 Check if any other tools return large payloads. Monitor actual JSON-RPC response size.
 
 ---
@@ -120,11 +234,13 @@ Check if any other tools return large payloads. Monitor actual JSON-RPC response
 Need to isolate whether the timeout issue is specific to Roo Code client or a general MCP server problem.
 
 ## Implementation
+
 1. Test with alternative MCP client (Claude Desktop, mcp-inspector, or raw stdio test)
 2. If alternative client works, issue is in Roo Code client implementation
 3. If alternative client also fails, issue is in server code
 
 ## Test Procedure
+
 ```bash
 # Option 1: Use mcp-inspector
 npx @modelcontextprotocol/inspector python -m qwen_mcp.server
@@ -137,9 +253,11 @@ npx @modelcontextprotocol/inspector python -m qwen_mcp.server
 ```
 
 ## Current Evidence
+
 The scratch/test_mcp_stdio.py test already passed (0.80s), suggesting the server works correctly when called directly via stdio simulation.
 
 ## Verification
+
 If alternative client works, document Roo Code-specific timeout behavior and recommend client-side configuration changes.
 
 ---
@@ -152,6 +270,7 @@ If alternative client works, document Roo Code-specific timeout behavior and rec
 Need visibility into the execution process for future debugging. Currently there's a debug trace function in snapshot.py that writes to a file, but we need proper stderr logging.
 
 ## Current State (snapshot.py:186-188)
+
 ```python
 def trace(msg):
     with open("debug_trace.log", "a") as f:
@@ -159,6 +278,7 @@ def trace(msg):
 ```
 
 ## Implementation
+
 1. Replace file-based trace with proper stderr logging
 2. Add timing logs at key points:
    - Start of capture_snapshot
@@ -168,6 +288,7 @@ def trace(msg):
 3. Log snapshot size before returning
 
 ## Code Change
+
 ```python
 import logging
 import sys
@@ -180,13 +301,14 @@ def trace(msg):
 ```
 
 ## Verification
+
 Run tool and check stderr logs show timing information without polluting stdout.
 
 ---
 
 ## 2026-04-11 23:57 - 7a654cc9-f300-4065-b666-ece2540e2647
 
-**Task**: Implement the `add_tasks` method (batch version) in `src/qwen_mcp/engines/decision_log_sync.py`. 
+**Task**: Implement the `add_tasks` method (batch version) in `src/qwen_mcp/engines/decision_log_sync.py`.
 
 The method should be added after the existing `add_task` method (around line 362). It should:
 
@@ -196,14 +318,13 @@ The method should be added after the existing `add_task` method (around line 362
 
 ---
 
-
 ## SOS Sync - 2026-04-11 18:59:07
 
 ## [2026-04-11 18:56:44] 096f6e58-d2a0-458f-bde5-49c007cf5091
 
 **Task**: Fix snapshot storage location to use .anti_degradation/snapshots from config
 
-**Advice**: FunctionalSnapshotGenerator.save_snapshot() and load_snapshot() use hardcoded '.snapshots' path (lines 680, 700) instead of reading storage_dir from AntiDegradationConfig (line 57). This causes snapshots to be saved in wrong location. Fix by: (1) Add storage_dir parameter to FunctionalSnapshotGenerator.__init__(), (2) Update save_snapshot() and load_snapshot() to use config-based path, (3) Update QwenDiffAuditTool and PreCommitHook to load config and pass storage_dir, (4) Migrate existing snapshots from .snapshots/ to .anti_degradation/snapshots/
+**Advice**: FunctionalSnapshotGenerator.save_snapshot() and load_snapshot() use hardcoded '.snapshots' path (lines 680, 700) instead of reading storage_dir from AntiDegradationConfig (line 57). This causes snapshots to be saved in wrong location. Fix by: (1) Add storage_dir parameter to FunctionalSnapshotGenerator.**init**(), (2) Update save_snapshot() and load_snapshot() to use config-based path, (3) Update QwenDiffAuditTool and PreCommitHook to load config and pass storage_dir, (4) Migrate existing snapshots from .snapshots/ to .anti_degradation/snapshots/
 
 ---
 
@@ -211,13 +332,12 @@ The method should be added after the existing `add_task` method (around line 362
 
 **Task**: Implement fix for snapshot storage location in src/graph/snapshot.py:
 
-1. Update FunctionalSnapshotGenerator.__init__() to accept optional storage_dir parameter
+1. Update FunctionalSnapshotGenerator.**init**() to accept optional storage_dir parameter
 2. Import get_config from qwen_mcp.anti
 
 **Status**: ✅ Completed
 
 ---
-
 
 ## SOS Sync - 2026-04-10 22:18:11
 
@@ -225,7 +345,7 @@ The method should be added after the existing `add_task` method (around line 362
 
 **Task**: T8: Optimize FunctionalSnapshotGenerator.capture_snapshot() to use git diff for file selection
 
-**Advice**: Add _get_changed_files() method to FunctionalSnapshotGenerator that uses git diff --name-only to get only changed Python files. Modify capture_snapshot() signature to accept commit_range and changed_files parameters. Fallback to rglob if no files changed or git fails.
+**Advice**: Add \_get_changed_files() method to FunctionalSnapshotGenerator that uses git diff --name-only to get only changed Python files. Modify capture_snapshot() signature to accept commit_range and changed_files parameters. Fallback to rglob if no files changed or git fails.
 
 ---
 
@@ -233,15 +353,15 @@ The method should be added after the existing `add_task` method (around line 362
 
 **Task**: T9: Add parallel processing with asyncio.gather for file snapshots
 
-**Advice**: Add _capture_file_snapshot_async() helper method to FunctionalSnapshotGenerator. Refactor capture_snapshot() to use asyncio.gather() for parallel file processing instead of sequential loop. This will provide 4x speedup for large file sets.
+**Advice**: Add \_capture_file_snapshot_async() helper method to FunctionalSnapshotGenerator. Refactor capture_snapshot() to use asyncio.gather() for parallel file processing instead of sequential loop. This will provide 4x speedup for large file sets.
 
 ---
 
 ## [2026-04-10 22:12:15] 475ef705-4a2c-4ca7-b205-c4095d233cce
 
-**Task**: T10: Optimize _generate_content_hashes() to only hash changed files
+**Task**: T10: Optimize \_generate_content_hashes() to only hash changed files
 
-**Advice**: Modify _generate_content_hashes() signature to accept changed_files parameter. When changed_files is provided, only hash those files instead of scanning all files with glob patterns. This reduces content hash generation from ~30s to ~3s for typical changes.
+**Advice**: Modify \_generate_content_hashes() signature to accept changed_files parameter. When changed_files is provided, only hash those files instead of scanning all files with glob patterns. This reduces content hash generation from ~30s to ~3s for typical changes.
 
 ---
 
@@ -270,19 +390,16 @@ The method should be added after the existing `add_task` method (around line 362
 
 ---
 
-
 ## 2026-04-10 14:39 - a5145df9-86f6-4e11-b44c-ba1c7e5af956
 
 **Task**: Create production blocking components for the Anti-Degradation System.
 
 **Task 1**: Create `.github/workflows/anti_degradation_production.yml`
+
 - Same as shadow workflow but WITHOUT continue-on-error
--
+- **Status**: ✅ Completed
 
-**Status**: ✅ Completed
-
----
-
+  ***
 
 ## 2026-04-10 14:36 - 14040cc4-59de-477a-a216-147137f6c958
 
@@ -291,12 +408,12 @@ The method should be added after the existing `add_task` method (around line 362
 **Task**: Create `.github/workflows/anti_degradation.yml`
 
 **Requirements**:
+
 1. Trigger on: pull_request (opened, sync
 
 **Status**: ✅ Completed
 
 ---
-
 
 ## 2026-04-10 14:03 - 82ad4d98-6825-4848-9515-da228e0f9a36
 
@@ -305,13 +422,13 @@ The method should be added after the existing `add_task` method (around line 362
 **Task**: Create `src/qwen_mcp/anti_degradation_config.py`
 
 **Requirements**:
+
 1. Use dataclasses for typed configuration
-2. Load 
+2. Load
 
 **Status**: ✅ Completed
 
 ---
-
 
 ## 2026-04-10 13:59 - 90109f25-ed29-423f-89b8-b182188ea5a9
 
@@ -320,13 +437,13 @@ The method should be added after the existing `add_task` method (around line 362
 **Task**: Create `.anti_degradation/config.yaml`
 
 **Requirements**:
+
 1. Define shadow_mode section with:
-   - enabled: boolean 
+   - enabled: boolean
 
 **Status**: ✅ Completed
 
 ---
-
 
 ## 2026-04-10 13:23 - 766d480d-625b-466d-9509-32941795e8d8
 
@@ -335,6 +452,7 @@ The method should be added after the existing `add_task` method (around line 362
 **Task**: Create `scripts/pre_commit_hook.py`
 
 **Requirements**:
+
 1. Must complete within 3 seconds latency requirement
 2. Use the GitD
 
@@ -342,18 +460,17 @@ The method should be added after the existing `add_task` method (around line 362
 
 ---
 
-
 ## 2026-04-10 13:04 - d7db8d3a-6c35-43e3-ad07-a58775655cd6
 
-**Task**: Implement Anti-Degradation System tasks T1-T7 from the backlog. 
+**Task**: Implement Anti-Degradation System tasks T1-T7 from the backlog.
 
 Context from sparring session sp_603b13d824b6:
+
 - Option A+C approach validated: qwen_diff_audit MCP tool + pre-commit hook with Functi
 
 **Status**: ✅ Completed
 
 ---
-
 
 ## SOS Sync - 2026-04-10 12:10:06
 
@@ -361,7 +478,7 @@ Context from sparring session sp_603b13d824b6:
 
 **Task**: T1: Content Hashing w Snapshotach
 
-**Advice**: Dodaj content_hash do function/class entries w _capture_file_snapshot() w src/graph/snapshot.py. Użyj SHA256 hash treści funkcji/klasy (body). Zmodyfikuj linie 75-81 dla functions i 93-99 dla classes. Wymagane: import hashlib, metoda _get_content_hash(node, source). Test: test_snapshot_hash_deterministic() musi przejść.
+**Advice**: Dodaj content_hash do function/class entries w \_capture_file_snapshot() w src/graph/snapshot.py. Użyj SHA256 hash treści funkcji/klasy (body). Zmodyfikuj linie 75-81 dla functions i 93-99 dla classes. Wymagane: import hashlib, metoda \_get_content_hash(node, source). Test: test_snapshot_hash_deterministic() musi przejść.
 
 ---
 
@@ -377,7 +494,7 @@ Context from sparring session sp_603b13d824b6:
 
 **Task**: T3: qwen_diff_audit MCP Tool
 
-**Advice**: Dodaj nowy MCP tool qwen_diff_audit w src/qwen_mcp/tools.py. Tool przyjmuje before_ref (default HEAD~1), after_ref (default HEAD), project_dir. Używa GitDiffParser i FunctionalSnapshotGenerator. Zwraca: changed_files, risk_score (0.0-1.0), removed_functions, removed_classes, signature_changes, regression_alerts. Dodaj do __all__ list. Rejestracja w MCP server. Test: test_qwen_diff_audit() musi przejść.
+**Advice**: Dodaj nowy MCP tool qwen_diff_audit w src/qwen_mcp/tools.py. Tool przyjmuje before_ref (default HEAD~1), after_ref (default HEAD), project_dir. Używa GitDiffParser i FunctionalSnapshotGenerator. Zwraca: changed_files, risk_score (0.0-1.0), removed_functions, removed_classes, signature_changes, regression_alerts. Dodaj do **all** list. Rejestracja w MCP server. Test: test_qwen_diff_audit() musi przejść.
 
 ---
 
@@ -417,7 +534,7 @@ Context from sparring session sp_603b13d824b6:
 
 **Task**: MCP Task Management Tools: qwen_list_tasks, qwen_get_task, qwen_update_task
 
-**Advice**: Implementacja 3 nowych MCP toolow w src/qwen_mcp/tools.py: (1) qwen_list_tasks - listuje taski z BACKLOG.md z opcjonalnym filtrem tagow, zwraca JSON z taskami, (2) qwen_get_task - pobiera pojedynczy task po decision_id z decision_log.parquet, zwraca szczegoly tasku, (3) qwen_update_task - aktualizuje status tasku (pending/completed) w BACKLOG.md i decision_log.parquet. Uzyj dekoratora @mcp.tool() jak w innych toolach. Dodaj do __all__. Wymagany import pandas dla parquet. Struktura: __all__ linie 16-33, add_task_to_backlog linie 600+.
+**Advice**: Implementacja 3 nowych MCP toolow w src/qwen_mcp/tools.py: (1) qwen_list_tasks - listuje taski z BACKLOG.md z opcjonalnym filtrem tagow, zwraca JSON z taskami, (2) qwen_get_task - pobiera pojedynczy task po decision_id z decision_log.parquet, zwraca szczegoly tasku, (3) qwen_update_task - aktualizuje status tasku (pending/completed) w BACKLOG.md i decision_log.parquet. Uzyj dekoratora @mcp.tool() jak w innych toolach. Dodaj do **all**. Wymagany import pandas dla parquet. Struktura: **all** linie 16-33, add_task_to_backlog linie 600+.
 
 ---
 
@@ -432,7 +549,6 @@ Context from sparring session sp_603b13d824b6:
 
 ---
 
-
 ## 2026-04-10 10:55 - e8408898-0a9c-4c90-ba97-e1ce4ecdcc9a
 
 **Task**: napisz funkcję Pythona: n = a^x + b^y
@@ -441,7 +557,6 @@ Context from sparring session sp_603b13d824b6:
 
 ---
 
-
 ## 2026-04-09 20:15 - 10fba463-b4a1-484e-a086-3a98bc030666
 
 **Task**: Extract and present the complete sparring analysis results from the session. The user wants to see the full findings from Red Cell, Blue Cell, and White Cell in a readable format. Present it as a comp
@@ -449,7 +564,6 @@ Context from sparring session sp_603b13d824b6:
 **Status**: ✅ Completed
 
 ---
-
 
 ## Release v1.1.1 - 2026-04-09
 
@@ -472,6 +586,7 @@ Context from sparring session sp_603b13d824b6:
 - Added unit tests in `tests/test_max_tokens_zero.py` for sparring3 verification
 
 **Files Changed:**
+
 - `src/qwen_mcp/engines/sparring_v2/models.py`: Added `storage_dir` parameter to `to_markdown()`
 - `src/qwen_mcp/tools.py`: Pass session store directory to response formatter
 - `src/qwen_mcp/completions.py`: Fixed max_tokens zero check (`is not None` instead of falsy check)

@@ -6,6 +6,8 @@
 
 ## Pending
 
+- [x] Snapshot naming convention and auto-selection - f4b59636-2c52-4488-aa32-be6efd91245f
+
 - [x] Pytanie dla architecta: LangGraph w projekcie? - 70f149bd-6d08-4256-8522-c98d13307073
   - **Answer**: LangGraph not needed - current architecture with specialized engines (CoderV2, SparringV2, Swarm) is sufficient for MCP server use case
 
