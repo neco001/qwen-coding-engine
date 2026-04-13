@@ -90,6 +90,163 @@ class BudgetManager:
 
 
 # =============================================================================
+# Dynamic Budget Manager - Extended Budget Management
+# =============================================================================
+
+class DynamicBudgetManager(BudgetManager):
+    """
+    Extended BudgetManager with dynamic budget adjustments.
+    
+    Features:
+    - Time borrowing across stages
+    - Timeout extension for complex tasks
+    - Complexity-based budget adjustment
+    """
+    
+    def __init__(
+        self,
+        total_budget_seconds: int,
+        stage_weights: Optional[Dict[str, float]] = None,
+        allow_borrow: bool = False,
+        extend_timeout_pct: float = 0.5
+    ):
+        """
+        Initialize DynamicBudgetManager.
+        
+        Args:
+            total_budget_seconds: Total timeout budget in seconds
+            stage_weights: Dictionary mapping stage names to weights
+            allow_borrow: Whether to allow borrowing time from previous stages
+            extend_timeout_pct: Percentage to extend timeout for complex tasks (0.5 = 50%)
+        """
+        super().__init__(total_budget_seconds, stage_weights)
+        self.allow_borrow = allow_borrow
+        self.extend_timeout_pct = extend_timeout_pct
+        self.completed_stages: List[str] = []
+        self.stage_order: List[str] = []
+        self.complexity_factors: Dict[str, float] = {}
+    
+    def register_stage_order(self, stage_order: List[str]) -> None:
+        """
+        Register the order of stages for borrowing calculations.
+        
+        Args:
+            stage_order: List of stage names in execution order
+        """
+        self.stage_order = stage_order
+    
+    def mark_stage_completed(self, stage_name: str) -> None:
+        """
+        Mark a stage as completed for borrowing purposes.
+        
+        Args:
+            stage_name: Name of the completed stage
+        """
+        if stage_name not in self.completed_stages:
+            self.completed_stages.append(stage_name)
+    
+    def set_stage_complexity(self, stage_name: str, complexity_factor: float = 1.0) -> None:
+        """
+        Set complexity factor for a stage.
+        
+        Args:
+            stage_name: Name of the stage
+            complexity_factor: Multiplier for complexity (1.0 = normal, >1.0 = complex)
+        """
+        self.complexity_factors[stage_name] = max(1.0, complexity_factor)
+    
+    def borrow_time_from_previous_stages(self, stage_name: str) -> float:
+        """
+        Calculate available borrowed time from completed previous stages.
+        
+        Args:
+            stage_name: Current stage name to borrow time for
+            
+        Returns:
+            Available time that can be borrowed from previous stages
+        """
+        if not self.allow_borrow or not self.stage_order:
+            return 0.0
+        
+        if stage_name not in self.stage_order:
+            return 0.0
+        
+        current_index = self.stage_order.index(stage_name)
+        if current_index == 0:
+            return 0.0
+        
+        available_borrowed_time = 0.0
+        
+        for i in range(current_index):
+            previous_stage = self.stage_order[i]
+            if previous_stage in self.completed_stages and previous_stage in self.stage_usage:
+                # Calculate unused time from previous stage
+                stage_budget = self.get_stage_budget(previous_stage)
+                used = self.stage_usage.get(previous_stage, 0)
+                unused = stage_budget - used
+                if unused > 0:
+                    available_borrowed_time += unused
+        
+        return max(0.0, available_borrowed_time)
+    
+    def extend_current_stage_timeout(self, base_timeout: float, is_complex: bool = False) -> float:
+        """
+        Apply timeout extension for current stage.
+        
+        Args:
+            base_timeout: Base timeout in seconds
+            is_complex: Whether the task is complex and needs extension
+            
+        Returns:
+            Extended timeout value
+        """
+        if not is_complex:
+            return base_timeout
+        
+        extension = base_timeout * self.extend_timeout_pct
+        return base_timeout + extension
+    
+    def adjust_for_complexity(self, stage_name: str, base_budget: int, is_complex: bool = False) -> int:
+        """
+        Adjust token budget based on stage complexity.
+        
+        Args:
+            stage_name: Name of the stage
+            base_budget: Base token budget
+            is_complex: Whether the stage is complex
+            
+        Returns:
+            Adjusted token budget
+        """
+        if not is_complex:
+            return base_budget
+        
+        complexity_factor = self.complexity_factors.get(stage_name, 1.5)
+        return int(base_budget * complexity_factor)
+    
+    def get_dynamic_stage_budget(
+        self,
+        stage_name: str,
+        base_budget: int,
+        is_complex: bool = False
+    ) -> int:
+        """
+        Get dynamic budget with all adjustments applied.
+        
+        Args:
+            stage_name: Name of the stage
+            base_budget: Base token budget
+            is_complex: Whether the stage is complex
+            
+        Returns:
+            Adjusted budget including borrowing and complexity adjustments
+        """
+        adjusted = self.adjust_for_complexity(stage_name, base_budget, is_complex)
+        borrowed = int(self.borrow_time_from_previous_stages(stage_name))
+        return adjusted + borrowed
+
+
+# =============================================================================
 # Circuit Breaker - Failure Recovery
 # =============================================================================
 
@@ -218,12 +375,18 @@ class StageContext:
         context: Additional context
         stage_results: Results from previously executed stages
         metadata: Additional stage-specific metadata
+        ctx: MCP Context object for progress reporting
+        word_limit: Word limit for the stage
+        allow_regeneration: Whether to allow regeneration (for white cell)
     """
     session_id: str
     topic: str
     context: str = ""
     stage_results: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    ctx: Optional[Any] = None
+    word_limit: Optional[int] = None
+    allow_regeneration: bool = True
     
     def get_stage_result(self, stage_name: str) -> Optional[Any]:
         """Get result from a previously executed stage."""

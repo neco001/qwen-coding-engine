@@ -502,12 +502,13 @@ def resolve_sparring_mode(mode: str) -> str:
 async def generate_sparring(
     topic: str,
     context: str,
-    mode: str,
     session_id: str,
+    mode: str = "sparring2",
     user_input: Optional[str] = None,  # New: multi-turn conversation input
     ctx: Optional[Context] = None,
     project_id: str = "default",
-    workspace_root: Optional[str] = None
+    workspace_root: Optional[str] = None,
+    force_mode: Optional[str] = None,  # Manual override to bypass auto-detection
 ) -> str:
     """
     Execute sparring session using SparringEngineV2.
@@ -519,10 +520,22 @@ async def generate_sparring(
     - Automatically filters reasoning_content for security
     - Applies rolling summary when context exceeds limit
     
+    Mode routing:
+    - Auto-detects mode based on topic complexity and context length
+    - force_mode: Manual override to bypass auto-detection
+    
     Defensive parameter handling: ensures all parameters are strings even if MCP passes dicts.
     
     Args:
+        topic: Sparring topic
+        context: Additional context
+        mode: Sparring mode (flash/full/pro)
+        session_id: Session identifier for multi-turn
+        user_input: Multi-turn conversation input
+        ctx: MCP context for progress reporting
+        project_id: Project identifier
         workspace_root: Path to workspace root (default: current directory)
+        force_mode: Manual mode override (flash/full/pro) to bypass auto-detection
     """
     from qwen_mcp.engines.sparring_v2 import SparringEngineV2, SparringResponse
     from qwen_mcp.engines.session_store import SessionStore
@@ -577,7 +590,39 @@ async def generate_sparring(
     engine = SparringEngineV2(client, session_store)
     
     # Resolve mode alias to internal mode
-    internal_mode = resolve_sparring_mode(mode)
+    # Use force_mode if provided (bypass auto-detection)
+    if force_mode:
+        # force_mode overrides everything - use it directly
+        internal_mode = force_mode.lower().strip()
+        logger.info(f"Using force_mode override: {internal_mode}")
+    else:
+        # Auto-detect mode based on topic complexity and context length
+        # ONLY if user didn't specify an explicit mode (mode is empty/default)
+        combined_text = f"{topic} {context}".strip()
+        text_length = len(combined_text)
+
+        # Check if user specified an explicit mode
+        explicit_mode = mode and mode.lower().strip() not in ("", "auto", "default")
+        
+        if explicit_mode:
+            # User specified an explicit mode - respect their choice
+            internal_mode = resolve_sparring_mode(mode)
+            logger.info(f"Using explicit mode: {internal_mode} (context length: {text_length} chars)")
+        else:
+            # No explicit mode - auto-detect based on context length
+            internal_mode = resolve_sparring_mode(mode) or "flash"
+            if text_length > 5000:
+                # Very long context - use pro mode for higher token limits
+                internal_mode = "pro"
+                logger.info(f"Auto-detected mode: pro (context length: {text_length} chars)")
+            elif text_length > 1500:
+                # Medium context - use full mode
+                internal_mode = "full"
+                logger.info(f"Auto-detected mode: full (context length: {text_length} chars)")
+            else:
+                # Short context - use flash mode
+                internal_mode = "flash"
+                logger.info(f"Auto-detected mode: flash (context length: {text_length} chars)")
     
     # Multi-turn support: Append user input to conversation history BEFORE execution
     messages_appended = 0

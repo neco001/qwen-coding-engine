@@ -91,7 +91,7 @@ class RedCellExecutor(ModeExecutor):
             enable_thinking=True,
         )
         red_critique = ContentValidator.validate_response(red_critique)
-        
+
         # Update session
         self.session_store.update_step(
             session_id, "red",

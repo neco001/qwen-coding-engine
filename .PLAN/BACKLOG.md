@@ -6,6 +6,56 @@
 
 ## Pending
 
+- [ ] Fix 5: sparring3 now truly step-by-step (one stage per MCP call) - 7b2e48d0-32b0-49d9-b41b-8476a60c5d6e
+- [ ] Revert: removed word limit enforcement (obcinanie = bad) - f9989739-195b-438a-a22d-217498737739
+- [ ] Doc fix: clarify FullExecutor vs ProExecutor behavior - 6ae8b900-ec7b-4887-9945-ff45e2939dbb
+
+- [ ] Fix 1: Respect explicit sparring mode choice (was auto-overriding) - bc2cc0d3-ce1c-41cb-a91d-f3cbf390b39e
+- [ ] Fix 2: Hard word limits + enforcement (timeout doesn't control response length) - 92e266b3-181a-456e-a2e7-f2adcb4492bc
+- [ ] Fix 3: Reduce timeouts to fit within 300s MCP limit - bab822e5-e051-4a6e-aa9d-5a8bc5051d85
+- [ ] Fix 4: JSON serialization fallback for method objects - beb69f20-f21d-494a-8a0e-19dc1d3b37a8
+
+- [ ] ostatnio coraz częściej widzę komunikaty że coder zwrócił kod ktory nie jest taki jak powinien byc.
+      trzeba to sprawdzic. przyklad:
+
+  ````zapis_bledu
+        Roo said
+    Now I'll use qwen_coder to implement Task 1 - creating MODE_PROFILES configuration in config.py.
+
+
+    Roo wants to use a tool on the qwen-coding MCP server
+    qwen-coding
+
+    qwen_coder
+    Unified code generation tool with mode-based routing. MODES: - auto: Intelligent routing based on prompt complexity (default) - standard: Fast generation using qwen3-coder-next - pro: Heavy-duty generation using qwen3-coder-plus - expert: Maximum capability for complex refactors/architecture EXAMPLES: 1. Simple task: qwen_coder(prompt="Write a function to add two numbers") 2. Complex task: qwen_coder(prompt="...", mode="pro") 3. Expert refactor: qwen_coder(prompt="...", mode="expert") DEPRECATED TOOLS (still available but use unified internally): - qwen_coder (old) → now calls qwen_coder(mode="standard") - qwen_coder_pro (old) → now calls qwen_coder(mode="pro")
+    {
+      "prompt": "Implement Task 1: Create MODE_PROFILES configuration in config.py\n\nRead the current file src/qwen_mcp/engines/sparring_v2/config.py and add a MODE_PROFILES dictionary after the existing configuration sections (after DEFAULT_MODELS at the end of the file).\n\nMODE_PROFILES should define configurations for flash, full, and pro modes with the following structure:\n\n```python\nfrom dataclasses import dataclass\nfrom typing import Dict, List, Optional\n\n@dataclass\nclass ModeProfile:\n    \"\"\"Configuration profile for a sparring mode.\"\"\"\n    name: str\n    stages: List[str]\n    total_budget: int  # seconds\n    stage_weights: Dict[str, float]\n    word_limits: Dict[str, int]\n    thinking_tokens: Dict[str, int]\n    timeout_config: Dict[str, float]\n    allow_borrow: bool = False  # Allow time borrowing across stages\n    extend_timeout_pct: float = 0.5  # 50% timeout extension for complex tasks\n\nMODE_PROFILES = {\n    \"flash\": ModeProfile(\n        name=\"flash\",\n        stages=[\"analyst\", \"drafter\"],\n        total_budget=60,  # 60 seconds for fast 2-step analysis\n        stage_weights={\"analyst\": 0.45, \"drafter\": 0.55},\n        word_limits={\"analyst\": 200, \"drafter\": 300},\n        thinking_tokens={\"analyst\": 1024, \"drafter\": 1024},\n        timeout_config={\"analyst\": 30.0, \"drafter\": 30.0},\n        allow_borrow=False,\n        extend_timeout_pct=0.3,  # 30% extension for flash\n    ),\n    \"full\": ModeProfile(\n        name=\"full\",\n        stages=[\"discovery\", \"red\", \"blue\", \"white\"],\n        total_budget=225,  # 225 seconds shared budget\n        stage_weights={\"discovery\": 0.15, \"red\": 0.28, \"blue\": 0.28, \"white\": 0.29},\n        word_limits={\"discovery\": 150, \"red\": 300, \"blue\": 300, \"white\": 600},\n        thinking_tokens={\"discovery\": 1024, \"red\": 1024, \"blue\": 1024, \"white\": 2048},\n        timeout_config={\"discovery\": 33.0, \"red\": 63.0, \"blue\": 63.0, \"white\": 65.0},\n        allow_borrow=True,  # Allow borrowing from previous stages\n        extend_timeout_pct=0.5,  # 50% extension for complex tasks\n    ),\n    \"pro\": ModeProfile(\n        name=\"pro\",\n        stages=[\"discovery\", \"red\", \"blue\", \"white\"],\n        total_budget=900,  # 900 seconds total (225s per stage)\n        stage_weights={\"discovery\": 0.15, \"red\": 0.28, \"blue\": 0.28, \"white\": 0.29},\n        word_limits={\"discovery\": 150, \"red\": 600, \"blue\": 600, \"white\": 800},\n        thinking_tokens={\"discovery\": 2048, \"red\": 2048, \"blue\": 2048, \"white\": 4096},\n        timeout_config={\"discovery\": 120.0, \"red\": 180.0, \"blue\": 180.0, \"white\": 360.0},\n        allow_borrow=True,\n        extend_timeout_pct=0.5,  # 50% extension for complex tasks\n    ),\n}\n```\n\nAdd this to the end of config.py file. The MODE_PROFILES should be added after the DEFAULT_MODELS dictionary.\n\nReturn the complete updated file content."
+    }
+
+
+
+    API Request
+    $0.0000
+
+    Roo said
+    The qwen_coder output shows a different file structure than expected. Let me read the current config.py to see what's there now and then apply the correct diff.
+
+  ````
+
+  pomysł: no wlasnie - czy ty mu podajesz odpowiedni kontekst? a moze coder powinien miec sam w sobie zaprogramowane multi-stage, i gdy nie ma tresci plikow to sam wywola read_file?
+
+- [x] Create MODE_PROFILES configuration in config.py with flash/full/pro mode definitions - b2e39215-af1a-45e7-a4e1-6db370a5f4d3
+- [x] Create get_mode_profile() helper function in config.py - 5e91a317-5018-4c6f-a7ed-20f2d73a6b6f
+- [x] Create DynamicBudgetManager class extending BudgetManager - 5a71ef24-8c74-48e0-ab96-dfb0c4efd7a0
+- [x] Create UnifiedSparringExecutor class in modes/unified.py - e210f485-ecd8-4501-9dde-4c9d31405c17
+- [x] Add force_mode parameter to qwen_sparring tool signature - 6d6edfcd-8080-4056-8ea0-4ce7a01e6620
+- [x] Implement mode routing logic with force_mode override - b28f3807-f156-4231-be58-99262f98c7e9
+- [x] Create backward compatibility wrappers for Flash/Full/Pro executors - e6ca869d-1599-4363-8104-01b5ef1bb764
+- [x] Integrate UnifiedSparringExecutor in engine.py - 919cc14f-23cd-422a-b08a-e06d9cfccc8c
+- [x] Implement and test budget borrowing logic in DynamicBudgetManager - 428be552-5a5f-47f5-a5a8-4021a77d5d0e
+- [x] Implement and test timeout extension for complex tasks - c833eeb2-e7da-44ad-9fd2-08c9b3a930df
+- [x] Create end-to-end integration test for consolidated sparring - 61503428-3671-4da1-8dde-7c87d04be96e
+
 - [x] Rename utils module to qwen_utils to avoid namespace conflicts - bd0cb9b5-6e17-42e8-84b8-5ea51c5a3502
 
 - [ ] dodaj task: architect podaje kod. czy powinien?

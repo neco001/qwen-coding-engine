@@ -13,6 +13,27 @@ from websockets.exceptions import ConnectionClosed
 logger = logging.getLogger(__name__)
 
 
+def _telemetry_json_default(obj):
+    """
+    Default handler for JSON serialization of non-serializable objects in telemetry state.
+    
+    Prevents broadcast_state from crashing when state accidentally contains method objects
+    or other non-serializable objects.
+    
+    Args:
+        obj: The object that JSON can't serialize
+        
+    Returns:
+        String representation of the object
+    """
+    # Handle method objects
+    if hasattr(obj, '__self__') and hasattr(obj, '__name__'):
+        return f"<method: {obj.__qualname__ if hasattr(obj, '__qualname__') else obj.__name__}>"
+    
+    # Handle any other non-serializable object
+    return repr(obj)
+
+
 class SessionMapper:
     """
     Maps project_id to sequential session numbers for display.
@@ -144,7 +165,7 @@ class TelemetryBroadcaster:
         # CRITICAL: Send state immediately on connect (outside lock to avoid deadlock)
         state = await self.get_state(project_id)
         try:
-            await websocket.send_text(json.dumps(state, ensure_ascii=False))
+            await websocket.send_text(json.dumps(state, ensure_ascii=False, default=_telemetry_json_default))
         except Exception:
             async with self._lock:
                 self._clients[project_id].discard(websocket)
@@ -183,7 +204,7 @@ class TelemetryBroadcaster:
             return
 
         # Prepare message while holding lock
-        message = json.dumps(state, ensure_ascii=False)
+        message = json.dumps(state, ensure_ascii=False, default=_telemetry_json_default)
 
         # Step 2: Send messages OUTSIDE lock to avoid blocking other operations
         disconnected = set()

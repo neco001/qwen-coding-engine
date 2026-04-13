@@ -99,7 +99,7 @@ class BlueCellExecutor(ModeExecutor):
             enable_thinking=True,
         )
         blue_defense = ContentValidator.validate_response(blue_defense)
-        
+
         # Update session
         self.session_store.update_step(
             session_id, "blue",

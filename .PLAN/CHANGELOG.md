@@ -1,5 +1,164 @@
 # CHANGELOG
 
+## 2026-04-13 11:28 - 7eefc18f-7a38-4800-8b82-a6cc673d69b4
+
+**Task**: Generate code to convert a SparringResponse object to a SessionCheckpoint object for use with session_store.save(). Use the following classes: SparringResponse (from src/qwen_mcp/engines/sparring_v2/m
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-13 10:52 - 9d4d505e-254a-4898-a801-652883d7838d
+
+**Task**: Modify the execute method in src/qwen_mcp/engines/sparring_v2/modes/unified.py (lines 237-280) to return SparringResponse. Use existing code skeleton and follow these exact steps:
+
+Current execute met
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-13 10:11 - 82baf86e-10e6-4a3f-85d2-5c2b6ef36fcc
+
+**Task**: Read the file src/qwen_mcp/engines/sparring_v2/base_stage_executor.py and add a new class DynamicBudgetManager that extends BudgetManager. The class should have these features:
+1. Constructor with all
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-13 10:10 - cc1ace20-5e9d-4aae-a453-24b5c058fdfb
+
+**Task**: Write a simple Python function that adds two numbers: def add(a, b): return a + b
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-13 10:08 - d09bc5d9-d6b6-43e8-be9f-69c472daeef9
+
+**Task**: Implement Task 3: Create DynamicBudgetManager class
+
+Read the current file src/qwen_mcp/engines/sparring_v2/base_stage_executor.py and add a DynamicBudgetManager class that extends BudgetManager with 
+
+**Status**: ✅ Completed
+
+---
+
+
+## SOS Sync - 2026-04-13 10:06:13
+
+## [2026-04-12 23:22:55] bd0cb9b5-6e17-42e8-84b8-5ea51c5a3502
+
+**Task**: Rename utils module to qwen_utils to avoid namespace conflicts
+
+**Advice**: The generic 'utils' module name conflicts with project-specific utils packages when qwen-coding runs from other project directories. Rename src/utils/ to src/qwen_utils/ and update all imports and pyproject.toml configuration.
+
+---
+
+## [2026-04-13 10:04:30] b2e39215-af1a-45e7-a4e1-6db370a5f4d3
+
+**Task**: Create MODE_PROFILES configuration in config.py with flash/full/pro mode definitions
+
+**Advice**: Add MODE_PROFILES dictionary to src/qwen_mcp/engines/sparring_v2/config.py with configurations for flash, full, and pro modes. Each profile should define: stages, total_budget, stage_weights, word_limits, thinking_tokens, timeout_config. Test file: tests/test_sparring_config.py
+
+---
+
+## [2026-04-13 10:04:30] 5e91a317-5018-4c6f-a7ed-20f2d73a6b6f
+
+**Task**: Create get_mode_profile() helper function in config.py
+
+**Advice**: Add get_mode_profile(mode: str) -> ModeProfile function to src/qwen_mcp/engines/sparring_v2/config.py that validates mode and returns profile from MODE_PROFILES. Raise ValueError for invalid modes. Test in tests/test_sparring_config.py
+
+---
+
+## [2026-04-13 10:04:30] 5a71ef24-8c74-48e0-ab96-dfb0c4efd7a0
+
+**Task**: Create DynamicBudgetManager class extending BudgetManager
+
+**Advice**: Create DynamicBudgetManager in src/qwen_mcp/engines/sparring_v2/base_stage_executor.py with support for: time borrowing across stages (allow_borrow: bool), timeout extension for complex tasks (extend_timeout_pct: float), and complexity-based budget adjustment. Test budget borrowing and timeout extension logic.
+
+---
+
+## [2026-04-13 10:04:30] e210f485-ecd8-4501-9dde-4c9d31405c17
+
+**Task**: Create UnifiedSparringExecutor class in modes/unified.py
+
+**Advice**: Create new file src/qwen_mcp/engines/sparring_v2/modes/unified.py with UnifiedSparringExecutor class. This class inherits from BaseStageExecutor and uses MODE_PROFILES for configuration. It should support all three modes (flash/full/pro) through a single implementation with mode-specific settings from profiles.
+
+---
+
+## [2026-04-13 10:04:30] 6d6edfcd-8080-4056-8ea0-4ce7a01e6620
+
+**Task**: Add force_mode parameter to qwen_sparring tool signature
+
+**Advice**: Update src/qwen_mcp/tools.py generate_sparring() function to add optional force_mode: Optional[str] = None parameter. This allows users to bypass auto-routing and force specific mode. Update MCP tool definition in server.py to expose this parameter.
+
+---
+
+## [2026-04-13 10:04:30] b28f3807-f156-4231-be58-99262f98c7e9
+
+**Task**: Implement mode routing logic with force_mode override
+
+**Advice**: Add _resolve_sparring_mode_with_override() helper in src/qwen_mcp/tools.py that checks force_mode first, then uses existing resolve_sparring_mode(). Update generate_sparring() to use this routing. Validate that forced mode is valid before execution.
+
+---
+
+## [2026-04-13 10:04:30] e6ca869d-1599-4363-8104-01b5ef1bb764
+
+**Task**: Create backward compatibility wrappers for Flash/Full/Pro executors
+
+**Advice**: In src/qwen_mcp/engines/sparring_v2/modes/unified.py, create FlashExecutor, FullExecutor, ProExecutor classes that delegate to UnifiedSparringExecutor with appropriate mode='flash'|'full'|'pro'. This maintains backward compatibility while using unified engine.
+
+---
+
+## [2026-04-13 10:04:30] 919cc14f-23cd-422a-b08a-e06d9cfccc8c
+
+**Task**: Integrate UnifiedSparringExecutor in engine.py
+
+**Advice**: Update src/qwen_mcp/engines/sparring_v2/engine.py to import and use UnifiedSparringExecutor instead of separate mode executors. Modify SparringEngineV2.execute() to instantiate UnifiedSparringExecutor with resolved mode parameter.
+
+---
+
+## [2026-04-13 10:04:30] 428be552-5a5f-47f5-a5a8-4021a77d5d0e
+
+**Task**: Implement and test budget borrowing logic in DynamicBudgetManager
+
+**Advice**: Add borrow_time_from_previous_stages() and extend_current_stage_timeout() methods to DynamicBudgetManager. Test that fast stages can lend unused budget to slower stages. Create tests in tests/test_sparring_budget.py.
+
+---
+
+## [2026-04-13 10:04:30] c833eeb2-e7da-44ad-9fd2-08c9b3a930df
+
+**Task**: Implement and test timeout extension for complex tasks
+
+**Advice**: Add extend_for_complex_task() method to DynamicBudgetManager that increases timeout by configured percentage (default 50%) when complexity indicator is detected. Test that timeout extension works without exceeding total budget limits.
+
+---
+
+## [2026-04-13 10:04:30] 61503428-3671-4da1-8dde-7c87d04be96e
+
+**Task**: Create end-to-end integration test for consolidated sparring
+
+**Advice**: Create tests/test_sparring_consolidation.py with e2e tests for all three modes using UnifiedSparringExecutor. Test: flash mode completes quickly, full mode with dynamic budgeting, pro mode with separate budgets, force_mode override bypasses auto-routing. Validate backward compatibility with old executor names.
+
+---
+
+## 2026-04-13 10:06 - 910f296f-7745-4e2d-ae94-0cb164ba119a
+
+**Task**: Implement Task 1: Create MODE_PROFILES configuration in config.py
+
+Read the current file src/qwen_mcp/engines/sparring_v2/config.py and add a MODE_PROFILES dictionary after the existing configuration 
+
+**Status**: ✅ Completed
+
+---
+
+
 ## 2026-04-12 22:38 - 1e0906a8-efb9-4a7d-a781-0b3a4a0c2cf6
 
 **Task**: Add progress tracking to McpExecution

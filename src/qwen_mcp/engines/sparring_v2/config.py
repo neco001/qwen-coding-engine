@@ -15,16 +15,17 @@ Note: MODE_ALIASES and DEFAULT_SPARRING_MODE are defined in tools.py to avoid ci
 # Timeout Configuration
 # =============================================================================
 # sparring1 (flash): 90s + 90s = 180s total
-# sparring2 (normal/full): Uses step timeouts with progress reporting
-# sparring3 (pro): 100s per step for step-by-step execution
+# sparring2 (normal/full): Uses step timeouts with progress reporting (ALL stages in ONE call)
+# sparring3 (pro): One stage per call = each gets full 300s MCP timeout
 
+# sparring2 timeouts: generous 90-150s per stage since all stages run in ONE MCP call (225s budget)
 TIMEOUTS = {
-    "flash_analyst": 90.0,       # sparring1: 180s total for 2 steps
-    "flash_drafter": 90.0,       # sparring1: 180s total for 2 steps
-    "discovery": 120.0,          # sparring3: step-by-step, 120s per step
-    "red_cell": 180.0,           # sparring3: step-by-step, 180s per step (4096 tokens)
-    "blue_cell": 180.0,          # sparring3: step-by-step, 180s per step (4096 tokens)
-    "white_cell": 360.0,         # sparring3: step-by-step, 360s per step (8192 tokens + synthesis + artifact)
+    "flash_analyst": 45.0,       # sparring1: 90s total for 2 steps
+    "flash_drafter": 45.0,       # sparring1: 90s total for 2 steps
+    "discovery": 90.0,           # sparring2: 90s (JSON roles)
+    "red_cell": 150.0,           # sparring2: 150s (deep analysis)
+    "blue_cell": 150.0,          # sparring2: 150s (deep defense)
+    "white_cell": 150.0,         # sparring2: 150s (synthesis + artifact)
 }
 
 # =============================================================================
@@ -184,3 +185,83 @@ DEFAULT_MODELS = {
     "blue_model": "qwen3.5-plus",
     "white_model": "qwen3.5-plus",
 }
+
+# =============================================================================
+# MODE PROFILES CONFIGURATION
+# =============================================================================
+# Mode profiles define complete configuration for each sparring mode
+# These profiles are used by the unified executor for dynamic mode selection
+
+from dataclasses import dataclass
+from typing import Dict, List
+
+
+@dataclass
+class ModeProfile:
+    """Configuration profile for a sparring mode."""
+    name: str
+    stages: List[str]
+    total_budget: int  # seconds
+    stage_weights: Dict[str, float]
+    word_limits: Dict[str, int]
+    thinking_tokens: Dict[str, int]
+    timeout_config: Dict[str, float]
+    allow_borrow: bool = False  # Allow time borrowing across stages
+    extend_timeout_pct: float = 0.5  # 50% timeout extension for complex tasks
+
+
+MODE_PROFILES = {
+    "flash": ModeProfile(
+        name="flash",
+        stages=["analyst", "drafter"],
+        total_budget=60,  # 60 seconds for fast 2-step analysis
+        stage_weights={"analyst": 0.45, "drafter": 0.55},
+        word_limits={"analyst": 200, "drafter": 300},
+        thinking_tokens={"analyst": 1024, "drafter": 1024},
+        timeout_config={"analyst": 30.0, "drafter": 30.0},
+        allow_borrow=False,
+        extend_timeout_pct=0.3,  # 30% extension for flash
+    ),
+    "full": ModeProfile(
+        name="full",
+        stages=["discovery", "red", "blue", "white"],
+        total_budget=225,  # 225 seconds shared budget
+        stage_weights={"discovery": 0.15, "red": 0.28, "blue": 0.28, "white": 0.29},
+        word_limits={"discovery": 150, "red": 300, "blue": 300, "white": 600},
+        thinking_tokens={"discovery": 1024, "red": 1024, "blue": 1024, "white": 2048},
+        timeout_config={"discovery": 45.0, "red": 60.0, "blue": 60.0, "white": 60.0},
+        allow_borrow=True,  # Allow borrowing from previous stages
+        extend_timeout_pct=0.5,  # 50% extension for complex tasks
+    ),
+    "pro": ModeProfile(
+        name="pro",
+        stages=["discovery", "red", "blue", "white"],
+        total_budget=900,  # 900 seconds total (225s per stage)
+        stage_weights={"discovery": 0.15, "red": 0.28, "blue": 0.28, "white": 0.29},
+        word_limits={"discovery": 150, "red": 600, "blue": 600, "white": 800},
+        thinking_tokens={"discovery": 2048, "red": 2048, "blue": 2048, "white": 4096},
+        timeout_config={"discovery": 100.0, "red": 100.0, "blue": 100.0, "white": 100.0},
+        allow_borrow=True,
+        extend_timeout_pct=0.5,  # 50% extension for complex tasks
+    ),
+}
+
+
+def get_mode_profile(mode: str) -> ModeProfile:
+    """
+    Get the mode profile for a given sparring mode.
+    
+    Args:
+        mode: One of 'flash', 'full', 'pro'
+    
+    Returns:
+        ModeProfile configuration for the mode
+    
+    Raises:
+        ValueError: If mode is not recognized
+    """
+    if mode not in MODE_PROFILES:
+        raise ValueError(
+            f"Invalid mode '{mode}'. Must be one of: {list(MODE_PROFILES.keys())}"
+        )
+    return MODE_PROFILES[mode]

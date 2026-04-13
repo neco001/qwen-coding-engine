@@ -289,7 +289,7 @@ async def qwen_sparring(
         "operation": f"Sparring session in progress (mode: {mode})..."
     }, project_id=project_id)
     
-    return await generate_sparring(topic, context, mode, session_id, ctx, project_id=project_id, workspace_root=workspace_root)
+    return await generate_sparring(topic, context, session_id, mode, ctx=ctx, project_id=project_id, workspace_root=workspace_root)
 
 @mcp.tool()
 async def qwen_swarm(

@@ -17,6 +17,34 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
+def _json_serializable_default(obj):
+    """
+    Default handler for JSON serialization of non-serializable objects.
+    
+    Handles edge cases where checkpoint data accidentally contains:
+    - Method objects (e.g., MCP Context methods leaking into results)
+    - Complex objects that should be converted to string representation
+    
+    Args:
+        obj: The object that JSON can't serialize
+        
+    Returns:
+        String representation of the object (for debugging)
+        
+    Warning:
+        Logs a warning so developers can fix the root cause
+    """
+    # Handle method objects (most common cause of this error)
+    if hasattr(obj, '__self__') and hasattr(obj, '__name__'):
+        logger.warning(f"Checkpoint contains method object: {obj.__qualname__ if hasattr(obj, '__qualname__') else obj.__name__}. Converting to string.")
+        return f"<method: {obj.__qualname__ if hasattr(obj, '__qualname__') else obj.__name__}>"
+    
+    # Handle any other non-serializable object
+    obj_type = type(obj).__name__
+    logger.warning(f"Checkpoint contains non-serializable {obj_type}: {repr(obj)[:100]}. Converting to string.")
+    return repr(obj)
+
 # =============================================================================
 # JSON Schema for Session Checkpoints
 # =============================================================================
@@ -149,40 +177,43 @@ class SessionStore:
         self.max_context_length = max_context_length
         logger.info(f"SessionStore initialized at {self.storage_dir.absolute()} (max_context_length={max_context_length})")
     
-    def _resolve_storage_dir(self, storage_dir: Optional[str]) -> str:
+    def _resolve_storage_dir(self, storage_dir: Optional[str]) -> Path:
         """
         Resolve the storage directory using the following priority:
         1. Explicit parameter
         2. Environment variable QWEN_SPARRING_SESSIONS_DIR
         3. User-level directory (APPDATA on Windows, ~/.qwen-mcp on Unix)
         4. Default relative directory
+        
+        Returns:
+            Path object with proper OS-specific separators
         """
         # Priority 1: Explicit parameter
         if storage_dir:
-            return storage_dir
+            return Path(storage_dir)
         
         # Priority 2: Environment variable
         env_dir = os.environ.get("QWEN_SPARRING_SESSIONS_DIR")
         if env_dir:
             logger.info(f"Using session directory from environment: {env_dir}")
-            return env_dir
+            return Path(env_dir)
         
         # Priority 3: User-level directory
         user_dir = self._get_user_data_dir()
         if user_dir:
             logger.info(f"Using user-level session directory: {user_dir}")
-            return user_dir
+            return Path(user_dir)
         
         # Priority 4: Fallback to relative directory
         logger.info("Using default relative session directory: .sparring_sessions")
-        return self.DEFAULT_DIR
+        return Path(self.DEFAULT_DIR)
     
-    def _get_user_data_dir(self) -> Optional[str]:
+    def _get_user_data_dir(self) -> Optional[Path]:
         """
         Get the user-level data directory for session storage.
         
         Returns:
-            Path to user data directory or None if not determinable
+            Path object to user data directory or None if not determinable
         """
         import sys
         
@@ -190,12 +221,12 @@ class SessionStore:
             # Windows: %APPDATA%\qwen-mcp\sparring_sessions
             appdata = os.environ.get("APPDATA")
             if appdata:
-                return os.path.join(appdata, "qwen-mcp", "sparring_sessions")
+                return Path(appdata) / "qwen-mcp" / "sparring_sessions"
         elif sys.platform == "darwin":
             # macOS: ~/Library/Application Support/qwen-mcp/sparring_sessions
             home = os.environ.get("HOME")
             if home:
-                return os.path.join(home, "Library", "Application Support", "qwen-mcp", "sparring_sessions")
+                return Path(home) / "Library" / "Application Support" / "qwen-mcp" / "sparring_sessions"
         else:
             # Linux/Unix: ~/.local/share/qwen-mcp/sparring_sessions or ~/.qwen-mcp/sparring_sessions
             home = os.environ.get("HOME")
@@ -203,9 +234,9 @@ class SessionStore:
                 # Try XDG data directory first
                 xdg_data = os.environ.get("XDG_DATA_HOME")
                 if xdg_data:
-                    return os.path.join(xdg_data, "qwen-mcp", "sparring_sessions")
+                    return Path(xdg_data) / "qwen-mcp" / "sparring_sessions"
                 # Fallback to ~/.qwen-mcp/sparring_sessions
-                return os.path.join(home, ".qwen-mcp", "sparring_sessions")
+                return Path(home) / ".qwen-mcp" / "sparring_sessions"
         
         return None
     
@@ -257,7 +288,7 @@ class SessionStore:
         
         # Atomic write: write to temp file, then rename
         data = checkpoint.to_dict()
-        json_str = json.dumps(data, indent=2, ensure_ascii=False)
+        json_str = json.dumps(data, indent=2, ensure_ascii=False, default=_json_serializable_default)
         
         # Write to temporary file first
         fd, temp_path = tempfile.mkstemp(

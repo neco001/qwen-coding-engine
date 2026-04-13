@@ -13,10 +13,10 @@ from typing import Dict
 def get_word_limit_instruction(word_count: int = 150) -> str:
     """
     Generate word limit instruction for sparring prompts.
-    
+
     Args:
         word_count: Target word count (150 for full mode, higher for pro mode)
-    
+
     Returns:
         Formatted word limit instruction string
     """
@@ -26,7 +26,7 @@ def get_word_limit_instruction(word_count: int = 150) -> str:
 - Nie używaj "cd. w następnym..." lub "kontynuacja..."
 - Jeśli brakuje miejsca, zakończ wątek syntetycznie
 - Lepiej krócej ale kompletnie, niż długo ale ucięte
-- CELUJ W ~{word_count} SŁÓW - to gwarantuje pełną odpowiedź w limicie czasu
+- odpowiedz MUSI mieścić się w ok ~{word_count} SŁÓW . Odopowiedź na znacznie wiecej słów - to błąd.
 """
 
 # Default word limits per mode

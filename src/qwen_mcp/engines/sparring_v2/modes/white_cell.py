@@ -114,7 +114,7 @@ class WhiteCellExecutor(ModeExecutor):
                 enable_thinking=True,
             )
             white_consensus = ContentValidator.validate_response(white_consensus)
-            
+
             # Check for regeneration request
             if "[REGENERATE" not in white_consensus or loop_count >= max_loops:
                 if "[REGENERATE" in white_consensus:
@@ -149,7 +149,7 @@ class WhiteCellExecutor(ModeExecutor):
                 enable_thinking=True,
             )
             blue_defense = ContentValidator.validate_response(blue_defense)
-            
+
             # Update session with new blue defense
             session.results["blue"] = {"defense": blue_defense, "raw": blue_defense}
             self.session_store.save(session)

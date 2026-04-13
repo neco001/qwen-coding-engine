@@ -1,8 +1,13 @@
 """
-Sparring Engine v2 - Full Mode Executor
+Sparring Engine v2 - Full Mode Executor (sparring2)
 
 Execute complete sparring session in one call: discovery→red→blue→white.
-Uses shorter word limits to ensure completion within MCP timeout.
+ALL stages run sequentially in ONE MCP call (225s total budget).
+
+⚠️ WARNING: This mode risks timeout if stages take too long!
+For step-by-step execution, use sparring3 (pro mode) instead.
+
+Uses shorter word limits to help fit within MCP timeout.
 
 Refactored to inherit from BaseStageExecutor for stage-based execution with:
 - Budget management (225s total budget)

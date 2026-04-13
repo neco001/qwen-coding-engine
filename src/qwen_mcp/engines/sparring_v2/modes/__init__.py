@@ -11,6 +11,12 @@ from qwen_mcp.engines.sparring_v2.modes.red_cell import RedCellExecutor
 from qwen_mcp.engines.sparring_v2.modes.blue_cell import BlueCellExecutor
 from qwen_mcp.engines.sparring_v2.modes.white_cell import WhiteCellExecutor
 from qwen_mcp.engines.sparring_v2.modes.full import FullExecutor
+from qwen_mcp.engines.sparring_v2.modes.unified import UnifiedSparringExecutor
+from qwen_mcp.engines.sparring_v2.modes.backward_compat import (
+    FlashExecutor as FlashExecutorCompat,
+    FullExecutor as FullExecutorCompat,
+    ProExecutor as ProExecutorCompat,
+)
 
 __all__ = [
     "FlashExecutor",
@@ -19,4 +25,8 @@ __all__ = [
     "BlueCellExecutor",
     "WhiteCellExecutor",
     "FullExecutor",
+    "UnifiedSparringExecutor",
+    "FlashExecutorCompat",
+    "FullExecutorCompat",
+    "ProExecutorCompat",
 ]

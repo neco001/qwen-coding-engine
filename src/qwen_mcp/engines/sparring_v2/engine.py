@@ -27,6 +27,12 @@ from qwen_mcp.engines.sparring_v2.modes.blue_cell import BlueCellExecutor
 from qwen_mcp.engines.sparring_v2.modes.white_cell import WhiteCellExecutor
 from qwen_mcp.engines.sparring_v2.modes.full import FullExecutor
 from qwen_mcp.engines.sparring_v2.modes.pro import ProExecutor
+from qwen_mcp.engines.sparring_v2.modes.unified import UnifiedSparringExecutor
+from qwen_mcp.engines.sparring_v2.modes.backward_compat import (
+    FlashExecutor,
+    FullExecutor,
+    ProExecutor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +52,15 @@ class SparringEngineV2:
     """
     
     # Mode executor mapping
+    # Note: flash/full/pro now use backward compat wrappers that delegate to UnifiedSparringExecutor
     MODE_EXECUTORS: Dict[str, Type[ModeExecutor]] = {
-        "flash": FlashExecutor,
+        "flash": FlashExecutor,  # Delegates to UnifiedSparringExecutor internally
         "discovery": DiscoveryExecutor,
         "red": RedCellExecutor,
         "blue": BlueCellExecutor,
         "white": WhiteCellExecutor,
-        "full": FullExecutor,
-        "pro": ProExecutor,  # sparring3: step-by-step with higher tokens/timeout
+        "full": FullExecutor,  # Delegates to UnifiedSparringExecutor internally
+        "pro": ProExecutor,  # Delegates to UnifiedSparringExecutor internally
     }
     
     def __init__(self, client: Optional[DashScopeClient] = None,
