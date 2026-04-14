@@ -6,6 +6,31 @@
 
 ## Pending
 
+- [x] Integrate DecisionLogOrchestrator into decision_log_sync.py - e68b693c-17b7-4bfb-9c00-527008289d8f
+
+- [x] Create models/task.py - e385bf52-9da7-4734-8758-053db85fac2a
+- [x] Create io_layer/path_resolver.py - 343c4ba6-91f6-4b76-bee5-4e2a7cccef50
+- [x] Create io_layer/file_handler.py - 2adfc111-10b3-47f9-8d9e-14ce66cea3db
+- [x] Create markdown_layer/parser.py - 750be343-7fc7-448f-8389-12808db90775
+- [x] Create markdown_layer/formatter.py - 6a6d30a5-4191-42cf-9f46-41d711064bc6
+- [x] Create markdown_layer/sections.py - a230f8df-d222-4ab1-9ff8-07b657613d60
+- [x] Create orchestrator.py - 5a1536af-5105-4307-9eb2-613b3c48de32
+- [x] Implement archival logic - 32740fe0-369e-4306-bed7-199804e0234e
+- [x] Update path resolution for CHANGELOG.md - 8bcd4fa6-5773-4085-ab51-3b6c60f0df3f
+- [x] Update original decision_log_sync.py - d1d6e677-06aa-42e0-8a2f-ffc6331ea07c
+- [x] Add unit tests for each layer - 27e280d4-839b-4b4e-a6c8-4361d8d55c86
+- [x] Remove deprecated code paths - d73a6408-6bca-44f0-a636-6aae2326218e
+
+- [x] Implement task archival in DecisionLogSyncEngine flows - bf19af91-cf26-4b9f-ba4f-9f7529c886ee
+- [x] Standardize CHANGELOG.md path to root directory - 4d5ba433-f70a-454a-b817-07ac123630f2
+
+- [x] Fix qwen_architect return type mismatch (dict vs str) - 9ac91137-99ec-416c-8a0c-c73cc781e4fe
+- [x] Audit all tools for return type consistency - c26935c6-c6ec-44f9-b26e-f563d5ec83c6
+
+- [x] Fix atomic_write leak in ContextBuilderEngine - ebe9d45a-596b-4dcb-abf5-c264d5d4247e
+- [x] Cleanup existing .tmp files in .context - 6b11b08b-54a0-42ff-bd35-722ec92c710c
+- [x] Verify context cleanup success - 17f72781-63a4-48c9-b897-77dfacae1959
+
 - [x] Align qwen_architect brownfield mode with greenfield mode - remove direct code generation - 92d2e556-69f6-4a5e-855e-57ca2951f844
   - **SOLVED**: Modified LP_BROWNFIELD_PROMPT to remove direct diff generation instructions and add swarm task assignment
   - **SOLVED**: Modified generate_lp_blueprint to parse brownfield architect response into swarm_tasks structure
@@ -37,7 +62,7 @@
 
 - [x] dodaj task: architect podaje kod. czy powinien? - analyzed, detailed task created: 92d2e556-69f6-4a5e-855e-57ca2951f844
 - [ ] tworzenie session context skutkuje produkcją plikow tmp w katalogu .\.context. a te nie są wymazywane.
-- [ ] czy narzędzie `qwen_init_request` jest potrzebne - miało być wywoływane w każdym z narzędzi.
+- [x] czy narzędzie `qwen_init_request` jest potrzebne - POTWIERDZONE: jest wywoływane automatycznie przez `_auto_init_request` wewnątrz narzędzi serwera. [2026-04-14]
 - [ ] nie działa HUD (wtyczka vsc)
 - [x] Snapshot naming convention and auto-selection - f4b59636-2c52-4488-aa32-be6efd91245f
 

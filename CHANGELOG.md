@@ -1,3 +1,282 @@
+# CHANGELOG
+
+## 2026-04-15 00:30 - a0f6d200-2bff-406b-aade-2b3e7b312bc5
+
+**Task**: Refactor `SectionManager` in `src/qwen_mcp/engines/markdown_layer/sections.py` to:
+1. Pre-compile regex patterns as class-level constants
+2. Fix EOF header detection by using `r'(## Completed\n?)'` in
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-15 00:27 - 2a7e7e83-efa0-47cc-aa72-20f200bfb7c0
+
+**Task**: I need to refactor `_mark_task_completed` in `DecisionLogSyncEngine` to delegate to `DecisionLogOrchestrator`.
+
+**Current signature of `_mark_task_completed` (line 938-987):**
+```python
+def _mark_task
+
+**Status**: ✅ Completed
+
+---
+
+
+## SOS Sync - 2026-04-15 00:26:35
+
+## [2026-04-15 00:26:01] e68b693c-17b7-4bfb-9c00-527008289d8f
+
+**Task**: Integrate DecisionLogOrchestrator into decision_log_sync.py
+
+**Advice**: Replace naive string.replace in _apply_advices_to_files and _mark_task_completed with calls to DecisionLogOrchestrator.archive_task(decision_id). This fixes the archival bug where completed tasks stay in Pending instead of moving to Completed. The Orchestrator uses SectionManager which correctly relocates the task line.
+
+---
+
+## 2026-04-15 00:26 - b8da47e1-a389-4535-af6c-b08d0ee6eb40
+
+**Task**: Write a pytest test (RED phase) for the integration of `DecisionLogOrchestrator` with `decision_log_sync.py`.
+
+Context:
+- `DecisionLogSyncEngine` (in `qwen_mcp.engines.decision_log_sync`) has a method
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-15 00:21 - bc6aa5bb-a6aa-4603-9d82-ebc0c5533f2e
+
+**Task**: Implement the `DecisionLogOrchestrator` class in `qwen_mcp.engines.orchestrator` to pass my tests.
+
+```python
+import pytest
+from unittest.mock import MagicMock, patch
+
+from qwen_mcp.engines.orchestrat
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-15 00:20 - 51d2f87f-988c-48bd-abfa-464236c73e42
+
+**Task**: Write a pytest test for the `DecisionLogOrchestrator` class in `qwen_mcp.engines.orchestrator`. 
+The required functionality for Orchestrator:
+- Takes `path_resolver: PathResolver` as dependency.
+- Use
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-15 00:19 - 42b62f82-7018-42cc-b769-a76cf2db7424
+
+**Task**: Write a pytest test for the `DecisionLogOrchestrator` class in `qwen_mcp.engines.orchestrator`. 
+The required functionality for Orchestrator:
+- Takes `PathResolver` as dependency.
+- Has `add_tasks(tas
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-15 00:11 - 89412b58-c99e-46dd-8298-51ab9f47080a
+
+**Task**: There is white space and new line mismatch in `SectionManager.archive_task()`.
+
+```
+E           AssertionError: assert '# Tasks\n\n#...sk C [id:789]' == '# Tasks\n\n#...sk A [id:123]'
+E             
+E
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-15 00:10 - d63d39a3-547d-4537-bae1-34602e477881
+
+**Task**: Implement the `SectionManager` class in `qwen_mcp.engines.markdown_layer.sections` to pass the following test:
+
+```python
+import pytest
+from qwen_mcp.engines.markdown_layer.sections import SectionMana
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-15 00:09 - 13232cb8-82da-4a36-85ba-edb46a0e60ab
+
+**Task**: Write a pytest test for the `SectionManager` class in `qwen_mcp.engines.markdown_layer.sections`. The `SectionManager` is responsible for handling markdown sections. It should have the following metho
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-15 00:08 - 0792cb8c-eeb2-4f7b-9832-c7267e8fa337
+
+**Task**: Implement the `MarkdownParser` class in `qwen_mcp.engines.markdown_layer.parser` to pass the following test:
+
+```python
+import pytest
+from qwen_mcp.engines.markdown_layer.parser import MarkdownParser
+
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-15 00:07 - 8f56f595-1eaa-4793-a03b-82531e608b30
+
+**Task**: Write a pytest test for the `MarkdownParser` class in `qwen_mcp.engines.markdown_layer.parser`. The parser should have methods like `extract_section(content: str, header: str) -> str`, `extract_tasks(
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-14 23:55 - af97027b-85e7-49b5-9152-7d01da50e572
+
+**Task**: Implement to pass this test:
+
+```python
+import pytest
+from pathlib import Path
+from qwen_mcp.engines.io_layer.file_handler import FileHandler
+
+
+class TestFileHandler:
+    """Test suite for the abstrac
+
+**Status**: ✅ Completed
+
+---
+
+
+## 2026-04-14 23:53 - 0a3a650a-056b-4b22-b4e0-b814018bf7bd
+
+**Task**: Write a pytest test for an abstract FileHandler class in `qwen_mcp.engines.io_layer.file_handler`. The FileHandler should have static/class methods for atomic file write operations. It requires tests 
+
+**Status**: ✅ Completed
+
+---
+
+
+## SOS Sync - 2026-04-14 23:34:15
+
+## [2026-04-14 21:31:57] e385bf52-9da7-4734-8758-053db85fac2a
+
+**Task**: Create models/task.py
+
+**Advice**: Create models/task.py with Task dataclass for state logic
+
+---
+
+## [2026-04-14 21:31:57] 343c4ba6-91f6-4b76-bee5-4e2a7cccef50
+
+**Task**: Create io_layer/path_resolver.py
+
+**Advice**: Create io_layer/path_resolver.py with path configuration
+
+---
+
+## [2026-04-14 21:31:57] 2adfc111-10b3-47f9-8d9e-14ce66cea3db
+
+**Task**: Create io_layer/file_handler.py
+
+**Advice**: Create io_layer/file_handler.py with abstracted file operations
+
+---
+
+## [2026-04-14 21:31:57] 750be343-7fc7-448f-8389-12808db90775
+
+**Task**: Create markdown_layer/parser.py
+
+**Advice**: Create markdown_layer/parser.py for section/task extraction
+
+---
+
+## [2026-04-14 21:31:57] 6a6d30a5-4191-42cf-9f46-41d711064bc6
+
+**Task**: Create markdown_layer/formatter.py
+
+**Advice**: Create markdown_layer/formatter.py for output generation
+
+---
+
+## [2026-04-14 21:31:57] a230f8df-d222-4ab1-9ff8-07b657613d60
+
+**Task**: Create markdown_layer/sections.py
+
+**Advice**: Create markdown_layer/sections.py for section management
+
+---
+
+## [2026-04-14 21:31:57] 5a1536af-5105-4307-9eb2-613b3c48de32
+
+**Task**: Create orchestrator.py
+
+**Advice**: Create orchestrator.py coordinating all layers
+
+---
+
+## [2026-04-14 21:31:57] 32740fe0-369e-4306-bed7-199804e0234e
+
+**Task**: Implement archival logic
+
+**Advice**: Implement archival logic in sections.py + orchestrator
+
+---
+
+## [2026-04-14 21:31:57] 8bcd4fa6-5773-4085-ab51-3b6c60f0df3f
+
+**Task**: Update path resolution for CHANGELOG.md
+
+**Advice**: Update path resolution for CHANGELOG.md location
+
+---
+
+## [2026-04-14 21:31:57] d1d6e677-06aa-42e0-8a2f-ffc6331ea07c
+
+**Task**: Update original decision_log_sync.py
+
+**Advice**: Update original decision_log_sync.py to use new modules
+
+---
+
+## [2026-04-14 21:31:57] 27e280d4-839b-4b4e-a6c8-4361d8d55c86
+
+**Task**: Add unit tests for each layer
+
+**Advice**: Add unit tests for each layer
+
+---
+
+## [2026-04-14 21:31:57] d73a6408-6bca-44f0-a636-6aae2326218e
+
+**Task**: Remove deprecated code paths
+
+**Advice**: Remove deprecated code paths
+
+---
+
+## 2026-04-14 23:34 - b7864bfb-890c-4b87-8617-4098e86b78af
+
+**Task**: Write a pytest test for a `Task` dataclass in `qwen_mcp.engines.models.task`. The `Task` dataclass should have fields like `decision_id`, `description`, `state` (e.g., 'pending', 'completed'). It shou
+
+**Status**: ✅ Completed
+
+---
+
 # Changelog
 
 ## [Full changelog](./.PLAN/CHANGELOG.md)

@@ -1,5 +1,100 @@
 # CHANGELOG
 
+## 2026-04-14 23:05 - b70ed64e-726e-4d16-bacd-b35458859c0e
+
+**Task**: Implement the following changes to DecisionLogSyncEngine and SOSPathsConfig:
+
+1. In `src/qwen_mcp/config/sos_paths.py`:
+   - Modify `get_changelog_path` to return `base / self.changelog_filename` (rem
+
+**Status**: ✅ Completed
+
+---
+
+
+## SOS Sync - 2026-04-14 22:47:25
+
+## [2026-04-14 16:41:58] a572933b-639f-458b-bc5d-a27ae8129ed7
+
+**Task**: improvement of session_context format in accordance with proposed template
+
+**Advice**: Updated SESSION_SUPPLEMENT_SYSTEM_PROMPT with 12 required sections from template, added workspace_root parameter to _format_session_summary_fallback, implemented full markdown structure matching template at .PLAN/qwen-coding-project-context-template.md
+
+---
+
+## [2026-04-14 16:56:29] 92d2e556-69f6-4a5e-855e-57ca2951f844
+
+**Task**: Align qwen_architect brownfield mode with greenfield mode - remove direct code generation
+
+**Advice**: Modify LP_BROWNFIELD_PROMPT in src/qwen_mcp/prompts/lachman.py to remove direct diff generation instructions and add swarm task assignment. Update generate_lp_blueprint in src/qwen_mcp/tools.py to ensure brownfield mode returns swarm_tasks structure similar to greenfield, not raw diffs. This ensures consistency across both modes and delegates code generation to qwen_coder.
+
+---
+
+## [2026-04-14 20:33:13] ebe9d45a-596b-4dcb-abf5-c264d5d4247e
+
+**Task**: Fix atomic_write leak in ContextBuilderEngine
+
+**Advice**: Remove lines 499-502 in context_builder.py. This redundant mkstemp() call is creating leaked .tmp files that are never used or unlinked.
+
+---
+
+## [2026-04-14 20:33:13] 6b11b08b-54a0-42ff-bd35-722ec92c710c
+
+**Task**: Cleanup existing .tmp files in .context
+
+**Advice**: Run a python one-liner or simple command to delete all *.tmp files inside the .context directory to restore order.
+
+---
+
+## [2026-04-14 20:33:13] 17f72781-63a4-48c9-b897-77dfacae1959
+
+**Task**: Verify context cleanup success
+
+**Advice**: Execute qwen_update_session_context and verify using list_dir that no new .tmp files are left behind.
+
+---
+
+## [2026-04-14 20:35:41] 9ac91137-99ec-416c-8a0c-c73cc781e4fe
+
+**Task**: Fix qwen_architect return type mismatch (dict vs str)
+
+**Advice**: Change brownfield return in generate_lp_blueprint to return string if called via MCP, or modify server.py wrapper to format the dict response into a readable markdown string before returning.
+
+---
+
+## [2026-04-14 20:35:41] c26935c6-c6ec-44f9-b26e-f563d5ec83c6
+
+**Task**: Audit all tools for return type consistency
+
+**Advice**: Ensure all MCP tools return str by default or properly handle Union[str, dict] if the client supports it. Currently, FastMCP Pydantic validation is strict.
+
+---
+
+## [2026-04-14 20:41:03] bf19af91-cf26-4b9f-ba4f-9f7529c886ee
+
+**Task**: Implement task archival in DecisionLogSyncEngine flows
+
+**Advice**: Refactor _apply_advices_to_files to use _mark_task_completed or extract a shared _archive_task utility to ensure tasks are moved to the ## Completed section during sync, not just toggled in-place.
+
+---
+
+## [2026-04-14 20:41:03] 4d5ba433-f70a-454a-b817-07ac123630f2
+
+**Task**: Standardize CHANGELOG.md path to root directory
+
+**Advice**: Update DEFAULT_SOS_PATHS or DecisionLogSyncEngine constants to point CHANGELOG.md to project root by default instead of .PLAN/ subdirectory.
+
+---
+
+## 2026-04-14 22:47 - 7a3adb23-85ba-4d5e-81c6-5fdd9cf7437e
+
+**Task**: Fix the `qwen_architect` tool in `src/qwen_mcp/server.py` (lines 192-239) to handle the case where `generate_lp_blueprint` returns a dict instead of a string (Brownfield mode). The fix should be appli
+
+**Status**: ✅ Completed
+
+---
+
+
 ## SOS Sync - 2026-04-14 07:54:27
 
 ## [2026-04-14 00:28:34] 9eca7c9b-95f6-49de-a56b-0223e8d99d60
