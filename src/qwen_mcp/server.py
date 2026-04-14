@@ -33,6 +33,7 @@ from qwen_mcp.specter.telemetry import get_broadcaster
 from qwen_mcp.specter.identity import get_current_project_id, get_session_id, get_or_create_instance_id
 from qwen_mcp.registry import registry
 import asyncio
+import json
 import logging
 import sys
 import threading
@@ -230,13 +231,25 @@ async def qwen_architect(
     from qwen_mcp.tools import generate_lp_blueprint
     # Add timeout wrapper to prevent indefinite hangs
     try:
-        return await asyncio.wait_for(
+        result = await asyncio.wait_for(
             generate_lp_blueprint(goal, context, ctx, auto_add_tasks=auto_add_tasks),
             timeout=240.0  # 4 minute timeout for architecture planning
         )
+        # Adapter: ensure MCP contract compliance (Pydantic expects str)
+        if isinstance(result, dict):
+            return result.get("manifest", json.dumps(result, indent=2, ensure_ascii=False))
+        elif isinstance(result, str):
+            return result
+        elif result is None:
+            return "❌ Error: Architect returned an empty result."
+        else:
+            return str(result)
     except asyncio.TimeoutError:
         logger.error(f"qwen_architect timed out after 240s for goal: {goal}")
         return "❌ Error: Architect request timed out after 4 minutes. The task may be too complex or the API is unresponsive."
+    except Exception as e:
+        logger.error(f"qwen_architect failed: {e}", exc_info=True)
+        return f"❌ Error: Architect failed - {str(e)}"
 
 @mcp.tool()
 async def qwen_sparring(
