@@ -119,7 +119,96 @@ async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: O
             timeout=60.0,
             progress_callback=ctx.report_progress if ctx else None
         )
-        return f"## 🏗️ Brownfield Analysis\n\n{result}"
+        
+        # Parse brownfield response into swarm_tasks structure
+        blueprint_data = extract_json_from_text(result)
+        swarm_tasks = []
+        
+        if blueprint_data and isinstance(blueprint_data, dict):
+            # If architect already provided swarm_tasks, use them
+            if "swarm_tasks" in blueprint_data:
+                swarm_tasks = blueprint_data.get("swarm_tasks", [])
+            # Otherwise, create a single qwen_coder task from the analysis
+            elif "analysis" in blueprint_data or "recommended_approach" in blueprint_data:
+                swarm_tasks = [{
+                    "id": "brownfield-implementation",
+                    "task": f"Implement brownfield changes: {blueprint_data.get('recommended_approach', 'See analysis')}",
+                    "priority": 5,
+                    "target_files": blueprint_data.get("target_files", []),
+                    "execution_hint": "qwen_coder"
+                }]
+        
+        # Build swarm section for display
+        swarm_section = ""
+        if isinstance(swarm_tasks, list) and len(swarm_tasks) > 0:
+            swarm_section = "\n\n## 🎯 Swarm Execution Tasks\n\n"
+            for task in swarm_tasks:
+                if isinstance(task, dict):
+                    task_id = task.get("id", "unknown")
+                    task_desc = task.get("task", "")
+                    priority = task.get("priority", 5)
+                    target_files = task.get("target_files", [])
+                    exec_hint = task.get("execution_hint", "qwen_coder")
+                    
+                    swarm_section += f"### {task_id} (Priority: {priority})\n"
+                    swarm_section += f"- **Task**: {task_desc}\n"
+                    swarm_section += f"- **Target Files**: {', '.join(target_files) if target_files else 'N/A'}\n"
+                    swarm_section += f"- **Execution**: `{exec_hint}`\n\n"
+        
+        # Auto-add tasks to backlog if enabled
+        if auto_add_tasks and isinstance(swarm_tasks, list) and len(swarm_tasks) > 0:
+            try:
+                from qwen_mcp.engines.decision_log_sync import DecisionLogSyncEngine
+                from qwen_mcp.config.sos_paths import DEFAULT_SOS_PATHS
+                from pathlib import Path
+                from urllib.parse import urlparse
+
+                # Determine workspace root from context
+                workspace_root = str(Path.cwd())
+                if ctx and hasattr(ctx, 'request_context') and ctx.request_context:
+                    session = ctx.request_context.session
+                    workspace_uri = getattr(session, 'root_uri', None)
+                    if workspace_uri:
+                        parsed = urlparse(workspace_uri)
+                        if parsed.scheme == 'file':
+                            workspace_root = str(Path(parsed.path))
+
+                # Initialize decision log sync engine
+                decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(workspace_root)
+                backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(workspace_root)
+                sync_engine = DecisionLogSyncEngine(decision_log_path)
+
+                # Convert swarm tasks to compatible format
+                tasks_to_add = []
+                for task in swarm_tasks:
+                    if isinstance(task, dict):
+                        tasks_to_add.append({
+                            "task_name": task.get("task", f"Unnamed task {task.get('id', 'unknown')}"),
+                            "advice": f"Auto-added from LP brownfield blueprint: {task.get('task', '')}",
+                            "complexity": str(task.get("priority", 5)),
+                            "tags": ["auto-generated", "lp-blueprint", "brownfield"],
+                            "risk_score": 0.0
+                        })
+
+                # Add tasks to backlog
+                if tasks_to_add:
+                    await sync_engine.add_tasks(tasks=tasks_to_add, backlog_path=backlog_path, workspace_root=workspace_root, session_id=project_id, decision_type="auto_task")
+            except Exception as e:
+                logger.warning(f"auto_add_tasks failed: {e}")
+        
+        # Return JSON structure for programmatic use, with swarm section for display
+        if isinstance(swarm_tasks, list) and len(swarm_tasks) > 0:
+            return {
+                "manifest": result,
+                "swarm_tasks": swarm_tasks,
+                "swarm_section": swarm_section
+            }
+        
+        return {
+            "manifest": result,
+            "swarm_tasks": [],
+            "swarm_section": ""
+        }
     
     # GREENFIELD MODE - Discovery phase with heartbeat
     discovery_msg = [
