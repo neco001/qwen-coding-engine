@@ -160,7 +160,9 @@ class CoderEngineV2:
         mode: str = "auto",
         context: str = "",
         ctx: Optional[Context] = None,
-        project_id: str = "default"
+        project_id: str = "default",
+        require_plan: bool = False,
+        require_test: bool = False
     ) -> CoderResponse:
         """
         Execute code generation with specified mode.
@@ -171,6 +173,8 @@ class CoderEngineV2:
             context: Additional context (existing code, requirements, etc.)
             ctx: MCP context for progress reporting
             project_id: Project/session ID for telemetry isolation (format: {instance}_{source}_{hash})
+            require_plan: If True, enforce plan pre-flight check (default: False)
+            require_test: If True, enforce TDD test requirement (default: False)
             
         Returns:
             CoderResponse with generated code and metadata

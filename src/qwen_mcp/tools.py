@@ -62,7 +62,7 @@ def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
             pass
     return None
 
-async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: Optional[Context] = None) -> str:
+async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: Optional[Context] = None, auto_add_tasks: bool = False) -> str:
     """Generate blueprint with heavy defense against NoneType errors and timeout protection."""
     from qwen_mcp.engines.scout import ScoutEngine
     from qwen_mcp.prompts.lachman import LP_BROWNFIELD_PROMPT
@@ -178,6 +178,7 @@ async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: O
     )
     
     blueprint_data = extract_json_from_text(blueprint_raw)
+    swarm_tasks = []
     if blueprint_data and isinstance(blueprint_data, dict) and "swarm_tasks" in blueprint_data:
         swarm_tasks = blueprint_data.get("swarm_tasks", [])
         if isinstance(swarm_tasks, list):
@@ -194,6 +195,46 @@ async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: O
                     swarm_section += f"- **Task**: {task_desc}\n"
                     swarm_section += f"- **Target Files**: {', '.join(target_files) if target_files else 'N/A'}\n"
                     swarm_section += f"- **Execution**: `{exec_hint}`\n\n"
+            # Auto-add tasks to backlog if enabled
+            if auto_add_tasks:
+                try:
+                    from qwen_mcp.engines.decision_log_sync import DecisionLogSyncEngine
+                    from qwen_mcp.config.sos_paths import DEFAULT_SOS_PATHS
+                    from pathlib import Path
+                    from urllib.parse import urlparse
+
+                    # Determine workspace root from context
+                    workspace_root = str(Path.cwd())
+                    if ctx and hasattr(ctx, 'request_context') and ctx.request_context:
+                        session = ctx.request_context.session
+                        workspace_uri = getattr(session, 'root_uri', None)
+                        if workspace_uri:
+                            parsed = urlparse(workspace_uri)
+                            if parsed.scheme == 'file':
+                                workspace_root = Path(parsed.path)
+
+                    # Initialize decision log sync engine
+                    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(workspace_root)
+                    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(workspace_root)
+                    sync_engine = DecisionLogSyncEngine(decision_log_path)
+
+                    # Convert swarm tasks to compatible format
+                    tasks_to_add = []
+                    for task in swarm_tasks:
+                        if isinstance(task, dict):
+                            tasks_to_add.append({
+                                "task_name": task.get("task", f"Unnamed task {task.get('id', 'unknown')}"),
+                                "advice": f"Auto-added from LP blueprint: {task.get('task', '')}",
+                                "complexity": str(task.get("priority", 5)),
+                                "tags": ["auto-generated", "lp-blueprint"],
+                                "risk_score": 0.0
+                            })
+
+                    # Add tasks to backlog
+                    if tasks_to_add:
+                        await sync_engine.add_tasks(tasks=tasks_to_add,backlog_path=backlog_path,workspace_root=workspace_root,session_id=project_id,decision_type="auto_task")
+                except Exception as e:
+                    logger.warning(f"auto_add_tasks failed: {e}. Blueprint returned without tasks.")
             return blueprint_raw + swarm_section
     
     return blueprint_raw
@@ -367,7 +408,7 @@ async def generate_audit(content: str, context: Optional[str] = None, ctx: Optio
         progress_callback=ctx.report_progress if ctx else None
     )
 
-async def generate_code_unified(prompt: str, mode: str = "auto", context: Optional[str] = None, ctx: Optional[Context] = None, project_id: str = "default", workspace_root: Optional[str] = None) -> str:
+async def generate_code_unified(prompt: str, mode: str = "auto", context: Optional[str] = None, ctx: Optional[Context] = None, project_id: str = "default", workspace_root: Optional[str] = None, require_plan: bool = False, require_test: bool = False) -> str:
     """
     Unified code generation with intelligent routing via CoderEngineV2.
     
@@ -411,7 +452,9 @@ async def generate_code_unified(prompt: str, mode: str = "auto", context: Option
         mode=mode,
         context=context,
         ctx=ctx,
-        project_id=project_id
+        project_id=project_id,
+        require_plan=require_plan,
+        require_test=require_test
     )
     
     if response.success:

@@ -6,14 +6,7 @@
 
 ## Pending
 
-- [ ] Fix 5: sparring3 now truly step-by-step (one stage per MCP call) - 7b2e48d0-32b0-49d9-b41b-8476a60c5d6e
-- [ ] Revert: removed word limit enforcement (obcinanie = bad) - f9989739-195b-438a-a22d-217498737739
-- [ ] Doc fix: clarify FullExecutor vs ProExecutor behavior - 6ae8b900-ec7b-4887-9945-ff45e2939dbb
-
-- [ ] Fix 1: Respect explicit sparring mode choice (was auto-overriding) - bc2cc0d3-ce1c-41cb-a91d-f3cbf390b39e
-- [ ] Fix 2: Hard word limits + enforcement (timeout doesn't control response length) - 92e266b3-181a-456e-a2e7-f2adcb4492bc
-- [ ] Fix 3: Reduce timeouts to fit within 300s MCP limit - bab822e5-e051-4a6e-aa9d-5a8bc5051d85
-- [ ] Fix 4: JSON serialization fallback for method objects - beb69f20-f21d-494a-8a0e-19dc1d3b37a8
+- [ ] improvement of session_context format in accordance with [proposed template] (C:\Repos_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\.PLAN\qwen-coding-project-context-template.md)
 
 - [ ] ostatnio coraz częściej widzę komunikaty że coder zwrócił kod ktory nie jest taki jak powinien byc.
       trzeba to sprawdzic. przyklad:
@@ -21,7 +14,6 @@
   ````zapis_bledu
         Roo said
     Now I'll use qwen_coder to implement Task 1 - creating MODE_PROFILES configuration in config.py.
-
 
     Roo wants to use a tool on the qwen-coding MCP server
     qwen-coding
@@ -32,8 +24,6 @@
       "prompt": "Implement Task 1: Create MODE_PROFILES configuration in config.py\n\nRead the current file src/qwen_mcp/engines/sparring_v2/config.py and add a MODE_PROFILES dictionary after the existing configuration sections (after DEFAULT_MODELS at the end of the file).\n\nMODE_PROFILES should define configurations for flash, full, and pro modes with the following structure:\n\n```python\nfrom dataclasses import dataclass\nfrom typing import Dict, List, Optional\n\n@dataclass\nclass ModeProfile:\n    \"\"\"Configuration profile for a sparring mode.\"\"\"\n    name: str\n    stages: List[str]\n    total_budget: int  # seconds\n    stage_weights: Dict[str, float]\n    word_limits: Dict[str, int]\n    thinking_tokens: Dict[str, int]\n    timeout_config: Dict[str, float]\n    allow_borrow: bool = False  # Allow time borrowing across stages\n    extend_timeout_pct: float = 0.5  # 50% timeout extension for complex tasks\n\nMODE_PROFILES = {\n    \"flash\": ModeProfile(\n        name=\"flash\",\n        stages=[\"analyst\", \"drafter\"],\n        total_budget=60,  # 60 seconds for fast 2-step analysis\n        stage_weights={\"analyst\": 0.45, \"drafter\": 0.55},\n        word_limits={\"analyst\": 200, \"drafter\": 300},\n        thinking_tokens={\"analyst\": 1024, \"drafter\": 1024},\n        timeout_config={\"analyst\": 30.0, \"drafter\": 30.0},\n        allow_borrow=False,\n        extend_timeout_pct=0.3,  # 30% extension for flash\n    ),\n    \"full\": ModeProfile(\n        name=\"full\",\n        stages=[\"discovery\", \"red\", \"blue\", \"white\"],\n        total_budget=225,  # 225 seconds shared budget\n        stage_weights={\"discovery\": 0.15, \"red\": 0.28, \"blue\": 0.28, \"white\": 0.29},\n        word_limits={\"discovery\": 150, \"red\": 300, \"blue\": 300, \"white\": 600},\n        thinking_tokens={\"discovery\": 1024, \"red\": 1024, \"blue\": 1024, \"white\": 2048},\n        timeout_config={\"discovery\": 33.0, \"red\": 63.0, \"blue\": 63.0, \"white\": 65.0},\n        allow_borrow=True,  # Allow borrowing from previous stages\n        extend_timeout_pct=0.5,  # 50% extension for complex tasks\n    ),\n    \"pro\": ModeProfile(\n        name=\"pro\",\n        stages=[\"discovery\", \"red\", \"blue\", \"white\"],\n        total_budget=900,  # 900 seconds total (225s per stage)\n        stage_weights={\"discovery\": 0.15, \"red\": 0.28, \"blue\": 0.28, \"white\": 0.29},\n        word_limits={\"discovery\": 150, \"red\": 600, \"blue\": 600, \"white\": 800},\n        thinking_tokens={\"discovery\": 2048, \"red\": 2048, \"blue\": 2048, \"white\": 4096},\n        timeout_config={\"discovery\": 120.0, \"red\": 180.0, \"blue\": 180.0, \"white\": 360.0},\n        allow_borrow=True,\n        extend_timeout_pct=0.5,  # 50% extension for complex tasks\n    ),\n}\n```\n\nAdd this to the end of config.py file. The MODE_PROFILES should be added after the DEFAULT_MODELS dictionary.\n\nReturn the complete updated file content."
     }
 
-
-
     API Request
     $0.0000
 
@@ -43,6 +33,13 @@
   ````
 
   pomysł: no wlasnie - czy ty mu podajesz odpowiedni kontekst? a moze coder powinien miec sam w sobie zaprogramowane multi-stage, i gdy nie ma tresci plikow to sam wywola read_file?
+  - [ ] Fix Unbound fetcher TypeError and investigate MCP progress blockage - 78ddb567-3d7c-41c2-bf8f-f80caf099e60
+
+- [ ] Dashboard ROI - wizualizacja ile energii (tokenów) spaliły poszczególne kłody (Epiki) - a8b8d19c-cedd-4a24-bf6b-35e8780f77df
+
+- [ ] Integracja raportów użycia tokenów z dynamicznym statusem sesji w Backlogu - fecae7b9-5549-4a56-851c-28c5e800391e
+
+## copleted
 
 - [x] Create MODE_PROFILES configuration in config.py with flash/full/pro mode definitions - b2e39215-af1a-45e7-a4e1-6db370a5f4d3
 - [x] Create get_mode_profile() helper function in config.py - 5e91a317-5018-4c6f-a7ed-20f2d73a6b6f
@@ -73,12 +70,6 @@
   - Added `add_tasks_to_backlog_batch()` in tools.py (lines 785-844)
   - Chunk-based processing (default: 20 tasks per chunk) to avoid MCP timeout
   - Full test coverage in tests/test_batch_tasks.py (8 tests passing)
-
-- [ ] Fix Unbound fetcher TypeError and investigate MCP progress blockage - 78ddb567-3d7c-41c2-bf8f-f80caf099e60
-
-- [ ] Dashboard ROI - wizualizacja ile energii (tokenów) spaliły poszczególne kłody (Epiki) - a8b8d19c-cedd-4a24-bf6b-35e8780f77df
-
-- [ ] Integracja raportów użycia tokenów z dynamicznym statusem sesji w Backlogu - fecae7b9-5549-4a56-851c-28c5e800391e
 
 ---
 
@@ -147,3 +138,48 @@
 - [x] T1: Content Hashing w Snapshotach - 9ab88b43-1995-4bf2-ab47-5c56192002ad
 
 - [x] Synchronizacja BACKLOG.md - dodać wszystkie pending z decision_log.parquet - 87722483-5a9b-4ebe-b331-c23fd41bec81
+
+- [x] Fix syntax error in tasks_to_add.append dictionary - 9eca7c9b-95f6-49de-a56b-0223e8d99d60
+- [x] Fix variable scope bug for swarm_tasks - 7d32100a-dd2f-499f-8e69-43fc11ccdf81
+- [x] Add exception handling for auto_add_tasks block - 88cc565f-2374-4999-95d8-e8b7215b4814
+- [x] Fix workspace URI validation - ed1f6e61-a343-4506-8692-9163c7cc5b16
+- [x] Fix naive datetime in DecisionLogSyncEngine.add_tasks - d4f15717-1887-4f1b-a5d5-21af27a3fb79
+
+### Qwen-Coding Enforcement (Layer 2: MCP Tool Validation) - COMPLETED
+
+- [x] Create qwen_init_request() utility function for telemetry reset - 13
+- [x] Modify qwen_architect to add auto_add_tasks parameter and auto-add tasks to backlog - 14
+- [x] Modify qwen_architect to add workspace_root parameter - 15
+- [x] Modify qwen_coder to add require_plan parameter for pre-flight check - 16
+- [x] Modify qwen_coder to add require_test parameter for TDD enforcement - 17
+- [x] Update MCP tool signatures in server.py for new parameters - 18
+- [x] Create tests/test_tools_enforcement.py with enforcement test cases - 19
+- [x] Update docs/TDD.md with enforcement layer documentation - 20
+- [x] Update docs/ARCHITECTURE.md with enforcement diagram - 21
+
+## Pending (Legacy)
+
+- [x] Fix session_id generation timing in UnifiedSparringExecutor.execute() - c58b514c-f752-448e-b2cb-4e8999e1a6c9
+- [x] Update DiscoveryExecutor to use existing session_id if provided - e1ec0266-e776-4940-ba8b-de004d33f543
+- [x] Fix FullExecutor import chain in engine.py - ed006198-b4d9-4506-bbc0-262864a873cd
+- [x] Test session_id propagation in sparring2 full mode - eac11924-ecad-4b8c-8908-c7f5ccd86ec2
+- [x] Evaluate and clean up duplicate FullExecutor implementations - 06de5934-2701-4333-afd8-7b6c96fef1a7
+
+- [x] Modify FullExecutor.execute() to accept session_id parameter - f6bc41eb-b733-4c05-828b-0701030854bb
+- [x] Implement session detection logic in FullExecutor - 997af485-2dc2-4c72-b54a-3ef941b1c4ec
+- [x] Update FullExecutor to run only NEXT stage when session exists - 41480973-3ec6-461d-a6b8-791b97631f37
+- [x] Update word limits to use WORD*LIMITS[full*\*] for each stage - ddfbb725-9f3d-48fd-ad83-cf3059aaee19
+- [x] Update next_command to guide user through sparring2 step-by-step flow - 897d5d5c-f868-4508-96d7-9c2ff2cfabd9
+- [x] Test sparring2 in step-by-step mode - 5ddd9804-27a5-4061-8d1c-138af391bc63
+- [x] Update documentation to explain sparring2 vs sparring3 differences - aed96848-a57a-4a65-ae39-21b232e91e26
+
+- [x] Refaktor sparring2 do działania krok-po-kroku (jak sparring3) - 0061563a-4208-464f-9819-da68aee8f9a0
+
+- [x] Fix 5: sparring3 now truly step-by-step (one stage per MCP call) - 7b2e48d0-32b0-49d9-b41b-8476a60c5d6e
+- [x] Revert: removed word limit enforcement (obcinanie = bad) - f9989739-195b-438a-a22d-217498737739
+- [x] Doc fix: clarify FullExecutor vs ProExecutor behavior - 6ae8b900-ec7b-4887-9945-ff45e2939dbb
+
+- [x] Fix 1: Respect explicit sparring mode choice (was auto-overriding) - bc2cc0d3-ce1c-41cb-a91d-f3cbf390b39e
+- [x] Fix 2: Hard word limits + enforcement (timeout doesn't control response length) - 92e266b3-181a-456e-a2e7-f2adcb4492bc
+- [x] Fix 3: Reduce timeouts to fit within 300s MCP limit - bab822e5-e051-4a6e-aa9d-5a8bc5051d85
+- [x] Fix 4: JSON serialization fallback for method objects - beb69f20-f21d-494a-8a0e-19dc1d3b37a8

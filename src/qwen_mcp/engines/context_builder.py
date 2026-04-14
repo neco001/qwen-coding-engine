@@ -300,12 +300,18 @@ Format the following session summary into a structured session supplement:
 {summary}
 
 The output should be in markdown format with the following sections:
-- Session Date
-- Objectives
-- Accomplishments
-- Decisions Made
-- Open Questions
-- Recommendations for Next Session
+1. Session Date (ISO 8601 format: YYYY-MM-DDTHH:MM)
+2. Objectives (Primary goals for this session)
+3. Accomplishments (Key achievements and completed tasks)
+4. Decisions Made (Architectural decisions, tool/library choices, configuration changes)
+5. Open Questions (Unresolved issues, future considerations, technical debt)
+6. Recommendations for Next Session (Priority tasks, files to review, tests to run)
+7. PATTERNS - Preferencje Kodowe (Code style preferences, documentation standards, workflow patterns)
+8. ANTIPATTERNS - Czego NIE robić (What to avoid: imports without checking, boilerplate generation, etc.)
+9. DECISIONS - Decyzje Architektoniczne (Historical architectural decisions with dates)
+10. SESSION_LOG - Historia Sesji (Previous sessions with dates, topics, key moments, decisions)
+11. NOTES - Uwagi (User workflow preferences, tool configurations, workspace paths)
+12. Anti-Degradation Checklist (Pre-commit verification items)
 
 If there is existing content, merge the new information while preserving historical sessions.
 """.strip()
@@ -325,24 +331,25 @@ If there is existing content, merge the new information while preserving histori
                 logger.info(f"Generated session supplement using LLM")
             except Exception as e:
                 logger.warning(f"LLM formatting failed, using fallback: {e}")
-                session_content = self._format_session_summary_fallback(summary)
+                session_content = self._format_session_summary_fallback(summary, workspace_root)
         else:
             # Fallback: format summary without LLM
-            session_content = self._format_session_summary_fallback(summary)
+            session_content = self._format_session_summary_fallback(summary, workspace_root)
         
         return session_content
     
-    def _format_session_summary_fallback(self, summary: str) -> str:
+    def _format_session_summary_fallback(self, summary: str, workspace_root: str = ".") -> str:
         """
         Format session summary into markdown without LLM.
         
         Args:
             summary: Human-readable session summary
+            workspace_root: Path to workspace root for metadata
             
         Returns:
-            Formatted markdown string
+            Formatted markdown string with all required sections
         """
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M")
         
         # Parse summary lines into sections
         lines = summary.strip().split("\n")
@@ -350,18 +357,132 @@ If there is existing content, merge the new information while preserving histori
         content = f"""# Session Supplement
 
 **Generated:** {timestamp}
+**Updated:** {timestamp}
+**Workspace:** `{workspace_root}`
 
 ---
 
-## Session Summary
+## Session Date
 
-{summary}
+{timestamp}
 
 ---
 
-## Session History
+## Objectives
 
-<!-- Previous sessions will be appended here -->
+*To be filled from session summary*
+
+---
+
+## Accomplishments
+
+*To be filled from session summary*
+
+---
+
+## Decisions Made
+
+*To be filled from session summary*
+
+---
+
+## Open Questions
+
+*To be filled from session summary*
+
+---
+
+## Recommendations for Next Session
+
+*To be filled from session summary*
+
+---
+
+## PATTERNS - Preferencje Kodowe
+
+### Styl kodu
+- **Funkcyjny > OOP** - preferuj kompozycję nad dziedziczeniem
+- **Explicit > Implicit** - jasne nazwy, jawne typy
+- **Single Responsibility** - jedna funkcja = jedno zadanie
+
+### Dokumentacja
+- **Format `.md`** - wszystkie instrukcje w markdown
+- **Wysoka gęstość informacyjna** - zero wypełniaczy
+- **Precyzja** - brak uproszczeń
+
+### Workflow
+- **Chunkowanie** - złożone zadania dziel na części ("część 1/6")
+- **Pre-generation checkpoint** - przed generowaniem kodu: potwierdź cel i ograniczenia
+- **Post-generation audit** - użyj `qwen_diff_audit_staged_tool` przed commit
+
+---
+
+## ANTIPATTERNS - Czego NIE robić
+
+### Kod
+- ❌ **Nie dodawaj importów bez pytania** - sprawdź najpierw, co już jest
+- ❌ **Nie generuj boilerplate'u** - pytaj o konkretny zakres
+- ❌ **Nie zakładaj struktury projektu** - sprawdź `.context/_PROJECT_CONTEXT.md`
+- ❌ **Nie rób refaktoryzacji na własną rękę** - to wymaga zgody
+
+### Proces
+- ❌ **Nie działaj w tle bez wiedzy** - każde narzędzie wymaga zatwierdzenia
+- ❌ **Nie zgaduj** - jak nie wiesz, to zapytaj
+- ❌ **Nie przyspieszaj procesu** - jeśli użytkownik zwalnia, dostosuj tempo
+
+---
+
+## DECISIONS - Decyzje Architektoniczne
+
+### YYYY-MM-DD: Nazwa decyzji
+**Kontekst:** Krótki opis sytuacji/problemu
+
+**Decyzja:**
+- Punkt 1
+- Punkt 2
+- Punkt 3
+
+**Zapisane w:** `ścieżka/do/pliku.md`
+
+---
+
+## SESSION_LOG - Historia Sesji
+
+### YYYY-MM-DD (bieżąca)
+**Temat:** Krótki opis
+
+**Kluczowe momenty:**
+1. Moment 1
+2. Moment 2
+3. Moment 3
+
+**Decyzje:**
+- Decyzja 1
+- Decyzja 2
+
+---
+
+## NOTES - Uwagi
+
+### Jak pracować z użytkownikiem
+1. Punkt 1
+2. Punkt 2
+3. Punkt 3
+
+### Narzędzia
+- **Interpreter:** `pyv` lub `python`
+- **Package Manager:** `uv`
+- **Preferuj:** MCP tools nad shell scripts
+
+---
+
+## Anti-Degradation Checklist
+
+Przed commit:
+- [ ] `qwen_diff_audit_staged_tool` uruchomiony
+- [ ] Brak regresji w baseline
+- [ ] Decyzje zapisane w `DECISIONS`
+- [ ] `SESSION_LOG` zaktualizowany
 """.strip()
         
         return content

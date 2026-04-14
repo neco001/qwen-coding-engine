@@ -379,7 +379,7 @@ class StageContext:
         word_limit: Word limit for the stage
         allow_regeneration: Whether to allow regeneration (for white cell)
     """
-    session_id: str
+    session_id: Optional[str]
     topic: str
     context: str = ""
     stage_results: Dict[str, Any] = field(default_factory=dict)

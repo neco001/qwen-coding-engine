@@ -139,7 +139,9 @@ async def qwen_coder(
     prompt: str,
     mode: str = "auto",
     context: Optional[str] = None,
-    ctx: Context = None
+    ctx: Context = None,
+    require_plan: bool = False,
+    require_test: bool = False
 ) -> str:
     """
     Unified code generation tool with mode-based routing.
@@ -184,13 +186,15 @@ async def qwen_coder(
         "operation": "Code generation in progress..."
     }, project_id=project_id)
     
-    return await generate_code_unified(prompt, mode, context, ctx, project_id=project_id, workspace_root=workspace_root)
+    return await generate_code_unified(prompt, mode, context, ctx, project_id=project_id, workspace_root=workspace_root, require_plan=require_plan, require_test=require_test)
 
 @mcp.tool()
 async def qwen_architect(
     goal: str,
     context: Optional[str] = None,
-    ctx: Context = None
+    ctx: Context = None,
+    auto_add_tasks: bool = False,
+    workspace_root: Optional[str] = None
 ) -> str:
     """
     Initiates 'The Lachman Protocol' (LP).
@@ -227,7 +231,7 @@ async def qwen_architect(
     # Add timeout wrapper to prevent indefinite hangs
     try:
         return await asyncio.wait_for(
-            generate_lp_blueprint(goal, context, ctx),
+            generate_lp_blueprint(goal, context, ctx, auto_add_tasks=auto_add_tasks),
             timeout=240.0  # 4 minute timeout for architecture planning
         )
     except asyncio.TimeoutError:

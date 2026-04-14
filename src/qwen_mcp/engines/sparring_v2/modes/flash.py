@@ -78,8 +78,20 @@ class FlashExecutor(BaseStageExecutor):
         try:
             if stage_name == "analyst":
                 # Step 1: Analyst
+                from qwen_mcp.prompts.sparring import get_word_limit_instruction
+                
+                # Get word limit for analyst stage
+                word_limit = getattr(self, '_word_limit', None)
+                if word_limit is None:
+                    # Try to get from context if available
+                    word_limit = getattr(context, 'word_limit', 200)  # Default for analyst
+                
+                analyst_prompt = FLASH_ANALYST_PROMPT
+                if word_limit:
+                    analyst_prompt += get_word_limit_instruction(word_limit)
+                
                 analyst_messages = [
-                    {"role": "system", "content": FLASH_ANALYST_PROMPT},
+                    {"role": "system", "content": analyst_prompt},
                     {"role": "user", "content": f"Topic: {self._topic}\n\nContext:\n{self._context}"},
                 ]
                 
@@ -108,8 +120,20 @@ class FlashExecutor(BaseStageExecutor):
                 # Step 2: Drafter - use analyst result from context
                 analysis = context.get_metadata("analyst_result", "")
                 
+                from qwen_mcp.prompts.sparring import get_word_limit_instruction
+                
+                # Get word limit for drafter stage
+                word_limit = getattr(self, '_word_limit', None)
+                if word_limit is None:
+                    # Try to get from context if available
+                    word_limit = getattr(context, 'word_limit', 300)  # Default for drafter
+                
+                drafter_prompt = FLASH_DRAFTER_PROMPT
+                if word_limit:
+                    drafter_prompt += get_word_limit_instruction(word_limit)
+                
                 drafter_messages = [
-                    {"role": "system", "content": FLASH_DRAFTER_PROMPT},
+                    {"role": "system", "content": drafter_prompt},
                     {"role": "user", "content": f"Topic: {self._topic}\n\nContext: {self._context}\n\nAnalysis:\n{analysis}"},
                 ]
                 
@@ -151,6 +175,9 @@ class FlashExecutor(BaseStageExecutor):
         topic: str,
         context: str = "",
         ctx: Optional[Context] = None,
+        word_limit: Optional[int] = None,
+        thinking_tokens: Optional[int] = None,
+        **kwargs,
     ) -> SparringResponse:
         """
         Execute flash mode analysis with ephemeral TTL checkpointing.
@@ -159,6 +186,9 @@ class FlashExecutor(BaseStageExecutor):
             topic: Topic for the sparring
             context: Additional context
             ctx: MCP context for progress reporting
+            word_limit: Optional word limit for responses
+            thinking_tokens: Optional thinking tokens
+            **kwargs: Additional arguments
             
         Returns:
             SparringResponse with analysis results
@@ -170,6 +200,7 @@ class FlashExecutor(BaseStageExecutor):
             self._topic = topic
             self._context = context
             self._ctx = ctx
+            self._word_limit = word_limit  # Store word limit for use in stages
             
             # Create ephemeral session for checkpointing
             self._ephemeral_session_id = f"flash_{topic[:20].replace(' ', '_')}_{id(self)}"
@@ -178,7 +209,8 @@ class FlashExecutor(BaseStageExecutor):
             stage_context = StageContext(
                 session_id=self._ephemeral_session_id,
                 topic=topic,
-                context=context
+                context=context,
+                word_limit=word_limit  # Pass word limit to context
             )
             
             # Report progress: starting

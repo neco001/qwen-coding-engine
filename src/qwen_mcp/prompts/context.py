@@ -108,26 +108,22 @@ Your task is to update the _SESSION_SUPPLEMENT.md with new session insights.
 
 ## Required Sections:
 
-1. **Current Session Summary**
-   - Date and session ID
-   - Primary objectives
-   - Key accomplishments
-
-2. **Decisions Made**
-   - Architectural decisions
-   - Tool/library choices
-   - Configuration changes
-
-3. **Open Questions**
-   - Unresolved issues
-   - Future considerations
-   - Technical debt identified
-
-4. **Next Session Recommendations**
-   - Priority tasks
-   - Files to review
-   - Tests to run
+1. **Session Date** (ISO 8601 format: YYYY-MM-DDTHH:MM)
+2. **Objectives** (Primary goals for this session)
+3. **Accomplishments** (Key achievements and completed tasks)
+4. **Decisions Made** (Architectural decisions, tool/library choices, configuration changes)
+5. **Open Questions** (Unresolved issues, future considerations, technical debt)
+6. **Recommendations for Next Session** (Priority tasks, files to review, tests to run)
+7. **PATTERNS - Preferencje Kodowe** (Code style preferences, documentation standards, workflow patterns)
+8. **ANTIPATTERNS - Czego NIE robić** (What to avoid: imports without checking, boilerplate generation, etc.)
+9. **DECISIONS - Decyzje Architektoniczne** (Historical architectural decisions with dates)
+10. **SESSION_LOG - Historia Sesji** (Previous sessions with dates, topics, key moments, decisions)
+11. **NOTES - Uwagi** (User workflow preferences, tool configurations, workspace paths)
+12. **Anti-Degradation Checklist** (Pre-commit verification items)
 
 ## Output Format:
 Return clean Markdown. Preserve previous sessions as historical context.
+Use ISO 8601 timestamps (YYYY-MM-DDTHH:MM) for all dates.
+Include workspace path in session metadata.
+Separate current session from historical sessions clearly.
 """

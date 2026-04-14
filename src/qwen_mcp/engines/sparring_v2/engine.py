@@ -128,7 +128,7 @@ class SparringEngineV2:
             elif mode == "white":
                 return await executor.execute(session_id=session_id, ctx=ctx)
             elif mode == "full":
-                return await executor.execute(topic=topic, context=context, ctx=ctx)
+                return await executor.execute(topic=topic, context=context, ctx=ctx, session_id=session_id)
             elif mode == "pro":
                 # sparring3: Start step-by-step with discovery (supports session resumption)
                 return await executor.execute(topic=topic, context=context, ctx=ctx, session_id=session_id)

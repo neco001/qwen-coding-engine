@@ -12,7 +12,7 @@ import asyncio
 import logging
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 import pyarrow as pa
 import pyarrow.parquet as pq
 from pathlib import Path
@@ -429,7 +429,7 @@ class DecisionLogSyncEngine:
                 
                 # Generate decision ID and timestamp
                 decision_id = str(uuid.uuid4())
-                timestamp = datetime.now()
+                timestamp = datetime.now(timezone.utc)
                 
                 # Create decision record with same schema as add_task
                 record = {

@@ -90,17 +90,23 @@ class FullExecutor(BaseStageExecutor):
                     word_limit=WORD_LIMITS["full_discovery"],
                 )
                 # Store session_id from discovery
+                logger.info(f"[Full.execute_stage.discovery] result.session_id={result.session_id!r}, result.success={result.success}")
                 if result.session_id:
                     context.session_id = result.session_id
+                    logger.info(f"[Full.execute_stage.discovery] Updated context.session_id to {context.session_id!r}")
+                else:
+                    logger.warning(f"[Full.execute_stage.discovery] result.session_id is falsy: {result.session_id!r}")
                     
             elif stage_name == "red":
                 from qwen_mcp.engines.sparring_v2.modes.red_cell import RedCellExecutor
                 executor = RedCellExecutor(self.client, self.session_store)
+                logger.info(f"[Full.execute_stage.red] BEFORE: context.session_id={context.session_id!r}")
                 result = await executor.execute(
                     session_id=context.session_id,
                     ctx=self._ctx,
                     word_limit=WORD_LIMITS["full_red"],
                 )
+                logger.info(f"[Full.execute_stage.red] AFTER: context.session_id={context.session_id!r}, result.session_id={result.session_id!r}")
                 
                 # Debug: Log red stage result
                 logger.debug(f"Red stage result: success={result.success}, error={result.error}, result keys={result.result.keys() if result.result else None}")
@@ -160,123 +166,227 @@ class FullExecutor(BaseStageExecutor):
         topic: str,
         context: str = "",
         ctx: Optional[Context] = None,
+        session_id: Optional[str] = None,
     ) -> SparringResponse:
         """
         Execute full sparring session with stage-based execution.
+        
+        Can operate in two modes:
+        1. Fresh execution: No session_id provided, run all stages
+        2. Step-by-step: session_id provided, run only next stage
         
         Args:
             topic: Topic for the sparring
             context: Additional context
             ctx: MCP context for progress reporting
+            session_id: Optional existing session ID to resume from
             
         Returns:
-            SparringResponse with full session results
+            SparringResponse with session results
         """
-        logger.info(f"Executing full mode with stage-based execution for topic: {topic}")
+        logger.info(f"Executing full mode (sparring2) - topic: {topic[:50]}..., session_id: {session_id}")
         
-        try:
-            # Store execution context for stage execution
-            self._topic = topic
-            self._context = context
-            self._ctx = ctx
-            
-            # Create initial stage context
-            stage_context = StageContext(
-                session_id="",  # Will be set by discovery stage
-                topic=topic,
-                context=context
-            )
-            
-            # Report progress: starting
-            await self._report_progress(ctx, 0.0, "[Full] Starting stage-based execution...")
-            
-            # Execute all stages with recovery
-            results = await self.execute_with_recovery(stage_context)
-            
-            # Get session_id from discovery stage
-            session_id = stage_context.session_id
-            
-            # Check for failures
-            failed_stages = [name for name, r in results.items() if not r.success]
-            
-            if failed_stages:
-                # Find first failed stage for next_command
-                first_failed = failed_stages[0]
-                completed = self.STAGES[:self.STAGES.index(first_failed)]
-                last_completed = completed[-1] if completed else None
+        # Normalize empty string session_id to None
+        if session_id == "":
+            session_id = None
+        
+        # Load existing session to determine next stage
+        existing_session = None
+        completed_stages = []
+        
+        if session_id:
+            existing_session = self.session_store.load(session_id)
+            if existing_session:
+                logger.info(f"Resuming existing session: {session_id}")
+                completed_stages = list(existing_session.steps_completed)
+                logger.info(f"Already completed stages: {completed_stages}")
                 
+                # Restore topic/context from saved session
+                if existing_session.topic:
+                    topic = existing_session.topic
+                if existing_session.context:
+                    context = existing_session.context
+
+        # Execute ALL stages sequentially in ONE MCP call (sparring2 = full batch mode)
+        # Store execution context for stage execution
+        self._topic = topic
+        self._context = context
+        self._ctx = ctx
+
+        # Initialize stage context - session_id will be updated by discovery stage
+        stage_context = StageContext(
+            session_id=session_id,
+            topic=topic,
+            context=context
+        )
+
+        await self._report_progress(ctx, 0.0, "[Full] Starting full sparring session (all stages)...")
+
+        # Execute ALL stages in sequence
+        stages_to_run = self.get_stages()
+        last_stage_result = None
+        
+        for next_stage in stages_to_run:
+            # Skip already completed stages (for session resumption)
+            if next_stage in completed_stages:
+                logger.info(f"Skipping already completed stage: {next_stage}")
+                continue
+            
+            await self._report_progress(ctx, 0.0, f"[Full] Executing {next_stage} stage...")
+
+            # Execute the stage
+            stage_result = await self.execute_stage(next_stage, stage_context)
+            
+            # Update session_id if discovery just created it
+            if next_stage == "discovery" and stage_result.success and stage_context.session_id:
+                session_id = stage_context.session_id
+                completed_stages.append(next_stage)
+            
+            # Handle stage failure
+            if not stage_result.success:
+                next_stage_after_fail = self._get_stage_after(next_stage)
                 return SparringResponse(
                     success=False,
-                    session_id=session_id if session_id else None,
-                    step_completed=last_completed or "full",
-                    next_step=first_failed,
-                    next_command=f'qwen_sparring(mode="{first_failed}", session_id="{session_id}")' if session_id else f'qwen_sparring(mode="discovery", topic="{topic}")',
+                    session_id=session_id,
+                    step_completed=next_stage,
+                    next_step=next_stage_after_fail,
+                    next_command=f'qwen_sparring(mode="{next_stage_after_fail or "discovery"}", session_id="{session_id}")' if session_id else None,
                     result=None,
-                    message=f"Full mode failed at stage: {first_failed}",
-                    error=results[first_failed].error,
+                    message=f"Full mode failed at stage: {next_stage}",
+                    error=stage_result.error,
                 )
             
-            # All stages completed successfully - assemble final report
-            final_report = self._assemble_full_report(results)
+            # Mark stage as completed
+            completed_stages.append(next_stage)
+            last_stage_result = stage_result
             
-            await self._report_progress(ctx, 100.0, "[Full] All stages completed successfully")
+            await self._report_progress(ctx, 50.0 + (len(completed_stages) / len(stages_to_run)) * 50.0, f"[Full] {next_stage.title()} complete")
+
+        # All stages complete - compile full report
+        # Load the full session to get all results
+        full_session = self.session_store.load(session_id) if session_id else None
+        if full_session and full_session.results:
+            full_report = self._compile_full_report_from_checkpoint(full_session)
+        else:
+            full_report = self._compile_full_report_from_stages(stages_to_run, last_stage_result)
+
+        return SparringResponse(
+            success=True,
+            session_id=session_id,
+            step_completed="full",
+            next_step=None,
+            next_command=None,
+            result=full_report,
+            message="Full mode (sparring2) completed successfully - all stages done",
+        )
+
+    def _get_next_stage(self, completed_stages: List[str]) -> Optional[str]:
+        """Get the next stage to execute based on completed stages."""
+        for stage in self.STAGES:
+            if stage not in completed_stages:
+                return stage
+        return None  # All stages completed
+
+    def _get_stage_after(self, current_stage: str) -> Optional[str]:
+        """Get the stage that follows the current stage."""
+        try:
+            idx = self.STAGES.index(current_stage)
+            if idx + 1 < len(self.STAGES):
+                return self.STAGES[idx + 1]
+        except ValueError:
+            pass
+        return None  # Current is last stage
+
+    def _compile_full_report_from_stages(self, stages: List[str], last_result: Any) -> str:
+        """Compile full report from stage results when session checkpoint is not available."""
+        report_parts = [
+            "# 📊 Pełny Raport Sparring2 - Analiza Wszystkich Etapów",
+            "",
+            "**Tryb:** `sparring2 (full)` - Wszystkie etapy w jednym wywołaniu",
+            "",
+            "---",
+            "",
+        ]
+        
+        # Add results from each stage
+        for stage_name in stages:
+            stage_titles = {
+                "discovery": "🎯 Krok 1: Discovery - Definicja Ról",
+                "red": "🔴 Krok 2: Red Cell - Audyt Ryzyk",
+                "blue": "🔵 Krok 3: Blue Cell - Obrona Strategiczna",
+                "white": "⚪ Krok 4: White Cell - Synteza i Rekomendacje",
+            }
             
-            return SparringResponse(
-                success=True,
-                session_id=session_id,
-                step_completed="full",
-                next_step=None,
-                next_command=None,
-                result={"full_report": final_report},
-                message="Full sparring session complete with stage-based execution",
-            )
+            report_parts.append(f"## {stage_titles.get(stage_name, stage_name)}")
+            report_parts.append("")
+            report_parts.append(f"*Stage {stage_name} completed*")
+            report_parts.append("")
+            report_parts.append("---")
+            report_parts.append("")
+        
+        return "\n".join(report_parts)
+
+    def _compile_full_report_from_checkpoint(self, session) -> str:
+        """Compile full report from a SessionCheckpoint."""
+        report_parts = [
+            "# 📊 Pełny Raport Sparring2 - Analiza Wszystkich Etapów",
+            "",
+            f"**Session ID:** `{session.session_id}`",
+            "**Tryb:** `sparring2 (full)` - Analiza wszystkich etapów w jednym wywołaniu",
+            "**Cel:** Kompleksowa analiza z użyciem mniejszego budżetu słów na etap",
+            "",
+            f"**Etap:** {', '.join(session.steps_completed)}",
+            "",
+            "---",
+            "",
+        ]
+
+        # Add roles if available
+        if session.roles:
+            report_parts.append("### 🎭 Wybrane Role:")
+            report_parts.append(f"- **Red:** {session.roles.get('red_role', 'N/A')}")
+            report_parts.append(f"- **Blue:** {session.roles.get('blue_role', 'N/A')}")
+            report_parts.append(f"- **White:** {session.roles.get('white_role', 'N/A')}")
+            report_parts.append("")
+            report_parts.append("---")
+            report_parts.append("")
+
+        # Add results from each stage
+        for stage_name in ["discovery", "red", "blue", "white"]:
+            if stage_name in session.results:
+                result = session.results[stage_name]
+                if isinstance(result, dict):
+                    # Extract the main content
+                    content = result.get("critique") or result.get("defense") or \
+                              result.get("consensus") or result.get("roles", {}) or \
+                              str(result)
+                else:
+                    content = str(result)
+
+                stage_titles = {
+                    "discovery": "🎯 Krok 1: Discovery - Definicja Ról",
+                    "red": "🔴 Krok 2: Red Cell - Audyt Ryzyk",
+                    "blue": "🔵 Krok 3: Blue Cell - Obrona Strategiczna",
+                    "white": "⚪ Krok 4: White Cell - Synteza i Rekomendacje",
+                }
+
+                report_parts.append(f"## {stage_titles.get(stage_name, stage_name)}")
+                report_parts.append("")
+                report_parts.append(content)
+                report_parts.append("")
+                report_parts.append("---")
+                report_parts.append("")
+
+        # Summary table
+        report_parts.extend([
+            "## 📋 Podsumowanie Procesu",
+            "",
+            f"**Etap:** {', '.join(session.steps_completed)}",
+            f"**Status:** {session.status}",
+            "",
+            "**sparring2 (full)** = Tryb kompleksowej analizy - wszystkie etapy w jednym wywołaniu lub krok-po-kroku",
+        ])
+
+        return "\n".join(report_parts)
             
-        except Exception as e:
-            logger.exception(f"Full mode execution failed: {e}")
-            return SparringResponse(
-                success=False,
-                session_id=None,
-                step_completed="full",
-                next_step=None,
-                next_command=None,
-                result=None,
-                message="Full mode execution failed",
-                error=str(e),
-            )
     
-    def _assemble_full_report(self, results: Dict[str, StageResult]) -> str:
-        """Assemble full session report from all stage results."""
-        from qwen_mcp.engines.sparring_v2.formatters.output import ReportAssembler
-        
-        # Convert StageResult to SparringResponse-like format for assembler
-        class MockSparringResponse:
-            def __init__(self, result, success=True, session_id=None, error=None):
-                self.result = result
-                self.success = success
-                self.session_id = session_id
-                self.error = error
-        
-        discovery_mock = MockSparringResponse(
-            results.get("discovery", StageResult("", False)).result,
-            results.get("discovery", StageResult("", False)).success
-        )
-        red_mock = MockSparringResponse(
-            results.get("red", StageResult("", False)).result,
-            results.get("red", StageResult("", False)).success
-        )
-        blue_mock = MockSparringResponse(
-            results.get("blue", StageResult("", False)).result,
-            results.get("blue", StageResult("", False)).success
-        )
-        white_mock = MockSparringResponse(
-            results.get("white", StageResult("", False)).result,
-            results.get("white", StageResult("", False)).success
-        )
-        
-        return ReportAssembler.assemble_full_report(
-            self.session_store,
-            discovery_mock,
-            red_mock,
-            blue_mock,
-            white_mock,
-        )

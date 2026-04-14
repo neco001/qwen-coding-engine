@@ -1,5 +1,274 @@
 # CHANGELOG
 
+## SOS Sync - 2026-04-14 07:54:27
+
+## [2026-04-14 00:28:34] 9eca7c9b-95f6-49de-a56b-0223e8d99d60
+
+**Task**: Fix syntax error in tasks_to_add.append dictionary
+
+**Advice**: Add missing commas in dictionary construction at src/qwen_mcp/tools.py:220. Format with proper line breaks and commas for key-value pairs.
+
+---
+
+## [2026-04-14 00:28:34] 7d32100a-dd2f-499f-8e69-43fc11ccdf81
+
+**Task**: Fix variable scope bug for swarm_tasks
+
+**Advice**: Initialize swarm_tasks = [] before the conditional block at line 180 in src/qwen_mcp/tools.py to prevent NameError when auto_add_tasks=True but blueprint has no swarm_tasks.
+
+---
+
+## [2026-04-14 00:28:34] 88cc565f-2374-4999-95d8-e8b7215b4814
+
+**Task**: Add exception handling for auto_add_tasks block
+
+**Advice**: Wrap the auto_add_tasks block (lines 198-225) in src/qwen_mcp/tools.py with try-except to log failures gracefully when DecisionLogSyncEngine.add_tasks() fails.
+
+---
+
+## [2026-04-14 00:28:34] ed1f6e61-a343-4506-8692-9163c7cc5b16
+
+**Task**: Fix workspace URI validation
+
+**Advice**: Replace hardcoded workspace_uri.startswith('file:///') with urllib.parse.urlparse for robust URI handling in src/qwen_mcp/tools.py:208.
+
+---
+
+## [2026-04-14 00:28:34] d4f15717-1887-4f1b-a5d5-21af27a3fb79
+
+**Task**: Fix naive datetime in DecisionLogSyncEngine.add_tasks
+
+**Advice**: Replace datetime.now() with datetime.now(timezone.utc) at src/qwen_mcp/engines/decision_log_sync.py:432 for timezone consistency.
+
+---
+
+## 2026-04-14 00:10 - 65f231f4-f453-48bf-9cc0-f030a2c57963
+
+**Task**: Write a pytest test for the generate_lp_blueprint function in src/qwen_mcp/tools.py that verifies the auto_add_tasks parameter works. The test should: 1. Mock DecisionLogSyncEngine.add_task with Async
+
+**Status**: ✅ Completed
+
+---
+
+
+## SOS Sync - 2026-04-13 23:40:07
+
+## [2026-04-13 22:55:20] c58b514c-f752-448e-b2cb-4e8999e1a6c9
+
+**Task**: Fix session_id generation timing in UnifiedSparringExecutor.execute()
+
+**Advice**: Remove session_id generation from unified.py:299-300. Set session_id=None initially in StageContext. After discovery stage completes, update session_id from stage_result (pattern from full.py:241-242). This ensures all stages use the same session_id created by discovery.
+
+---
+
+## [2026-04-13 22:55:20] e1ec0266-e776-4940-ba8b-de004d33f543
+
+**Task**: Update DiscoveryExecutor to use existing session_id if provided
+
+**Advice**: Update discovery.py to accept and use existing session_id from StageContext if provided (not None). Only generate new session_id if session_id is None. This preserves session continuity when called from unified executor.
+
+---
+
+## [2026-04-13 22:55:20] ed006198-b4d9-4506-bbc0-262864a873cd
+
+**Task**: Fix FullExecutor import chain in engine.py
+
+**Advice**: Change engine.py line 33 to import FullExecutor from full.py instead of backward_compat.py. Alternatively, remove backward_compat.py.FullExecutor and have it delegate to full.py.FullExecutor. This ensures the correct implementation is used.
+
+---
+
+## [2026-04-13 22:55:20] eac11924-ecad-4b8c-8908-c7f5ccd86ec2
+
+**Task**: Test session_id propagation in sparring2 full mode
+
+**Advice**: Run sparring2 test with topic that triggers full mode. Verify in logs that all 4 stages (discovery, red, blue, white) use the SAME session_id. Expected: session_id created by discovery is used by all subsequent stages.
+
+---
+
+## [2026-04-13 22:55:20] 06de5934-2701-4333-afd8-7b6c96fef1a7
+
+**Task**: Evaluate and clean up duplicate FullExecutor implementations
+
+**Advice**: After fixing unified.py, evaluate if full.py is still needed. Consider removing full.py if unified.py handles all cases correctly. Alternatively, keep full.py as reference implementation and remove backward_compat.py wrapper entirely.
+
+---
+
+## 2026-04-13 23:40 - 01389237-8228-421f-874b-2e338c001d77
+
+**Task**: Write a pytest test for the qwen_init_request utility function that verifies: 1. Telemetry counters are reset via get_broadcaster().broadcast_state with operation 'request_start'; 2. The function retu
+
+**Status**: ✅ Completed
+
+---
+
+
+## SOS Sync - 2026-04-13 20:03:58
+
+## [2026-04-13 19:54:52] 0061563a-4208-464f-9819-da68aee8f9a0
+
+**Task**: Refaktor sparring2 do działania krok-po-kroku (jak sparring3)
+
+**Advice**: FullExecutor obecnie uruchamia wszystkie 4 etapy (discovery→red→blue→white) w JEDNYM wywołaniu MCP, co ryzykuje timeout 300s. Refaktoryzacja polega na:
+
+1. **SparringEngineV2.execute()** (engine.py:130): Dodać session_id do wywołania FullExecutor
+2. **FullExecutor.execute()** (full.py:158): 
+   - Przyjmować session_id jako parametr
+   - Sprawdzać czy sesja istnieje (kontynuacja) czy to nowa sesja
+   - Uruchamiać TYLKO następny etap, nie wszystkie naraz
+   - Zwracać wynik etapu + next_command
+3. **Nowa metoda _execute_single_stage()**: Wykonuje pojedynczy etap z odpowiednim word_limit z WORD_LIMITS["full_*"]
+4. **Zachować różnice**: sparring2 ma word_limits 100-200 słów, sparring3 ma 800 słów
+
+Korzyści: eliminacja timeout, lepsza kontrola, możliwość przerwania po dowolnym etapie, spójność z sparring3.
+
+Pliki do zmiany:
+- src/qwen_mcp/engines/sparring_v2/engine.py (linia 130)
+- src/qwen_mcp/engines/sparring_v2/modes/full.py (cała klasa FullExecutor)
+- src/qwen_mcp/prompts/sparring.py (WORD_LIMITS - już istnieją)
+
+---
+
+## [2026-04-13 20:00:12] 3d4bfd01-183d-4444-b737-186ad8d7c064
+
+**Task**: Update SparringEngineV2 to pass session_id to FullExecutor
+
+**Advice**: W pliku [`engine.py:130`](src/qwen_mcp/engines/sparring_v2/engine.py:130) zmienić wywołanie FullExecutor.execute() aby przekazywało session_id. Obecnie: `await executor.execute(topic=topic, context=context, ctx=ctx)`. Zmiana na: `await executor.execute(topic=topic, context=context, ctx=ctx, session_id=session_id)`. To umożliwia FullExecutor wykrycie czy to kontynuacja istniejącej sesji.
+
+---
+
+## [2026-04-13 20:00:12] f6bc41eb-b733-4c05-828b-0701030854bb
+
+**Task**: Modify FullExecutor.execute() to accept session_id parameter
+
+**Advice**: W pliku [`full.py:158`](src/qwen_mcp/engines/sparring_v2/modes/full.py:158) dodać parametr `session_id: Optional[str] = None` do sygnatury metody execute(). To pierwszy krok do refaktoryzacji - pozwala na wykrycie czy user wywołuje sparring2 z session_id (kontynuacja) czy bez (nowa sesja).
+
+---
+
+## [2026-04-13 20:00:12] 997af485-2dc2-4c72-b54a-3ef941b1c4ec
+
+**Task**: Implement session detection logic in FullExecutor
+
+**Advice**: W FullExecutor.execute() dodać logikę sprawdzającą czy session_id istnieje: `if session_id: existing_session = self.session_store.load(session_id)`. Jeśli sesja istnieje - to kontynuacja, jeśli nie - to nowa sesja. Użyć tej logiki do decyzji czy uruchomić discovery (nowa sesja) czy następny etap (kontynuacja).
+
+---
+
+## [2026-04-13 20:00:12] 41480973-3ec6-461d-a6b8-791b97631f37
+
+**Task**: Update FullExecutor to run only NEXT stage when session exists
+
+**Advice**: Zamiast uruchamiać wszystkie etapy naraz (discovery→red→blue→white), FullExecutor ma uruchamiać TYLKO jeden etap: 1) Dla nowej sesji: discovery, 2) Dla istniejącej sesji: next_stage = _get_next_stage(completed_stages). Po wykonaniu etapu zwrócić SparringResponse z next_command do kolejnego wywołania.
+
+---
+
+## [2026-04-13 20:00:12] ddfbb725-9f3d-48fd-ad83-cf3059aaee19
+
+**Task**: Update word limits to use WORD_LIMITS[full_*] for each stage
+
+**Advice**: W metodzie _execute_single_stage() używać word_limits z WORD_LIMITS dictionary: discovery=WORD_LIMITS["full_discovery"] (100), red=WORD_LIMITS["full_red"] (150), blue=WORD_LIMITS["full_blue"] (150), white=WORD_LIMITS["full_white"] (200). To zapewnia zwięzłe odpowiedzi w sparring2 w przeciwieństwie do sparring3 (800 słów).
+
+---
+
+## [2026-04-13 20:00:12] 897d5d5c-f868-4508-96d7-9c2ff2cfabd9
+
+**Task**: Update next_command to guide user through sparring2 step-by-step flow
+
+**Advice**: Każdy etap sparring2 ma zwracać next_command w formacie: `qwen_sparring(mode='full', session_id='{session_id}')`. Discovery zwraca 'next: red', red zwraca 'next: blue', blue zwraca 'next: white', white zwraca None (koniec). User widzi postęp i wie które wywołanie wykonać dalej.
+
+---
+
+## [2026-04-13 20:00:12] 5ddd9804-27a5-4061-8d1c-138af391bc63
+
+**Task**: Test sparring2 in step-by-step mode
+
+**Advice**: Przetestować refaktoryzowany sparring2: 1) Uruchomić qwen_sparring(mode='full', topic='...') - powinno zwrócić discovery + next: red, 2) Uruchomić qwen_sparring(mode='full', session_id='...') - powinno zwrócić red + next: blue, 3) Kontynuować do white, 4) Sprawdzić czy wszystkie etapy zachowują word_limits (100-200 słów), 5) Sprawdzić czy session_store poprawnie zapisuje/odczytuje sesję.
+
+---
+
+## [2026-04-13 20:00:12] aed96848-a57a-4a65-ae39-21b232e91e26
+
+**Task**: Update documentation to explain sparring2 vs sparring3 differences
+
+**Advice**: Zaktualizować dokumentację (docs/SPARRING_V2.md lub README.md) aby wyjaśnić różnice: sparring2 (full) = krok-po-kroku z word_limits 100-200 słów, ~56s timeout na etap; sparring3 (pro) = krok-po-kroku z word_limit 800 słów, 300s timeout na etap. Oba tryby działają krok-po-kroku, ale sparring3 pozwala na głębszą analizę.
+
+---
+
+## 2026-04-13 20:03 - e202c862-5852-4120-b918-d3acc0835fd4
+
+**Original Task**: Update SparringEngineV2 to pass session_id to FullExecutor  
+**Decision ID**: `3d4bfd01-183d-4444-b737-186ad8d7c064` → `e202c862-5852-4120-b918-d3acc0835fd4`
+
+**Status**: ✅ Completed
+
+---
+
+
+## SOS Sync - 2026-04-13 18:35:24
+
+## [2026-04-13 18:01:20] bc2cc0d3-ce1c-41cb-a91d-f3cbf390b39e
+
+**Task**: Fix 1: Respect explicit sparring mode choice (was auto-overriding)
+
+**Advice**: Fixed auto-detection overriding user's explicit sparring mode choice. Changed logic to respect sparring1/sparring2/sparring3 when explicitly provided, only auto-detecting when no mode specified.
+
+---
+
+## [2026-04-13 18:01:20] 92e266b3-181a-456e-a2e7-f2adcb4492bc
+
+**Task**: Fix 2: Hard word limits + enforcement (timeout doesn't control response length)
+
+**Advice**: Updated get_word_limit_instruction to be a HARD constraint with explicit consequences. Added enforce_word_limit method to ContentValidator that truncates responses exceeding limits. Applied enforcement to red_cell, blue_cell, and white_cell executors after API calls.
+
+---
+
+## [2026-04-13 18:01:20] bab822e5-e051-4a6e-aa9d-5a8bc5051d85
+
+**Task**: Fix 3: Reduce timeouts to fit within 300s MCP limit
+
+**Advice**: Reduced sparring timeouts from 400s total to 165s total: discovery=30s, red=45s, blue=45s, white=45s. With hard word limits, responses complete much faster.
+
+---
+
+## [2026-04-13 18:01:20] beb69f20-f21d-494a-8a0e-19dc1d3b37a8
+
+**Task**: Fix 4: JSON serialization fallback for method objects
+
+**Advice**: Added custom _json_serializable_default handlers in session_store.py and _telemetry_json_default in telemetry.py to gracefully handle method objects that accidentally leak into checkpoint data.
+
+---
+
+## [2026-04-13 18:21:13] 7b2e48d0-32b0-49d9-b41b-8476a60c5d6e
+
+**Task**: Fix 5: sparring3 now truly step-by-step (one stage per MCP call)
+
+**Advice**: Rewrote ProExecutor.execute() to run ONE STAGE PER CALL instead of all 4 stages. This matches your design: each MCP call gets its own 300s timeout. User calls sparring3 repeatedly to progress through discovery→red→blue→white.
+
+---
+
+## [2026-04-13 18:21:13] f9989739-195b-438a-a22d-217498737739
+
+**Task**: Revert: removed word limit enforcement (obcinanie = bad)
+
+**Advice**: Removed enforce_word_limit from sanitizer.py and reverted get_word_limit_instruction. Word limit obcinanie was bad - it produced incomplete responses.
+
+---
+
+## [2026-04-13 18:21:13] 6ae8b900-ec7b-4887-9945-ff45e2939dbb
+
+**Task**: Doc fix: clarify FullExecutor vs ProExecutor behavior
+
+**Advice**: Updated FullExecutor and ProExecutor docstrings to clearly state: FullExecutor runs ALL stages in one call (risk timeout!), ProExecutor runs ONE stage per call (safe).
+
+---
+
+## 2026-04-13 18:35 - a2fa04f4-e583-428a-b73d-24c242ce51d2
+
+**Task**: Generate a complex git commit message following the project standards with type, scope, subject, body, and core changes. The commit should cover the changes made to implement the UnifiedSparringExecut
+
+**Status**: ✅ Completed
+
+---
+
+
 ## 2026-04-13 11:28 - 7eefc18f-7a38-4800-8b82-a6cc673d69b4
 
 **Task**: Generate code to convert a SparringResponse object to a SessionCheckpoint object for use with session_store.save(). Use the following classes: SparringResponse (from src/qwen_mcp/engines/sparring_v2/m

@@ -168,20 +168,30 @@ class UnifiedSparringExecutor(BaseStageExecutor):
             
             # Execute stage with correct parameters based on executor type
             # Each legacy executor has different signature, so we adapt the call
+            # Use stage-specific word limit from mode profile
+            stage_word_limit = self.get_word_limit(stage_name)
+            
             if stage_name == "discovery":
-                # DiscoveryExecutor.execute(topic, context, ctx, word_limit)
+                # DiscoveryExecutor.execute(topic, context, ctx, word_limit, session_id)
+                # Pass context.session_id if it exists (for session resumption)
                 result = await stage_executor.execute(
                     topic=context.topic,
                     context=context.context or "",
                     ctx=context.ctx,
-                    word_limit=context.word_limit
+                    word_limit=stage_word_limit,
+                    session_id=context.session_id  # Pass existing session_id if available
                 )
+                
+                # Update context.session_id from discovery result
+                if result.success and hasattr(result, 'session_id') and result.session_id:
+                    context.session_id = result.session_id
+                    logger.info(f"Discovery created session: {context.session_id!r}")
             elif stage_name in ("red", "blue"):
                 # RedCellExecutor/BlueCellExecutor.execute(session_id, ctx, word_limit)
                 result = await stage_executor.execute(
                     session_id=context.session_id,
                     ctx=context.ctx,
-                    word_limit=context.word_limit
+                    word_limit=stage_word_limit
                 )
             elif stage_name == "white":
                 # WhiteCellExecutor.execute(session_id, ctx, allow_regeneration, word_limit)
@@ -189,14 +199,14 @@ class UnifiedSparringExecutor(BaseStageExecutor):
                     session_id=context.session_id,
                     ctx=context.ctx,
                     allow_regeneration=context.allow_regeneration or True,
-                    word_limit=context.word_limit
+                    word_limit=stage_word_limit
                 )
             elif stage_name in ("analyst", "drafter"):
                 # FlashAnalystExecutor/DrafterExecutor may have different signatures
                 result = await stage_executor.execute(
                     session_id=context.session_id,
                     ctx=context.ctx,
-                    word_limit=context.word_limit
+                    word_limit=stage_word_limit
                 )
             else:
                 # Fallback for unknown stages
@@ -293,22 +303,25 @@ class UnifiedSparringExecutor(BaseStageExecutor):
             self._context = context
             self._ctx = ctx
 
-            # Generate valid session ID (fix empty value)
-            session_id = self.session_store._generate_session_id()
-
-            # Create initial context
+            # Create initial context - use first stage's word limit if not overridden
+            # session_id will be created by discovery stage
+            initial_word_limit = word_limit if word_limit is not None else self.get_word_limit(self._stages[0])
+            
             initial_context = StageContext(
-                session_id=session_id,
+                session_id=None,  # Discovery will create session_id
                 topic=topic,
                 context=context,
                 ctx=ctx,
-                word_limit=word_limit,
+                word_limit=initial_word_limit,
                 allow_regeneration=True,  # Enable regeneration for white cell
             )
 
             # Execute all stages
             results = await self.execute_with_recovery(initial_context)
 
+            # Get session_id from context (updated by discovery stage)
+            session_id = initial_context.session_id
+            
             # Assemble final report
             report = self._assemble_full_report(results)
 

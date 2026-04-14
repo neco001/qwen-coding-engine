@@ -33,6 +33,7 @@ class DiscoveryExecutor(ModeExecutor):
         context: str = "",
         ctx: Optional[Context] = None,
         word_limit: Optional[int] = None,
+        session_id: Optional[str] = None,
     ) -> SparringResponse:
         """
         Execute discovery mode.
@@ -126,14 +127,31 @@ class DiscoveryExecutor(ModeExecutor):
             }
             logger.warning("Using default roles and models due to discovery parse failure")
         
-        # Create session
-        session = self.session_store.create_session(topic=topic, context=context)
-        session.roles = roles
-        session.models = models
-        self.session_store.save(session)
-        
-        # CRITICAL: Log session_id for debugging
-        logger.info(f"DiscoveryExecutor created session: {session.session_id!r}")
+        # Use existing session_id if provided, otherwise create new session
+        if session_id:
+            # Load existing session and update it
+            session = self.session_store.load(session_id)
+            if session:
+                session.roles = roles
+                session.models = models
+                self.session_store.save(session)
+                logger.info(f"DiscoveryExecutor updated existing session: {session.session_id!r}")
+            else:
+                # Session not found, create new one
+                session = self.session_store.create_session(topic=topic, context=context)
+                session.roles = roles
+                session.models = models
+                self.session_store.save(session)
+                logger.info(f"DiscoveryExecutor created new session (existing not found): {session.session_id!r}")
+        else:
+            # Create new session
+            session = self.session_store.create_session(topic=topic, context=context)
+            session.roles = roles
+            session.models = models
+            self.session_store.save(session)
+            
+            # CRITICAL: Log session_id for debugging
+            logger.info(f"DiscoveryExecutor created session: {session.session_id!r}")
         
         return SparringResponse(
             success=True,

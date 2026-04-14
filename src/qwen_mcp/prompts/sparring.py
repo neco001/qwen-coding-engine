@@ -11,16 +11,16 @@ from typing import Dict
 # For sparring3 (pro mode): unlimited - step-by-step with 100s timeout.
 
 def get_word_limit_instruction(word_count: int = 150) -> str:
-    """
-    Generate word limit instruction for sparring prompts.
+   """
+   Generate word limit instruction for sparring prompts.
+   
+   Args:
+       word_count: Target word count (use values from MODE_PROFILES for specific stages)
 
-    Args:
-        word_count: Target word count (150 for full mode, higher for pro mode)
-
-    Returns:
-        Formatted word limit instruction string
-    """
-    return f"""
+   Returns:
+       Formatted word limit instruction string
+   """
+   return f"""
 ⚠️ KRYTYCZNE: Twoja odpowiedź musi być KOMPLETNA i zwięzła.
 - Nie przerywaj w połowie zdania lub wątku
 - Nie używaj "cd. w następnym..." lub "kontynuacja..."
@@ -29,17 +29,17 @@ def get_word_limit_instruction(word_count: int = 150) -> str:
 - odpowiedz MUSI mieścić się w ok ~{word_count} SŁÓW . Odopowiedź na znacznie wiecej słów - to błąd.
 """
 
-# Default word limits per mode
+# Default word limits per mode (used in MODE_PROFILES in config.py)
 WORD_LIMITS = {
-    "full_discovery": 100,   # JSON roles - short
-    "full_red": 150,         # Critique - concise
-    "full_blue": 150,        # Defense - concise
-    "full_white": 200,       # Synthesis - slightly longer
-    "pro": 800,              # Step-by-step mode - unlimited
+   "full_discovery": 100,   # JSON roles - short
+   "full_red": 150,         # Critique - concise
+   "full_blue": 150,        # Defense - concise
+   "full_white": 200,       # Synthesis - slightly longer
+   "pro": 800,              # Step-by-step mode - unlimited
 }
 
-# Legacy constant for backwards compatibility
-WORD_LIMIT_INSTRUCTION = get_word_limit_instruction(800)
+# Legacy constant for backwards compatibility (now deprecated)
+WORD_LIMIT_INSTRUCTION = get_word_limit_instruction(800)  # DEPRECATED: Use get_word_limit_instruction() with specific values from MODE_PROFILES
 def get_discovery_prompt(billing_mode: str = "coding_plan") -> str:
     """
     Generate discovery prompt with models available for the current billing mode.

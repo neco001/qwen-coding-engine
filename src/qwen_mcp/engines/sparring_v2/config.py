@@ -216,9 +216,9 @@ MODE_PROFILES = {
         stages=["analyst", "drafter"],
         total_budget=60,  # 60 seconds for fast 2-step analysis
         stage_weights={"analyst": 0.45, "drafter": 0.55},
-        word_limits={"analyst": 200, "drafter": 300},
+        word_limits={"analyst": 200, "drafter": 300},  # Balanced limits for fast 2-step analysis
         thinking_tokens={"analyst": 1024, "drafter": 1024},
-        timeout_config={"analyst": 30.0, "drafter": 30.0},
+        timeout_config={"analyst": 60.0, "drafter": 120.0},
         allow_borrow=False,
         extend_timeout_pct=0.3,  # 30% extension for flash
     ),
@@ -227,9 +227,9 @@ MODE_PROFILES = {
         stages=["discovery", "red", "blue", "white"],
         total_budget=225,  # 225 seconds shared budget
         stage_weights={"discovery": 0.15, "red": 0.28, "blue": 0.28, "white": 0.29},
-        word_limits={"discovery": 150, "red": 300, "blue": 300, "white": 600},
+        word_limits={"discovery": 100, "red": 150, "blue": 150, "white": 200},  # Align with WORD_LIMITS from sparring.py: full_discovery=100, full_red=150, full_blue=150, full_white=200
         thinking_tokens={"discovery": 1024, "red": 1024, "blue": 1024, "white": 2048},
-        timeout_config={"discovery": 45.0, "red": 60.0, "blue": 60.0, "white": 60.0},
+        timeout_config={"discovery": 45.0, "red": 120.0, "blue": 120.0, "white": 150.0},
         allow_borrow=True,  # Allow borrowing from previous stages
         extend_timeout_pct=0.5,  # 50% extension for complex tasks
     ),
@@ -238,9 +238,9 @@ MODE_PROFILES = {
         stages=["discovery", "red", "blue", "white"],
         total_budget=900,  # 900 seconds total (225s per stage)
         stage_weights={"discovery": 0.15, "red": 0.28, "blue": 0.28, "white": 0.29},
-        word_limits={"discovery": 150, "red": 600, "blue": 600, "white": 800},
+        word_limits={"discovery": 150, "red": 600, "blue": 600, "white": 800},  # Higher limits for pro mode deep analysis
         thinking_tokens={"discovery": 2048, "red": 2048, "blue": 2048, "white": 4096},
-        timeout_config={"discovery": 100.0, "red": 100.0, "blue": 100.0, "white": 100.0},
+        timeout_config={"discovery": 100.0, "red": 180.0, "blue": 180.0, "white": 180.0},
         allow_borrow=True,
         extend_timeout_pct=0.5,  # 50% extension for complex tasks
     ),
