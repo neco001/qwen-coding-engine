@@ -968,10 +968,10 @@ class DecisionLogSyncEngine:
         tokens_used: int = 0
     ) -> None:
         """
-        Append a completion entry to CHANGELOG.md with full details from parquet.
+        Append a completion entry to CHANGELOG.md via Orchestrator.
         
         Args:
-            changelog_path: Path to CHANGELOG.md
+            changelog_path: Path to CHANGELOG.md (backward compatible, not used for IO)
             decision_id: The UUID of the completed decision
             task_description: Description of the completed task
             matched_task_id: Original decision_id from BACKLOG.md (if matched)
@@ -979,17 +979,9 @@ class DecisionLogSyncEngine:
             files_changed: List of files that were modified
             tokens_used: Number of tokens consumed
         """
-        if changelog_path.exists():
-            with open(changelog_path, 'r', encoding='utf-8') as f:
-                changelog_content = f.read()
-        else:
-            changelog_content = "# CHANGELOG\n\n"
-            changelog_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Create changelog entry with full details
+        # Build changelog entry with full details
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
         
-        # Build entry with enhanced details
         entry = f"## {timestamp} - {decision_id}\n\n"
         
         # Task reference (link to original backlog item if exists)
@@ -1013,23 +1005,18 @@ class DecisionLogSyncEngine:
         entry += f"**Status**: ✅ Completed\n\n"
         entry += "---\n\n"
         
-        # Insert after "# CHANGELOG" header
-        if changelog_content.startswith("# CHANGELOG"):
-            header_end = changelog_content.find("\n", 11) + 1
-            changelog_content = changelog_content[:header_end] + "\n" + entry + changelog_content[header_end:]
-        else:
-            changelog_content = entry + changelog_content
+        # Delegate IO to Orchestrator
+        from qwen_mcp.engines.io_layer.path_resolver import PathResolver
+        from qwen_mcp.engines.orchestrator import DecisionLogOrchestrator
         
-        # Atomic write
-        fd, tmp_path = tempfile.mkstemp(suffix=".md", dir=str(changelog_path.parent))
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                f.write(changelog_content)
-            os.replace(tmp_path, str(changelog_path))
-        except Exception:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            raise
+        if hasattr(self, 'decision_log_path') and self.decision_log_path:
+            workspace_root = self.decision_log_path.parent.parent
+        else:
+            workspace_root = Path.cwd()
+        
+        resolver = PathResolver(workspace_root=workspace_root)
+        orchestrator = DecisionLogOrchestrator(path_resolver=resolver)
+        orchestrator.append_to_changelog(entry)
 
     async def apply_advice(self, decision_id: str, backlog_path: Path, changelog_path: Optional[Path] = None):
         """Applies a single advice by ID."""
@@ -1048,12 +1035,12 @@ class DecisionLogSyncEngine:
         Apply advices to BACKLOG.md and CHANGELOG.md.
         
         This method:
-        1. Marks corresponding tasks in BACKLOG.md as completed [x]
-        2. Moves completed items to CHANGELOG.md
+        1. Archives corresponding tasks in BACKLOG.md
+        2. Moves completed items to CHANGELOG.md via Orchestrator
         
         Args:
-            backlog_path: Path to BACKLOG.md
-            changelog_path: Path to CHANGELOG.md
+            backlog_path: Path to BACKLOG.md (backward compatible)
+            changelog_path: Path to CHANGELOG.md (backward compatible)
             advices: List of advice records with decision_id, agentic_advice, backlog_ref
             
         Returns:
@@ -1062,55 +1049,39 @@ class DecisionLogSyncEngine:
         backlog_updated = False
         changelog_updated = False
         
-        # Read BACKLOG.md
-        if not backlog_path.exists():
-            logger.warning(f"BACKLOG.md not found at {backlog_path}")
+        if not advices:
             return False, False
             
-        with open(backlog_path, 'r', encoding='utf-8') as f:
-            backlog_content = f.read()
-        
-        # Read CHANGELOG.md (create if doesn't exist)
-        if changelog_path.exists():
-            with open(changelog_path, 'r', encoding='utf-8') as f:
-                changelog_content = f.read()
+        if hasattr(self, 'decision_log_path') and self.decision_log_path:
+            workspace_root = self.decision_log_path.parent.parent
         else:
-            changelog_content = "# CHANGELOG\n\n"
-            changelog_path.parent.mkdir(parents=True, exist_ok=True)
+            workspace_root = Path.cwd()
+
+        # Import locally to avoid circular imports during init if paths differ
+        from qwen_mcp.engines.io_layer.path_resolver import PathResolver
+        from qwen_mcp.engines.orchestrator import DecisionLogOrchestrator
         
-        # Process each advice
+        resolver = PathResolver(workspace_root=workspace_root)
+        orchestrator = DecisionLogOrchestrator(path_resolver=resolver)
+        
         changelog_entries = []
         for advice in advices:
             decision_id = advice.get('decision_id', '')
             agentic_advice = advice.get('agentic_advice', '')
             backlog_ref = advice.get('backlog_ref', '')
             
-            # Mark task as completed in BACKLOG.md
-            # Priority: match by backlog_ref first, fall back to decision_id
-            matched = False
-            if backlog_ref:
-                pattern = rf'(- \[ \]\s*.*?{re.escape(backlog_ref)}.*?(?=\n|$))'
-                match = re.search(pattern, backlog_content)
-                if match:
-                    old_line = match.group(1)
-                    new_line = old_line.replace('- [ ]', '- [x]', 1)
-                    backlog_content = backlog_content.replace(old_line, new_line)
+            # 1. Archive task via orchestrator
+            if decision_id:
+                if orchestrator.archive_task(decision_id):
                     backlog_updated = True
-                    matched = True
-                    logger.info(f"Marked task '{backlog_ref}' as completed in BACKLOG.md")
-            
-            # Only try decision_id match if backlog_ref didn't match
-            if not matched and decision_id:
-                pattern = rf'(- \[ \]\s*.*?{re.escape(decision_id)}.*?(?=\n|$))'
-                match = re.search(pattern, backlog_content)
-                if match:
-                    old_line = match.group(1)
-                    new_line = old_line.replace('- [ ]', '- [x]', 1)
-                    backlog_content = backlog_content.replace(old_line, new_line)
+                    logger.info(f"Marked task with decision_id '{decision_id}' as completed via Orchestrator")
+            elif backlog_ref:
+                # Orchestrator uses decision_id, fallback to backlog_ref if decision_id is missing
+                if orchestrator.archive_task(backlog_ref):
                     backlog_updated = True
-                    logger.info(f"Marked task with decision_id '{decision_id}' as completed in BACKLOG.md")
+                    logger.info(f"Marked task '{backlog_ref}' as completed via Orchestrator")
             
-            # Prepare changelog entry
+            # 2. Build changelog entry format identical to old system
             timestamp = advice.get('timestamp', '')
             if timestamp:
                 if isinstance(timestamp, datetime):
@@ -1126,33 +1097,17 @@ class DecisionLogSyncEngine:
             entry += f"**Advice**: {agentic_advice}\n\n"
             entry += "---\n\n"
             changelog_entries.append(entry)
-        
-        # Write updated BACKLOG.md
-        if backlog_updated:
-            with open(backlog_path, 'w', encoding='utf-8') as f:
-                f.write(backlog_content)
-            logger.info(f"Updated BACKLOG.md with {len(advices)} completed tasks")
-        
-        # Write updated CHANGELOG.md (prepend new entries)
+            
         if changelog_entries:
-            new_changelog = "# CHANGELOG\n\n"
-            new_changelog += f"## SOS Sync - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            new_changelog += ''.join(changelog_entries)
+            # Sync cluster mega-entry directly delegates to append_to_changelog
+            mega_entry = f"## SOS Sync - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            mega_entry += "".join(changelog_entries)
             
-            # Append existing content, preserving all entries
-            if changelog_content:
-                # Skip header if present, preserve everything else
-                if changelog_content.startswith("# CHANGELOG\n\n"):
-                    existing_content = changelog_content[len("# CHANGELOG\n\n"):]
-                else:
-                    existing_content = changelog_content
-                new_changelog += existing_content
-            
-            with open(changelog_path, 'w', encoding='utf-8') as f:
-                f.write(new_changelog)
+            # SectionManager.append_to_changelog automatically inserts below the '# CHANGELOG' header
+            orchestrator.append_to_changelog(mega_entry)
             changelog_updated = True
-            logger.info(f"Updated CHANGELOG.md with {len(changelog_entries)} entries")
-        
+            logger.info(f"Appended {len(changelog_entries)} entries to CHANGELOG.md via Orchestrator")
+            
         return backlog_updated, changelog_updated
 
     async def _apply_internal(self, decision_ids: List[str], backlog_path: Path, changelog_path: Optional[Path] = None):

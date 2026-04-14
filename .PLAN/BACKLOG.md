@@ -6,6 +6,8 @@
 
 ## Pending
 
+- [ ] wiszące zadanie: Poprawię linię 1235, a potem zrefaktoryzuję \_apply_advices_to_files. Dodam metodę \_move_task_in_content(self, content, decision_id, backlog_ref=None), aby obsłużyć logikę przenoszenia zadania. Użyję qwen_coder tylko do refaktoryzacji \_apply_advices_to_files, zachowując jej obecną sygnaturę.
+
 - [x] Integrate DecisionLogOrchestrator into decision_log_sync.py - e68b693c-17b7-4bfb-9c00-527008289d8f
 
 - [x] Create models/task.py - e385bf52-9da7-4734-8758-053db85fac2a
