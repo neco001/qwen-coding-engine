@@ -18,6 +18,8 @@ import pyarrow.parquet as pq
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import tempfile
+from qwen_mcp.engines.orchestrator import DecisionLogOrchestrator
+from qwen_mcp.engines.io_layer.path_resolver import PathResolver
 
 logger = logging.getLogger(__name__)
 
@@ -935,56 +937,25 @@ class DecisionLogSyncEngine:
                     os.unlink(tmp_path)
                 raise
     
-    def _mark_task_completed(self, backlog_path: Path, decision_id: str) -> None:
+    def _mark_task_completed(self, decision_id: str) -> bool:
         """
-        Mark a task as completed in BACKLOG.md and migrate it to Completed section.
-        
+        Mark a task as completed by delegating to DecisionLogOrchestrator.
+
         Args:
-            backlog_path: Path to BACKLOG.md
             decision_id: The UUID of the decision to mark as completed
+
+        Returns:
+            bool: True if successful, False otherwise
         """
-        if not backlog_path.exists():
-            return
-        
-        with open(backlog_path, 'r', encoding='utf-8') as f:
-            backlog_content = f.read()
-        
-        # Find the task in Pending section
-        pattern = rf'(- \[ \]\s*.*?-\s*{re.escape(decision_id)}.*?(?=\n|$))'
-        match = re.search(pattern, backlog_content)
-        
-        if match:
-            old_line = match.group(1)
-            # Change checkbox to [x]
-            new_line = old_line.replace('- [ ]', '- [x]', 1)
-            
-            # Check if Completed section exists
-            if '## Completed' not in backlog_content:
-                # Add Completed section before the end of file
-                backlog_content = backlog_content.rstrip() + '\n\n---\n\n## Completed\n'
-            
-            # Remove from Pending section
-            backlog_content = backlog_content.replace(old_line, '')
-            
-            # Clean up extra blank lines in Pending section
-            backlog_content = re.sub(r'\n{3,}', '\n\n', backlog_content)
-            
-            # Add to Completed section (after ## Completed header)
-            completed_section_match = re.search(r'(## Completed\n)', backlog_content)
-            if completed_section_match:
-                insert_pos = completed_section_match.end()
-                backlog_content = backlog_content[:insert_pos] + '\n' + new_line + backlog_content[insert_pos:]
-            
-            # Atomic write
-            fd, tmp_path = tempfile.mkstemp(suffix=".md", dir=str(backlog_path.parent))
-            try:
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                    f.write(backlog_content)
-                os.replace(tmp_path, str(backlog_path))
-            except Exception:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-                raise
+        if hasattr(self, 'decision_log_path') and self.decision_log_path:
+            workspace_root = self.decision_log_path.parent.parent
+        else:
+            workspace_root = Path.cwd()
+
+        resolver = PathResolver(workspace_root=workspace_root)
+        orchestrator = DecisionLogOrchestrator(path_resolver=resolver)
+
+        return orchestrator.archive_task(decision_id)
 
     def _append_changelog(
         self,

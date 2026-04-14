@@ -70,9 +70,9 @@ class SOSPathsConfig(BaseModel):
         return base / self.plan_dir / self.backlog_filename
     
     def get_changelog_path(self, workspace_root: Optional[Union[str, Path]] = None) -> Path:
-        """Get full path to CHANGELOG.md file."""
+        """Get full path to CHANGELOG.md file in workspace root."""
         base = self.resolve_workspace_root(workspace_root)
-        return base / self.plan_dir / self.changelog_filename
+        return base / self.changelog_filename
     
     def ensure_directories_exist(self, workspace_root: Optional[Union[str, Path]] = None):
         """Create all required directories if they don't exist."""
