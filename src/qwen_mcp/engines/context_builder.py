@@ -295,39 +295,44 @@ class ContextBuilderEngine:
         
         # Build prompt for LLM to format session summary
         user_prompt = f"""
-Format the following session summary into a structured session supplement:
+Format the following session summary into a structured session supplement.
 
+--- NEW SESSION SUMMARY ---
 {summary}
+--- END NEW SESSION SUMMARY ---
 
-The output should be in markdown format with the following sections:
-1. Session Date (ISO 8601 format: YYYY-MM-DDTHH:MM)
-2. Objectives (Primary goals for this session)
-3. Accomplishments (Key achievements and completed tasks)
-4. Decisions Made (Architectural decisions, tool/library choices, configuration changes)
-5. Open Questions (Unresolved issues, future considerations, technical debt)
-6. Recommendations for Next Session (Priority tasks, files to review, tests to run)
-7. PATTERNS - Preferencje Kodowe (Code style preferences, documentation standards, workflow patterns)
-8. ANTIPATTERNS - Czego NIE robić (What to avoid: imports without checking, boilerplate generation, etc.)
-9. DECISIONS - Decyzje Architektoniczne (Historical architectural decisions with dates)
-10. SESSION_LOG - Historia Sesji (Previous sessions with dates, topics, key moments, decisions)
-11. NOTES - Uwagi (User workflow preferences, tool configurations, workspace paths)
-12. Anti-Degradation Checklist (Pre-commit verification items)
+--- EXISTING SESSION SUPPLEMENT ---
+{existing_content}
+--- END EXISTING SESSION SUPPLEMENT ---
 
-If there is existing content, merge the new information while preserving historical sessions.
+The output should be a complete markdown document using the existing content as a base and incorporating the new information.
+Follow these rules:
+1. Session Date: Update to current {datetime.now().strftime("%Y-%m-%dT%H:%M")}.
+2. Objectives: List the primary goals from the new summary.
+3. Accomplishments: List key achievements from the new summary.
+4. Decisions Made: Extract any architectural or technical decisions.
+5. Open Questions: List unresolved issues.
+6. Recommendations: Priority tasks for the next session.
+7. PATTERNS/ANTIPATTERNS: Preserve existing ones unless specifically changed.
+8. DECISIONS: Append the new decision to this historical log (with date).
+9. SESSION_LOG: PREPEND the new session entry at the TOP of this history section.
+10. Anti-Degradation Checklist: Ensure it is present at the end.
+
+If there is NO existing content, generate a fresh document based on the summary.
 """.strip()
         
         # Use LLM to format if client is available
-        if self.client:
+        if self.client and hasattr(self.client, "generate_completion"):
             try:
-                response = await self.client.chat.completions.create(
-                    model="qwen3.5-plus",
+                # Use generate_completion (standard MCP tool path) for better routing
+                session_content = await self.client.generate_completion(
                     messages=[
                         {"role": "system", "content": SESSION_SUPPLEMENT_SYSTEM_PROMPT},
                         {"role": "user", "content": user_prompt}
                     ],
-                    max_tokens=0,  # unlimited - controlled by thinking_budget
+                    task_type="strategist",
+                    complexity="medium"
                 )
-                session_content = response.choices[0].message.content
                 logger.info(f"Generated session supplement using LLM")
             except Exception as e:
                 logger.warning(f"LLM formatting failed, using fallback: {e}")
@@ -341,19 +346,15 @@ If there is existing content, merge the new information while preserving histori
     def _format_session_summary_fallback(self, summary: str, workspace_root: str = ".") -> str:
         """
         Format session summary into markdown without LLM.
-        
-        Args:
-            summary: Human-readable session summary
-            workspace_root: Path to workspace root for metadata
-            
-        Returns:
-            Formatted markdown string with all required sections
         """
         timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M")
         
-        # Parse summary lines into sections
-        lines = summary.strip().split("\n")
-        
+        # Simple extraction of key points from summary
+        summary_lines = summary.strip().split("\n")
+        accomplishments = "\n".join([f"- {line.strip()}" for line in summary_lines if line.strip()][:5])
+        if not accomplishments:
+            accomplishments = "*No items extracted*"
+            
         content = f"""# Session Supplement
 
 **Generated:** {timestamp}
@@ -370,31 +371,31 @@ If there is existing content, merge the new information while preserving histori
 
 ## Objectives
 
-*To be filled from session summary*
+{summary_lines[0] if summary_lines else "Session continuity"}
 
 ---
 
 ## Accomplishments
 
-*To be filled from session summary*
+{accomplishments}
 
 ---
 
 ## Decisions Made
 
-*To be filled from session summary*
+*Review summary for details*
 
 ---
 
 ## Open Questions
 
-*To be filled from session summary*
+*To be defined*
 
 ---
 
 ## Recommendations for Next Session
 
-*To be filled from session summary*
+*Continue current roadmap*
 
 ---
 
@@ -434,31 +435,25 @@ If there is existing content, merge the new information while preserving histori
 
 ## DECISIONS - Decyzje Architektoniczne
 
-### YYYY-MM-DD: Nazwa decyzji
-**Kontekst:** Krótki opis sytuacji/problemu
+### {timestamp}: Session Update
+**Kontekst:** Session summary update
 
 **Decyzja:**
-- Punkt 1
-- Punkt 2
-- Punkt 3
-
-**Zapisane w:** `ścieżka/do/pliku.md`
+- Update context with current findings
 
 ---
 
 ## SESSION_LOG - Historia Sesji
 
-### YYYY-MM-DD (bieżąca)
-**Temat:** Krótki opis
+### {timestamp} (bieżąca)
+**Temat:** {summary_lines[0] if summary_lines else "General update"}
 
 **Kluczowe momenty:**
-1. Moment 1
-2. Moment 2
-3. Moment 3
+1. {summary_lines[0] if summary_lines else "Started session"}
+2. Summary processed
 
 **Decyzje:**
-- Decyzja 1
-- Decyzja 2
+- Updated session supplement
 
 ---
 
@@ -532,14 +527,38 @@ Przed commit:
         return sections
 
     def _merge_sections(self, old_sections: List[Tuple[str, str]], new_sections: List[Tuple[str, str]]) -> str:
-        old_map = {h: c for h, c in old_sections}
+        old_map = {h.strip(): c for h, c in old_sections}
         merged = [f"<!-- version: {datetime.now().strftime('%Y%m%d-%H%M')} -->", ""]
+        
+        # New sections headers that should be appended/prepended rather than replaced
+        LOG_SECTIONS = ["## SESSION_LOG - Historia Sesji", "## DECISIONS - Decyzje Architektoniczne"]
+        
+        seen_headers = set()
         for header, new_c in new_sections:
-            if header in old_map:
-                old_c = old_map[header]
-                if self._content_changed(old_c, new_c): merged.extend([header, new_c])
-                else: merged.extend([header, old_c])
-            else: merged.extend([header, new_c])
+            h_key = header.strip()
+            seen_headers.add(h_key)
+            if h_key in LOG_SECTIONS and h_key in old_map:
+                old_c = old_map[h_key]
+                # Prepend new content to old log content (assuming reverse chronological order)
+                # We need to be careful with double headers.
+                # Just merge them ensuring no duplicates at the junction
+                clean_new = new_c.strip()
+                clean_old = old_c.strip()
+                merged.extend([header, f"{clean_new}\n\n{clean_old}"])
+            elif h_key in old_map:
+                old_c = old_map[h_key]
+                if self._content_changed(old_c, new_c): 
+                    merged.extend([header, new_c])
+                else: 
+                    merged.extend([header, old_c])
+            else:
+                merged.extend([header, new_c])
+        
+        # Add historical sections that were NOT in the new template
+        for header, old_c in old_sections:
+            if header.strip() not in seen_headers:
+                merged.extend([header, old_c])
+                
         return '\n'.join(merged)
 
     def _content_changed(self, old_c: str, new_c: str) -> bool:
