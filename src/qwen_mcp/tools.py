@@ -1164,11 +1164,19 @@ async def qwen_get_task(
         output += f"**Session ID**: {row.get('session_id', 'N/A')}\n"
         output += f"**Created**: {row.get('timestamp', 'N/A')}\n\n"
         
-        if 'tags' in row and row['tags']:
-            output += f"**Tags**: {row['tags']}\n\n"
+        if 'tags' in row:
+            tags_val = row['tags']
+            if tags_val is not None:
+                if hasattr(tags_val, '__len__') and not isinstance(tags_val, str):
+                    if len(tags_val) > 0:
+                        output += f"**Tags**: {tags_val}\n\n"
+                elif tags_val:
+                    output += f"**Tags**: {tags_val}\n\n"
         
         if 'agentic_advice' in row:
-            output += f"### Advice\n\n{row['agentic_advice']}\n"
+            advice_val = row['agentic_advice']
+            if advice_val is not None and str(advice_val).strip():
+                output += f"### Advice\n\n{advice_val}\n"
         
         return output
         

@@ -102,7 +102,19 @@ class DecisionLogSyncEngine:
             finally:
                 self._release_lock()
 
-        return await asyncio.to_thread(lambda: [r for r in read_data() if r.get('agentic_advice') and not r.get('patch_applied', False)])
+        def is_non_empty(val):
+            if val is None:
+                return False
+            if isinstance(val, (list, str)):
+                return len(val) > 0
+            if hasattr(val, '__len__'):
+                return len(val) > 0
+            return bool(val)
+
+        return await asyncio.to_thread(lambda: [
+            r for r in read_data() 
+            if is_non_empty(r.get('agentic_advice')) and not r.get('patch_applied', False)
+        ])
     
     async def query_decisions(
         self,

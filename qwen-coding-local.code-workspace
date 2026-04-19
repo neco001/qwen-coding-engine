@@ -1,0 +1,52 @@
+{
+  "folders": [
+	{
+		"path": "."
+	}
+],
+  "settings": {
+    "workbench.colorCustomizations": {
+      "statusBarItem.warningBackground": "#b5d902",
+      "statusBarItem.warningForeground": "#000000",
+      "statusBarItem.warningHoverBackground": "#b5d902",
+      "statusBarItem.warningHoverForeground": "#00000090",
+      "statusBarItem.remoteBackground": "#c2e60f",
+      "statusBarItem.remoteForeground": "#000000",
+      "statusBarItem.remoteHoverBackground": "#cff31c",
+      "statusBarItem.remoteHoverForeground": "#00000090",
+      "statusBar.background": "#b5d902",
+      "statusBar.foreground": "#000000",
+      "statusBar.border": "#b5d902",
+      "statusBar.debuggingBackground": "#b5d902",
+      "statusBar.debuggingForeground": "#000000",
+      "statusBar.debuggingBorder": "#b5d902",
+      "statusBar.noFolderBackground": "#b5d902",
+      "statusBar.noFolderForeground": "#000000",
+      "statusBar.noFolderBorder": "#b5d902",
+      "statusBar.prominentBackground": "#b5d902",
+      "statusBar.prominentForeground": "#000000",
+      "statusBar.prominentHoverBackground": "#b5d902",
+      "statusBar.prominentHoverForeground": "#00000090",
+      "focusBorder": "#b5d90299",
+      "progressBar.background": "#b5d902",
+      "textLink.foreground": "#f5ff42",
+      "textLink.activeForeground": "#ffff4f",
+      "selection.background": "#a8cc00",
+      "list.highlightForeground": "#b5d902",
+      "list.focusAndSelectionOutline": "#b5d90299",
+      "button.background": "#b5d902",
+      "button.foreground": "#000000",
+      "button.hoverBackground": "#c2e60f",
+      "tab.activeBorderTop": "#c2e60f",
+      "pickerGroup.foreground": "#c2e60f",
+      "list.activeSelectionBackground": "#b5d9024d",
+      "panelTitle.activeBorder": "#c2e60f",
+      "activityBar.activeBorder": "#b5d902",
+      "activityBarBadge.foreground": "#000000",
+      "activityBarBadge.background": "#b5d902"
+    },
+    "window.title": "1776195451554",
+    "folder-color.pathColors": [],
+    "projectColors.mainColor": "#f0247c"
+  }
+}

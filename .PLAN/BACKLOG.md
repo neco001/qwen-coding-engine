@@ -6,7 +6,34 @@
 
 ## Pending
 
-- [ ] wiszące zadanie: Poprawię linię 1235, a potem zrefaktoryzuję \_apply_advices_to_files. Dodam metodę \_move_task_in_content(self, content, decision_id, backlog_ref=None), aby obsłużyć logikę przenoszenia zadania. Użyję qwen_coder tylko do refaktoryzacji \_apply_advices_to_files, zachowując jej obecną sygnaturę.
+- [ ] [BACKEND] Explainable Scoring Engine - c68b4abe-4946-42d5-9a5a-900251f444c5
+- [ ] [BACKEND] Data Integrity Lock - 271ffb92-2d21-43d2-8802-12cb00973644
+- [ ] [BACKEND] Manual Override API - 7c9c4570-0044-4d39-8301-7daeb912a41b
+- [ ] [FRONT] Resilient Polling Hub - d7b07f66-aa2f-4c9e-aba8-1f876bd533bb
+- [ ] [FRONT] Intelligence Highlighting - 3ee59c7c-6427-4331-9d48-2bc7b013eb90
+- [ ] [UI] Tactical Feed & Controls - e0e6e76e-988c-4556-ab0c-45a077ab0c77
+
+- [ ] Build column dictionary from input file (cleaned of \n) - 3e1f6f01-5d20-411e-984b-7332b5d0aad8
+
+- [ ] [INFRA] Universal ConfigManager with Secret Encryption - 1837d3f4-8421-48d2-bc44-36519a63e34c
+- [ ] [INFRA] Multi-Cloud Provider System (Strategy Pattern) - c3198d18-ecbf-4430-b41f-74f0ac0b8678
+- [ ] [SECURITY] Cloud-Safe Password Policy Enforcement - a1126c50-a573-4b74-a5a8-4ac62404f3a0
+- [ ] [UI] Centralized Settings Hub (Tabbed Interface) - d74f73d9-e5e7-4ac9-9d1b-993f4fea4d24
+- [ ] [LOGIC] Automated 24h Cloud Clean-up Worker - 647b4129-f6cf-4f78-ba62-f45dd8bae2b6
+- [ ] [INT] Wire Multi-Cloud Delivery to Main UI Flow - e3877910-3070-42b4-9a06-e1de8c292726
+
+- [ ] [OVERSEAS] Refaktoryzacja rejestru kolumn (Pure English) - ac3bda58-531c-44a8-ac5d-514368e5a18c
+- [ ] [OVERSEAS] Implementacja logiki De-Sinization w procesorze - fe6507b7-4d1c-427a-ab70-37721b5509b9
+- [ ] [OVERSEAS] Przebudowa skryptu Power Query dla nowych nazw - 24af190c-c634-4e9b-88c1-8d36318d0512
+
+- [ ] Implement Core Email Engine (EmailService) - d89152a3-ec2e-4138-876d-a5406ddb9da0
+- [ ] Implement Encrypted SMTP Config Manager - 0a1ad1a1-e70b-4b57-bd24-762d4724a42f
+- [ ] Create UI for Email Settings & Connectivity Test - f34109d3-22a6-4602-aea5-f69fcffc1d6b
+- [ ] Integrate Email Sending into Encryption Workflow - b5d6d55a-023c-4c5d-83ca-e8805a376711
+
+- [ ] [P0] PDF Data Extraction & Preview Integration - 59499826-e4dd-49d3-83ae-4a7926515749
+
+- [x] wiszące zadanie: Poprawię linię 1235, a potem zrefaktoryzuję \_apply_advices_to_files. Dodam metodę \_move_task_in_content(self, content, decision_id, backlog_ref=None), aby obsłużyć logikę przenoszenia zadania. Użyję qwen_coder tylko do refaktoryzacji \_apply_advices_to_files, zachowując jej obecną sygnaturę.
 
 - [x] Integrate DecisionLogOrchestrator into decision_log_sync.py - e68b693c-17b7-4bfb-9c00-527008289d8f
 
@@ -40,7 +67,8 @@
 
 - [x] improvement of session_context format in accordance with [proposed template] (C:\Repos_Toolbox\mcp_servers\Qwen-mcp\qwen-coding-local\.PLAN\qwen-coding-project-context-template.md) - a572933b-639f-458b-bc5d-a27ae8129ed7
 
-- [ ] Fix Unbound fetcher TypeError and investigate MCP progress blockage - 78ddb567-3d7c-41c2-bf8f-f80caf099e60
+- [x] Fix Unbound fetcher TypeError and investigate MCP progress blockage - 78ddb567-3d7c-41c2-bf8f-f80caf099e60
+  - **CLOSED**: "fetcher" nie istnieje w codebase - to był tytuł taska, nie błąd. Znaleziono i naprawiono brakujący `import time` w `billing.py` (używany w retry loop `_init_db`).
 
 - [ ] Dashboard ROI - wizualizacja ile energii (tokenów) spaliły poszczególne kłody (Epiki) - a8b8d19c-cedd-4a24-bf6b-35e8780f77df
 

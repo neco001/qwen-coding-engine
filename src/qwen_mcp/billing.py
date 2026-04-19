@@ -4,6 +4,7 @@ import atexit
 import tempfile
 import asyncio
 import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from platformdirs import user_cache_dir
