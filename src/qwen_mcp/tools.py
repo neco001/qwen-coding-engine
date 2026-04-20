@@ -4,7 +4,7 @@ import re
 import os
 import glob
 import pandas as pd
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from mcp.server.fastmcp import Context
 from qwen_mcp.api import DashScopeClient
 from qwen_mcp.base import set_billing_mode, get_billing_mode as get_current_billing_mode
@@ -12,6 +12,9 @@ from qwen_mcp.registry import registry
 from qwen_mcp.sanitizer import ContentValidator
 from qwen_mcp.specter.telemetry import get_broadcaster
 from qwen_mcp.config.sos_paths import DEFAULT_SOS_PATHS
+from qwen_mcp.engines.scout import ScoutEngine
+from qwen_mcp.engines.decision_log_sync import DecisionLogSyncEngine
+from qwen_mcp.prompts.lachman import LP_BROWNFIELD_PROMPT
 
 # Re-export billing mode functions for server.py
 __all__ = [
@@ -48,7 +51,7 @@ def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
         return None
     try:
         # Try finding a ```json block first
-        match = re.search(r'```json\n(.*?)\n```', text, re.DOTALL)
+        match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
         json_str = match.group(1) if match else text
         if not json_str: return None
         return json.loads(json_str.strip())
@@ -62,24 +65,47 @@ def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
             pass
     return None
 
-async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: Optional[Context] = None, auto_add_tasks: bool = False) -> str:
+async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: Optional[Context] = None, auto_add_tasks: bool = False, workspace_root: Optional[str] = None) -> Union[str, Dict[str, Any]]:
     """Generate blueprint with heavy defense against NoneType errors and timeout protection."""
-    from qwen_mcp.engines.scout import ScoutEngine
-    from qwen_mcp.prompts.lachman import LP_BROWNFIELD_PROMPT
-    from qwen_mcp.specter.telemetry import get_broadcaster
+    from urllib.parse import urlparse
+    from pathlib import Path
     
     client = DashScopeClient()
     scout = ScoutEngine(client)
     
+    # 0. DETERMINE WORKSPACE ROOT (Harden against contamination)
+    from urllib.parse import urlparse
+    from pathlib import Path
+    if not workspace_root:
+        if ctx and hasattr(ctx, 'request_context') and ctx.request_context:
+            try:
+                session = ctx.request_context.session
+                # Try multiple attribute names for compatibility
+                for attr in ('root_uri', 'workspaceUri', 'workspace_root'):
+                    workspace_uri = getattr(session, attr, None)
+                    if workspace_uri:
+                        parsed = urlparse(workspace_uri)
+                        if parsed.scheme == 'file' and parsed.path:
+                            # Normalize path (handle Windows /C:/ and Unix /path)
+                            path_str = parsed.path
+                            if os.name == 'nt' and path_str.startswith('/') and len(path_str) > 2 and path_str[2] == ':':
+                                path_str = path_str[1:]
+                            candidate = Path(path_str)
+                            if candidate.exists():
+                                workspace_root = str(candidate.resolve())
+                                break
+            except Exception:
+                pass
+    
+    if not workspace_root:
+        # Fallback to CWD only if not in server mode
+        if os.environ.get("QWEN_ENV") == "server":
+             raise ValueError("CRITICAL: workspace_root could not be determined. Refusing to default to server CWD.")
+        workspace_root = os.getcwd()
+        logger.warning(f"No workspace_root provided. Falling back to CWD: {workspace_root}")
+
     # Extract project_id for telemetry
     project_id = "default"
-    if ctx:
-        try:
-            from mcp.server.fastmcp import Context
-            # Extract from ctx if available
-            pass
-        except Exception:
-            pass
     
     # 0. Initial Sizing with heartbeat protection
     try:
@@ -158,35 +184,36 @@ async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: O
         # Auto-add tasks to backlog if enabled
         if auto_add_tasks and isinstance(swarm_tasks, list) and len(swarm_tasks) > 0:
             try:
-                from qwen_mcp.engines.decision_log_sync import DecisionLogSyncEngine
-                from qwen_mcp.config.sos_paths import DEFAULT_SOS_PATHS
-                from pathlib import Path
-                from urllib.parse import urlparse
-
-                # Determine workspace root from context
-                workspace_root = str(Path.cwd())
-                if ctx and hasattr(ctx, 'request_context') and ctx.request_context:
-                    session = ctx.request_context.session
-                    workspace_uri = getattr(session, 'root_uri', None)
-                    if workspace_uri:
-                        parsed = urlparse(workspace_uri)
-                        if parsed.scheme == 'file':
-                            workspace_root = str(Path(parsed.path))
-
-                # Initialize decision log sync engine
+                # Initialize decision log sync engine with explicit workspace isolation
                 decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(workspace_root)
                 backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(workspace_root)
                 sync_engine = DecisionLogSyncEngine(decision_log_path)
+
+                # Master Decision Logging
+                master_decision_id = await sync_engine.log_decision(
+                    decision_description=f"Blueprint for: {goal}",
+                    session_id=project_id,
+                    blueprint_ref=result,
+                    tags=["lp-master-blueprint", "brownfield"]
+                )
 
                 # Convert swarm tasks to compatible format
                 tasks_to_add = []
                 for task in swarm_tasks:
                     if isinstance(task, dict):
+                        # ENHANCEMENT: Inject full architectural context into each task's advice
+                        enriched_advice = (
+                            f"{task.get('task', '')}\n\n"
+                            f"---\n"
+                            f"## 🏗️ ARCHITECTURAL BLUEPRINT (Reference)\n"
+                            f"Master Decision: {master_decision_id}\n\n"
+                            f"{result}"
+                        )
                         tasks_to_add.append({
                             "task_name": task.get("task", f"Unnamed task {task.get('id', 'unknown')}"),
-                            "advice": f"Auto-added from LP brownfield blueprint: {task.get('task', '')}",
+                            "advice": enriched_advice,
                             "complexity": str(task.get("priority", 5)),
-                            "tags": ["auto-generated", "lp-blueprint", "brownfield"],
+                            "tags": ["auto-generated", "lp-blueprint", "brownfield", f"master:{master_decision_id[:8]}"],
                             "risk_score": 0.0
                         })
 
@@ -287,41 +314,41 @@ async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: O
             # Auto-add tasks to backlog if enabled
             if auto_add_tasks:
                 try:
-                    from qwen_mcp.engines.decision_log_sync import DecisionLogSyncEngine
-                    from qwen_mcp.config.sos_paths import DEFAULT_SOS_PATHS
-                    from pathlib import Path
-                    from urllib.parse import urlparse
+                    # Determined earlier in hardened block
+                    # workspace_root = str(Path.cwd())
+                    # ...
 
-                    # Determine workspace root from context
-                    workspace_root = str(Path.cwd())
-                    if ctx and hasattr(ctx, 'request_context') and ctx.request_context:
-                        session = ctx.request_context.session
-                        workspace_uri = getattr(session, 'root_uri', None)
-                        if workspace_uri:
-                            parsed = urlparse(workspace_uri)
-                            if parsed.scheme == 'file':
-                                workspace_root = Path(parsed.path)
-
-                    # Initialize decision log sync engine
-                    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(workspace_root)
-                    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(workspace_root)
-                    sync_engine = DecisionLogSyncEngine(decision_log_path)
+                    # Master Decision Logging
+                    master_decision_id = await sync_engine.log_decision(
+                        decision_description=f"Blueprint for: {goal}",
+                        session_id=project_id,
+                        blueprint_ref=blueprint_raw,
+                        tags=["lp-master-blueprint", "greenfield"]
+                    )
 
                     # Convert swarm tasks to compatible format
                     tasks_to_add = []
                     for task in swarm_tasks:
                         if isinstance(task, dict):
+                            # ENHANCEMENT: Inject full architectural context into each task's advice
+                            enriched_advice = (
+                                f"{task.get('task', '')}\n\n"
+                                f"---\n"
+                                f"## 🏗️ ARCHITECTURAL BLUEPRINT (Reference)\n"
+                                f"Master Decision: {master_decision_id}\n\n"
+                                f"{blueprint_raw}"
+                            )
                             tasks_to_add.append({
                                 "task_name": task.get("task", f"Unnamed task {task.get('id', 'unknown')}"),
-                                "advice": f"Auto-added from LP blueprint: {task.get('task', '')}",
+                                "advice": enriched_advice,
                                 "complexity": str(task.get("priority", 5)),
-                                "tags": ["auto-generated", "lp-blueprint"],
+                                "tags": ["auto-generated", "lp-blueprint", f"master:{master_decision_id[:8]}"],
                                 "risk_score": 0.0
                             })
 
                     # Add tasks to backlog
                     if tasks_to_add:
-                        await sync_engine.add_tasks(tasks=tasks_to_add,backlog_path=backlog_path,workspace_root=workspace_root,session_id=project_id,decision_type="auto_task")
+                        await sync_engine.add_tasks(tasks=tasks_to_add, backlog_path=backlog_path, workspace_root=workspace_root, session_id=project_id, decision_type="auto_task")
                 except Exception as e:
                     logger.warning(f"auto_add_tasks failed: {e}. Blueprint returned without tasks.")
             return blueprint_raw + swarm_section
@@ -549,21 +576,34 @@ async def generate_code_unified(prompt: str, mode: str = "auto", context: Option
     if response.success:
         # Auto-invoke DecisionLogSync after successful code generation
         try:
-            # CRITICAL: Use provided workspace_root, NOT Path.cwd()
-            # This ensures files are saved in the CLIENT's project directory, not server directory
-            if workspace_root:
-                workspace = Path(workspace_root)
-            else:
-                # Fallback to MCP context's workspace folder if available
+            # CRITICAL: Prioritize provided workspace_root, then extract from ctx, then fail if server
+            if not workspace_root:
                 if ctx and hasattr(ctx, 'request_context') and ctx.request_context:
-                    session = ctx.request_context.session
-                    workspace_uri = getattr(session, 'root_uri', None)
-                    if workspace_uri and workspace_uri.startswith('file:///'):
-                        workspace = Path(workspace_uri[8:])
-                    else:
-                        workspace = Path.cwd()
-                else:
-                    workspace = Path.cwd()
+                    try:
+                        session = ctx.request_context.session
+                        for attr in ('root_uri', 'workspaceUri', 'workspace_root'):
+                            workspace_uri = getattr(session, attr, None)
+                            if workspace_uri and workspace_uri.startswith('file:///'):
+                                # Normalize path
+                                path_str = workspace_uri[8:]
+                                if os.name == 'nt' and path_str[1:3] == ':/': 
+                                    pass # already good
+                                elif os.name == 'nt' and path_str[2] == ':':
+                                    path_str = path_str[1:] # remove leading /
+                                
+                                candidate = Path(path_str)
+                                if candidate.exists():
+                                    workspace_root = str(candidate.resolve())
+                                    break
+                    except Exception:
+                        pass
+            
+            if not workspace_root:
+                if os.environ.get("QWEN_ENV") == "server":
+                    raise ValueError("CRITICAL: workspace_root missing in coder tool. Refusing fallback to server CWD.")
+                workspace_root = os.getcwd()
+
+            workspace = Path(workspace_root)
             
             decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(workspace)
             backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(workspace)

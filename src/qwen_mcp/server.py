@@ -42,15 +42,36 @@ import os
 import hashlib
 import uvicorn
 from fastapi import FastAPI, WebSocket
+import functools
 
 logger = logging.getLogger(__name__)
 
 # Initialize FastMCP Server
 mcp = FastMCP("Qwen MCP Server (DashScope)")
 
+# Set environment marker for tools to know they are running in the server context
+os.environ["QWEN_ENV"] = "server"
+
+def telemetry_gate(operation: str):
+    """
+    Decorator to wrap MCP tools with automated telemetry and billing reset.
+    
+    Args:
+        operation: The name of the operation for telemetry tracking
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Extract ctx from kwargs if provided
+            ctx = kwargs.get("ctx")
+            await _auto_init_request(ctx, operation)
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
+
 async def _auto_init_request(ctx: Context = None, project_id: str = "default") -> None:
     """
-    Automatically initialize request state for HUD telemetry.
+    Automatically initialize request state for HUD telemetry and reset billing counters.
     
     This eliminates the dependency on agent awareness by ensuring
     every tool call starts with a properly initialized request state.
@@ -59,9 +80,12 @@ async def _auto_init_request(ctx: Context = None, project_id: str = "default") -
         ctx: MCP context for session ID extraction
         project_id: Optional explicit project ID (uses ctx if not provided)
     """
+    from qwen_mcp.billing import billing_tracker
     broadcaster = get_broadcaster()
     if project_id == "default" and ctx is not None:
         project_id = _get_tool_session_id(ctx, default_source="auto")
+    
+    # Initialize request in telemetry (broadcaster handles start_request logic)
     await broadcaster.start_request(project_id=project_id)
 
 
@@ -95,6 +119,7 @@ def _get_tool_session_id(ctx: Context = None, default_source: str = "mcp") -> st
     return get_session_id(instance_id, client_source, cwd)
 
 @mcp.tool()
+@telemetry_gate("audit")
 async def qwen_audit(
     content: str,
     context: Optional[str] = None,
@@ -116,7 +141,6 @@ async def qwen_audit(
     Returns:
         Audit report with findings and recommendations
     """
-    await _auto_init_request(ctx, "audit")
     project_id = _get_tool_session_id(ctx, default_source="audit")
     
     # Report progress FIRST (before any broadcast_state to avoid double-response)
@@ -136,6 +160,7 @@ async def qwen_audit(
     return await generate_audit(content, context, ctx, use_swarm=use_swarm, project_id=project_id)
 
 @mcp.tool()
+@telemetry_gate("coder")
 async def qwen_coder(
     prompt: str,
     mode: str = "auto",
@@ -162,7 +187,6 @@ async def qwen_coder(
     - qwen_coder (old) → now calls qwen_coder(mode="standard")
     - qwen_coder_pro (old) → now calls qwen_coder(mode="pro")
     """
-    await _auto_init_request(ctx, "coder")
     project_id = _get_tool_session_id(ctx, default_source="coder")
     
     # Extract workspace_root from MCP context
@@ -190,6 +214,7 @@ async def qwen_coder(
     return await generate_code_unified(prompt, mode, context, ctx, project_id=project_id, workspace_root=workspace_root, require_plan=require_plan, require_test=require_test)
 
 @mcp.tool()
+@telemetry_gate("architect")
 async def qwen_architect(
     goal: str,
     context: Optional[str] = None,
@@ -211,7 +236,6 @@ async def qwen_architect(
     GREENFIELD OUTPUT:
     - Full LP blueprint with swarm_tasks, manifest, roadmap
     """
-    await _auto_init_request(ctx, "architect")
     project_id = _get_tool_session_id(ctx, default_source="architect")
     
     # Report progress FIRST (before any broadcast_state to avoid double-response)
@@ -232,7 +256,7 @@ async def qwen_architect(
     # Add timeout wrapper to prevent indefinite hangs
     try:
         result = await asyncio.wait_for(
-            generate_lp_blueprint(goal, context, ctx, auto_add_tasks=auto_add_tasks),
+            generate_lp_blueprint(goal, context, ctx, auto_add_tasks=auto_add_tasks, workspace_root=workspace_root),
             timeout=240.0  # 4 minute timeout for architecture planning
         )
         # Adapter: ensure MCP contract compliance (Pydantic expects str)
@@ -252,6 +276,7 @@ async def qwen_architect(
         return f"❌ Error: Architect failed - {str(e)}"
 
 @mcp.tool()
+@telemetry_gate("sparring")
 async def qwen_sparring(
     mode: str = "sparring2",
     topic: str = "",
@@ -281,7 +306,6 @@ async def qwen_sparring(
     Returns:
         Sparring session transcript with analysis
     """
-    await _auto_init_request(ctx, "sparring")
     project_id = _get_tool_session_id(ctx, default_source="sparring")
     
     # Extract workspace_root from MCP context
@@ -309,6 +333,7 @@ async def qwen_sparring(
     return await generate_sparring(topic, context, session_id, mode, ctx=ctx, project_id=project_id, workspace_root=workspace_root)
 
 @mcp.tool()
+@telemetry_gate("swarm")
 async def qwen_swarm(
     prompt: str,
     task_type: str = "general",
@@ -328,7 +353,6 @@ async def qwen_swarm(
     Returns:
         Synthesized swarm analysis report
     """
-    await _auto_init_request(ctx, "swarm")
     project_id = _get_tool_session_id(ctx, default_source="swarm")
     
     # Report progress FIRST (before any broadcast_state to avoid double-response)
@@ -348,6 +372,7 @@ async def qwen_swarm(
     return await generate_swarm(prompt, task_type, ctx, project_id=project_id)
 
 @mcp.tool()
+@telemetry_gate("sos_sync")
 async def qwen_sync_state(
     apply: bool = False,
     decision_id: str = None,
@@ -370,7 +395,6 @@ async def qwen_sync_state(
     Returns:
         Synchronization status and results
     """
-    await _auto_init_request(ctx, "sos_sync")
     project_id = _get_tool_session_id(ctx, default_source="sos_sync")
     
     # Report progress FIRST
@@ -388,6 +412,7 @@ async def qwen_sync_state(
 
 
 @mcp.tool()
+@telemetry_gate("add_task")
 async def qwen_add_task(
     task_name: str,
     advice: str,
@@ -419,7 +444,6 @@ async def qwen_add_task(
     Returns:
         Confirmation message with decision_id
     """
-    await _auto_init_request(ctx, "add_task")
     project_id = _get_tool_session_id(ctx, default_source="add_task")
     
     # Report progress FIRST
@@ -446,6 +470,7 @@ async def qwen_add_task(
 
 
 @mcp.tool()
+@telemetry_gate("add_tasks")
 async def qwen_add_tasks(
     tasks: List[Dict[str, Any]],
     workspace_root: str = ".",
@@ -476,7 +501,6 @@ async def qwen_add_tasks(
     Returns:
         Confirmation message with count of added tasks
     """
-    await _auto_init_request(ctx, "add_tasks")
     project_id = _get_tool_session_id(ctx, default_source="add_tasks")
     
     # Report progress FIRST
@@ -522,6 +546,7 @@ async def qwen_add_tasks(
 
 
 @mcp.tool()
+@telemetry_gate("refresh")
 async def qwen_refresh_models(ctx: Context = None) -> str:
     """
     🔄 REFRESH MODELS: Syncs model registry with DashScope and HuggingFace.
@@ -530,7 +555,6 @@ async def qwen_refresh_models(ctx: Context = None) -> str:
     Returns:
         Status of registry refresh from both sources
     """
-    await _auto_init_request(ctx, "refresh")
     project_id = _get_tool_session_id(ctx, default_source="refresh")
     
     if ctx:
@@ -549,6 +573,7 @@ async def qwen_refresh_models(ctx: Context = None) -> str:
     return f"DashScope: {ds_res}\nHugging Face: {hf_res}"
 
 @mcp.tool()
+@telemetry_gate("list_available_models")
 async def qwen_list_available_models() -> str:
     """
     📋 LIST MODELS: Returns all available models from the registry.
@@ -560,6 +585,7 @@ async def qwen_list_available_models() -> str:
     return await list_available_models()
 
 @mcp.tool()
+@telemetry_gate("set_model")
 async def qwen_set_model(
     role: str,
     model_id: str
@@ -578,6 +604,7 @@ async def qwen_set_model(
     return await set_model_in_registry(role, model_id)
 
 @mcp.tool()
+@telemetry_gate("set_billing_mode")
 async def qwen_set_billing_mode(
     mode: str
 ) -> str:
@@ -598,6 +625,7 @@ async def qwen_set_billing_mode(
     return await set_billing_mode(mode)
 
 @mcp.tool()
+@telemetry_gate("get_billing_mode")
 async def qwen_get_billing_mode() -> str:
     """
     💰 GET BILLING MODE: Returns current billing configuration.
@@ -608,6 +636,7 @@ async def qwen_get_billing_mode() -> str:
     return await get_current_billing_mode()
 
 @mcp.tool()
+@telemetry_gate("read_file")
 async def qwen_read_file(
     path: str
 ) -> str:
@@ -623,6 +652,7 @@ async def qwen_read_file(
     return await read_repo_file(path)
 
 @mcp.tool()
+@telemetry_gate("list_files")
 async def qwen_list_files(
     directory: str = ".",
     pattern: str = "**/*"
@@ -640,6 +670,7 @@ async def qwen_list_files(
     return await list_repo_files(directory, pattern)
 
 @mcp.tool()
+@telemetry_gate("usage_report")
 async def qwen_usage_report() -> str:
     """
     📊 USAGE REPORT: Generates token usage and cost summary.
@@ -649,25 +680,14 @@ async def qwen_usage_report() -> str:
     """
     return await generate_usage_report()
 
-@mcp.tool()
-async def qwen_init_request(ctx: Context = None) -> str:
-    """
-    ⚡ INITIALIZE NEW REQUEST: Resets 'This Prompt' token counter and buffers in the HUD.
-    MANDATORY: Call this as your FIRST tool at the start of EVERY new user prompt/task.
-    Failure to call this results in incorrect token accumulation in telemetry.
-    """
-    broadcaster = get_broadcaster()
-    project_id = _get_tool_session_id(ctx, default_source="init")
-    await broadcaster.start_request(project_id=project_id)
-    return f"OK: {project_id}"
 
 @mcp.tool()
+@telemetry_gate("heal")
 async def qwen_heal_registry(ctx: Context = None) -> str:
     """
     ⚡ SELF-HEALING: Analyzes available models and maps them to roles based on ROI and SOTA status.
     Use this if tools report 'Model not found' or if you want to upgrade to the latest versions.
     """
-    await _auto_init_request(ctx, "heal")
     project_id = _get_tool_session_id(ctx, default_source="heal")
     
     if ctx:
@@ -684,6 +704,7 @@ async def qwen_heal_registry(ctx: Context = None) -> str:
     return await client.heal_registry()
 
 @mcp.tool()
+@telemetry_gate("context_init")
 async def qwen_init_context_tool(
     workspace_root: str = ".",
     ctx: Context = None
@@ -711,7 +732,6 @@ async def qwen_init_context_tool(
     Example:
         qwen_init_context_tool(workspace_root=".")
     """
-    await _auto_init_request(ctx, "context_init")
     project_id = _get_tool_session_id(ctx, default_source="context_init")
     
     if ctx:
@@ -726,6 +746,7 @@ async def qwen_init_context_tool(
     return await qwen_init_context(workspace_root, ctx)
 
 @mcp.tool()
+@telemetry_gate("session_context")
 async def qwen_update_session_context_tool(
     session_summary: str,
     workspace_root: str = ".",
@@ -754,7 +775,6 @@ async def qwen_update_session_context_tool(
             workspace_root="."
         )
     """
-    await _auto_init_request(ctx, "session_context")
     project_id = _get_tool_session_id(ctx, default_source="session_context")
     
     if ctx:
@@ -769,6 +789,7 @@ async def qwen_update_session_context_tool(
     return await qwen_update_session_context(session_summary, workspace_root, ctx)
 
 @mcp.tool()
+@telemetry_gate("list_tasks")
 async def qwen_list_tasks_tool(
     status: str = "pending",
     tags: str = None,
@@ -789,6 +810,7 @@ async def qwen_list_tasks_tool(
     return await qwen_list_tasks(status=status, tags=tags_list, workspace_root=workspace_root)
 
 @mcp.tool()
+@telemetry_gate("get_task")
 async def qwen_get_task_tool(
     decision_id: str,
     workspace_root: str = "."
@@ -806,6 +828,7 @@ async def qwen_get_task_tool(
     return await qwen_get_task(decision_id=decision_id, workspace_root=workspace_root)
 
 @mcp.tool()
+@telemetry_gate("update_task")
 async def qwen_update_task_tool(
     decision_id: str,
     new_status: str,
@@ -825,6 +848,7 @@ async def qwen_update_task_tool(
     return await qwen_update_task(decision_id=decision_id, new_status=new_status, workspace_root=workspace_root)
 
 @mcp.tool()
+@telemetry_gate("diff_audit")
 async def qwen_diff_audit_tool(
     from_ref: str = "HEAD~1",
     to_ref: str = "HEAD",
@@ -856,6 +880,7 @@ async def qwen_diff_audit_tool(
     return json.dumps(result, indent=2)
 
 @mcp.tool()
+@telemetry_gate("diff_audit_staged")
 async def qwen_diff_audit_staged_tool(
     baseline_snapshot: str = None,
     shadow_mode: bool = False,
@@ -881,6 +906,7 @@ async def qwen_diff_audit_staged_tool(
     return json.dumps(result, indent=2)
 
 @mcp.tool()
+@telemetry_gate("create_baseline")
 async def qwen_create_baseline_tool(
     name: Optional[str] = "auto",
     workspace_root: str = "."
@@ -898,6 +924,7 @@ async def qwen_create_baseline_tool(
     return await qwen_create_baseline(name=name, workspace_root=workspace_root)
 
 @mcp.tool()
+@telemetry_gate("compare_snapshots")
 async def qwen_compare_snapshots_tool(
     snapshot1_name: Optional[str] = "auto",
     snapshot2_name: Optional[str] = "auto",
@@ -923,6 +950,7 @@ async def qwen_compare_snapshots_tool(
     return json.dumps(result, indent=2)
 
 @mcp.tool()
+@telemetry_gate("audit_history")
 async def qwen_audit_history_tool(
     limit: int = 100,
     workspace_root: str = "."

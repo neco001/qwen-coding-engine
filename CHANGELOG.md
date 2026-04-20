@@ -1,5 +1,256 @@
 # CHANGELOG
 
+## SOS Sync - 2026-04-20 22:54:40
+
+## [2026-04-20 20:48:32] fb9486ca-39f2-4c0f-8cb1-5537c45d21b3
+
+**Task**: ALG-06-01: Implementacja wzorców telefonów w ExtractionEngine
+
+**Advice**: Dodaj phone_pattern do ExtractionEngine.__init__ obsługujący formaty xxx-xxx-xxx, xxx xxx xxx oraz xxxxxxxxx. Faza 4.3. TDD RED.
+
+---
+
+## [2026-04-20 20:48:32] d03f8a96-fece-411f-8a0b-a0d631e212fd
+
+**Task**: ALG-06-02: Walidacja prefiksów polskich operatorów GSM
+
+**Advice**: Zaimplementuj walidację prefiksów operatorów (5xx, 6xx, 7xx, 8xx) po ekstrakcji numeru. Zintegruj z _audit_result. Faza 4.3. TDD GREEN.
+
+---
+
+## [2026-04-20 20:48:32] 6fae1c99-ff63-45cc-9f05-cdf16731e879
+
+**Task**: SEC-DUP-01: Detekcja duplikatów plików po hashu
+
+**Advice**: Dodaj mechanizm ostrzegania w UI (EncryptionView), jeśli plik o danym hashu został już przetworzony (sprawdzenie w DB). Faza 4.4. UX Safety.
+
+---
+
+## [2026-04-20 20:48:32] 9a5c5aed-e103-4047-86cb-09c0c1c898ec
+
+**Task**: LOG-HASH-01: Indeksowanie PII za pomocą skrótów SHA256
+
+**Advice**: Zaktualizuj manager.py i logikę logowania, aby przechowywać hasze SHA256 pełnych danych PII dla celów wyszukiwania (RODO-safe indexing). Faza 4.4. Privacy.
+
+---
+
+## 2026-04-20 19:34 - 017c63b2-fb58-4844-82b6-6fd3ff3f952b
+
+**Task**: Implement IdentityScoringEngine in src/core/logic/scoring.py.
+The class should:
+1. Initialize with db_path.
+2. async _get_word_stats(word: str) -> Dict[str, int]:
+   - SELECT name_m_count, name_f_coun
+
+**Status**: ✅ Completed
+
+---
+
+## 2026-04-20 19:33 - 3017bec1-79f9-4bef-bc3a-1c6e01b6fc70
+
+**Task**: Write a pytest test for IdentityScoringEngine class in src/core/logic/scoring.py.
+The test should:
+1. Mock the name_stats database connection.
+2. Test vote(candidate_words: List[str]) -> Tuple[str, st
+
+**Status**: ✅ Completed
+
+---
+
+## 2026-04-20 19:26 - 52a7b43d-cf97-4118-875b-6a4394359dd8
+
+**Task**: Write a pytest test for DB initialization of 'name_stats' table in src/db/manager.py.
+The test should:
+1. Use init_db(db_path).
+2. Verify table 'name_stats' exists.
+3. Verify columns: word, name_m_cou
+
+**Status**: ✅ Completed
+
+---
+
+## 2026-04-20 19:24 - 96a7ef71-788e-4044-849e-e8b2724a1351
+
+**Task**: Implement TemplateEngine in src/core/logic/matcher.py.
+The class should:
+1. Initialize with db_path.
+2. match(fingerprint: str) -> Optional[Dict[str, str]]:
+   - Open async connection to db.
+   - Sele
+
+**Status**: ✅ Completed
+
+---
+
+## 2026-04-20 19:23 - ecac4173-5b32-4a3a-9b84-117da1989a74
+
+**Task**: Write a pytest test for TemplateEngine class in src/core/logic/matcher.py.
+The test should:
+1. Mock the database connection (aiosqlite).
+2. Test match(fingerprint) -> returns regex_map or None.
+3. Tes
+
+**Status**: ✅ Completed
+
+---
+
+## 2026-04-20 19:21 - ef2ebde9-2e9d-4601-b11c-c4c9cf0a514b
+
+**Task**: Write a pytest test for DB initialization of 'extraction_templates' table in src/db/manager.py.
+The test should:
+1. Use init_db(db_path).
+2. Verify table 'extraction_templates' exists.
+3. Verify colum
+
+**Status**: ✅ Completed
+
+---
+
+## 2026-04-20 19:19 - 5fff3972-48fc-4815-ab71-1a9430965438
+
+**Task**: Implement FingerprintService in src/core/logic/fingerprinting.py.
+The class should:
+1. Have a method generate(text: str) -> str.
+2. Normalize input:
+   - Convert to lowercase.
+   - Replace all digits 
+
+**Status**: ✅ Completed
+
+---
+
+## 2026-04-20 19:18 - de6f4e15-ef4e-4af1-8d19-a303791e4dc0
+
+**Task**: Write a pytest test for FingerprintService in src/core/logic/fingerprinting.py.
+The test should:
+1. Verify that "Patient John Doe, Date: 2024-05-10" and "Patient Anna Smith, Date: 2025-06-11" produce 
+
+**Status**: ✅ Completed
+
+---
+
+## 2026-04-20 19:16 - c7fc5b86-24c4-425f-9bed-df200e221f96
+
+**Task**: Implement RawExtractor in src/core/extraction/raw.py.
+The class should:
+1. Have a method extract(file_path: Path) -> str.
+2. Use fitz (PyMuPDF) to open the document.
+3. Iterate through pages but STOP 
+
+**Status**: ✅ Completed
+
+---
+
+## 2026-04-20 19:15 - 5fc4b38e-4f10-4699-8750-068e18059c42
+
+**Task**: Write a pytest test for RawExtractor class in src/core/extraction/raw.py.
+The test should:
+1. Use 'badania_example.pdf' from '.DOC' directory.
+2. Call RawExtractor.extract(path).
+3. Assert the result 
+
+**Status**: ✅ Completed
+
+---
+
+## 2026-04-20 19:13 - e29fc715-0971-4982-8c43-c51eae1b27a2
+
+**Task**: Write a pytest test for DB initialization of 'extraction_buffer' table in src/db/manager.py.
+The test should:
+1. Use a temporary in-memory or file-based SQLite database.
+2. Call init_db(db_path).
+3. V
+
+**Status**: ✅ Completed
+
+---
+
+## 2026-04-20 19:06 - 083c2391-1f02-4160-b467-c9711fb19b75
+
+**Task**: Implement AsyncBatchLoader in src/core/ingestion.py to pass the tests.
+The class should:
+1. Accept file_paths in __init__.
+2. Have async scan_batch(on_progress_callback) method.
+3. Use asyncio.Semapho
+
+**Status**: ✅ Completed
+
+---
+
+## 2026-04-20 19:05 - 0210a84e-6114-426a-9d52-c13d3d5e3ef2
+
+**Task**: Write a pytest test for AsyncBatchLoader class. 
+The class should:
+1. Accept a list of file paths.
+2. Have an async method 'scan_batch(on_progress_callback=None)' that processes files.
+3. Call the cal
+
+**Status**: ✅ Completed
+
+---
+
+## SOS Sync - 2026-04-20 18:58:46
+
+## [2026-04-20 16:50:33] 70196c00-d530-44b5-8888-e2568bec0cfb
+
+**Task**: Refaktoryzacja server.py: Automatyzacja telemetrii i usunięcie qwen_init_request
+
+**Advice**: Znajdź dekorator @mcp.tool() dla wszystkich funkcji. Zaimplementuj mechanizm (np. wspólny dekorator lub wywołanie _auto_init_request w każdej funkcji), który automatycznie resetuje telemetrię na starcie dowolnego narzędzia. Następnie usuń definicję i rejestrację narzędzia qwen_init_request.
+
+---
+
+## [2026-04-20 16:50:33] e7c070f8-17e2-4cf8-942f-263cf572ac0c
+
+**Task**: Weryfikacja logiki start_request w telemetry.py
+
+**Advice**: Upewnij się, że start_request poprawnie resetuje bufory HUDa i liczniki 'This Prompt'. Sprawdź, czy wielokrotne wywołania w krótkim odstępie czasu (łańcuch narzędzi) nie powodują niepożądanych efektów ubocznych w telemetrii.
+
+---
+
+## [2026-04-20 16:50:33] e8af572c-4ccb-4891-aa2b-bec61806d397
+
+**Task**: Aktualizacja dokumentacji: AGENTS.md i LACHMAN_PROTOCOL_ENFORCEMENT.md
+
+**Advice**: Usuń sekcje dotyczące ręcznego wywoływania qwen_init_request. Zaktualizuj opisy procesów, wskazując na pełną automatyzację inicjalizacji sesji po stronie serwera MCP.
+
+---
+
+## [2026-04-20 16:55:12] f6c0c826-5894-4c6c-8550-fbafd6c07d13
+
+**Task**: FIX: Naprawa izolacji workspace w qwen_architect i tools.py
+
+**Advice**: Zmodyfikuj sygnaturę generate_lp_blueprint, aby przyjmowała workspace_root. W server.py:qwen_architect przekaż ten parametr. Usuń wszystkie wystąpienia Path.cwd() jako default dla operacji na plikach projektu w tools.py.
+
+---
+
+## [2026-04-20 16:55:12] c3b302ef-f487-4909-8c09-078dfb2778b4
+
+**Task**: CLEANUP: Usunięcie obcych zadań z backlogu serwera
+
+**Advice**: Usuń z .PLAN/BACKLOG.md zadania dotyczące projektów zewnętrznych (Scoring Engine, Email Engine, Overseas, secureExamPDF). Przenieś je (jeśli możliwe) lub po prostu skasuj z repozytorium serwera.
+
+---
+
+## 2026-04-20 18:58 - d46241d9-a3f0-4291-9517-262f1820b162
+
+**Task**: Write a pytest-asyncio test for workspace root isolation in qwen_architect.
+The test should:
+1. Use a mocked DashScopeClient.
+2. Mock DecisionLogSyncEngine.
+3. Call qwen_architect with a non-standard 
+
+**Status**: ✅ Completed
+
+---
+
+## 2026-04-20 00:06 - f5234be9-1aad-40d0-87d8-93022d7a122d
+
+**Task**: Write a pytest test for: Append 'Filtered' to VALID_STATUSES in src/db_manager.py. The test should verify that calling add_offer with status='Filtered' and minimal data (just URL, title, company) does
+
+**Status**: ✅ Completed
+
+---
+
 ## 2026-04-19 12:44 - 9f5eba54-7c39-4595-857b-117068ad0a1e
 
 **Task**: Refactor src/job_hunter.py and scrapers/LinkedIn_Scraper/fetch_linkedin.py to integrate LinkedIn scraping into the main hunt flow. 
