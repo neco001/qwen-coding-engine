@@ -489,12 +489,6 @@ Przed commit:
         This prevents corruption if the process is interrupted during write.
         Matches the pattern from SessionStore.save().
         """
-        parent_dir = path.parent
-        # Write to temp file first
-        fd, temp_path = tempfile.mkstemp(
-            suffix=".tmp",
-            dir=str(parent_dir)
-        )
         try:
             old_content = path.read_text(encoding="utf-8")
             old_sections = self._parse_markdown_sections(old_content)

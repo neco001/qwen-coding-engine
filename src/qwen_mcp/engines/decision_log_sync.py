@@ -767,7 +767,7 @@ class DecisionLogSyncEngine:
         adr_link: Optional[str]
     ) -> None:
         """Helper to log architectural decisions to BACKLOG.md under a Decisions section."""
-        backlog_path = Path(".PLAN/BACKLOG.md")
+        backlog_path = DEFAULT_SOS_PATHS.get_backlog_path()
         
         if not backlog_path.exists():
             backlog_path.parent.mkdir(parents=True, exist_ok=True)
@@ -776,25 +776,37 @@ class DecisionLogSyncEngine:
             with open(backlog_path, 'r', encoding='utf-8') as f:
                 backlog_content = f.read()
         
-        # Add decision entry
+        # Add decision entry with rich details
         refs = []
         if blueprint_ref:
-            refs.append(f"blueprint: {blueprint_ref}")
+            # If blueprint is long, we might truncate it in the summary but keep full ref
+            refs.append(f"blueprint: {blueprint_ref[:100]}...")
         if adr_link:
             refs.append(f"adr: {adr_link}")
-        ref_str = f" ({', '.join(refs)})" if refs else ""
         
-        decision_line = f"- [x] DECISION: {decision_description[:200]}{ref_str} - {decision_id}\n"
+        timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        rich_decision = f"### [{timestamp_str}] DECISION: {decision_description}\n"
+        rich_decision += f"- **Decision ID**: `{decision_id}`\n"
+        
+        if adr_link:
+            rich_decision += f"- **ADR Document**: [{adr_link}](file:///{adr_link})\n"
+            
+        if blueprint_ref:
+            # We wrap the blueprint in a details tag for collapsible UI in GitHub/VSCode
+            rich_decision += f"<details>\n<summary>View Architectural Blueprint</summary>\n\n{blueprint_ref}\n\n</details>\n"
+        
+        rich_decision += "\n---\n\n"
         
         # Try to insert after "## Decisions" section
         decision_pattern = r'(## Decisions\n)'
         match = re.search(decision_pattern, backlog_content)
         if match:
             insert_pos = match.end()
-            backlog_content = backlog_content[:insert_pos] + "\n" + decision_line + backlog_content[insert_pos:]
+            backlog_content = backlog_content[:insert_pos] + "\n" + rich_decision + backlog_content[insert_pos:]
         else:
             # No Decisions section - create one
-            backlog_content += "\n## Decisions\n\n" + decision_line
+            backlog_content += "\n## Decisions\n\n" + rich_decision
         
         # Atomic write
         fd, tmp_path = tempfile.mkstemp(suffix=".md", dir=str(backlog_path.parent))

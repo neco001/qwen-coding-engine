@@ -10,7 +10,7 @@
 
 By offloading heavy architectural planning and raw coding to specialized Qwen models, you stop the "two steps forward, one step back" dance and start delivering finished applications.
 
-**Version:** 1.2.0 | **License:** MIT | **Python:** 3.10+
+**Version:** 1.2.1 | **License:** MIT | **Python:** 3.10+
 
 **[ See the Lachman Protocol Storyboard in action!](./docs/EXAMPLE.md)**
 
@@ -642,6 +642,8 @@ Don't waste time manually editing config files. Just copy the prompt from **[INS
 ---
 **License: MIT** 
 **Build apps, not just conversations.**
+
+*Latest Release: [v1.2.1 - Context & Telemetry Stabilization](./RELEASE_NOTES_v1.2.1.md)*
 
 ---
 

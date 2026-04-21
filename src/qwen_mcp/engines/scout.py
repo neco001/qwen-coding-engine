@@ -2,10 +2,12 @@
 Scout Engine - Centralized Task Complexity & Routing Analysis
 """
 
-import logging
+import os
 import re
+import logging
 import json
-from typing import Optional, Dict, Any, Tuple
+from pathlib import Path
+from typing import Optional, Dict, Any, Tuple, List
 from qwen_mcp.api import DashScopeClient
 from qwen_mcp.registry import registry
 
@@ -95,3 +97,52 @@ Rules:
         if word_count > 200: return "high"
         if word_count > 50: return "medium"
         return "low"
+
+    async def deep_discovery(self, workspace_root: str) -> str:
+        """
+        Autonomous context discovery. Scans for .context files, config files, and project structure.
+        """
+        root = Path(workspace_root)
+        discovery_log = ["## 🔍 Scout Deep Discovery Report\n"]
+        
+        # 1. Check for .context directory
+        context_dir = root / ".context"
+        if context_dir.exists() and context_dir.is_dir():
+            discovery_log.append("### 📁 Context Files Found:")
+            for cf in context_dir.glob("*.md"):
+                try:
+                    content = cf.read_text(encoding='utf-8')
+                    # Snippet of content
+                    discovery_log.append(f"#### {cf.name}\n{content[:1000]}...\n")
+                except Exception as e:
+                    discovery_log.append(f"#### {cf.name} (Error reading: {e})")
+        else:
+            discovery_log.append("> No .context/ directory found. Sourcing from root structure.\n")
+
+        # 2. Check for key config files
+        config_files = ["pyproject.toml", "package.json", "requirements.txt", "setup.py", "docker-compose.yml", ".env.example", "AGENTS.md"]
+        found_configs = []
+        for cfg in config_files:
+            cfg_path = root / cfg
+            if cfg_path.exists():
+                found_configs.append(cfg)
+                try:
+                    content = cfg_path.read_text(encoding='utf-8')
+                    discovery_log.append(f"### ⚙️ Config: {cfg}\n```\n{content[:500]}\n```\n")
+                except:
+                    pass
+        
+        if not found_configs:
+            discovery_log.append("> No standard config files detected in root.\n")
+
+        # 3. Quick Tree Discovery (Top-level dirs)
+        try:
+            items = os.listdir(workspace_root)
+            dirs = [d for d in items if os.path.isdir(os.path.join(workspace_root, d)) and not d.startswith('.')]
+            files = [f for f in items if os.path.isfile(os.path.join(workspace_root, f)) and not f.startswith('.')]
+            discovery_log.append(f"### 🌳 Project Structure:\n- **Directories**: {', '.join(dirs[:15])}{'...' if len(dirs) > 15 else ''}")
+            discovery_log.append(f"- **Root Files**: {', '.join(files[:15])}{'...' if len(files) > 15 else ''}")
+        except Exception as e:
+            discovery_log.append(f"### 🌳 Project Structure (Discovery Error: {e})")
+
+        return "\n".join(discovery_log)

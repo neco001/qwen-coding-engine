@@ -73,41 +73,55 @@ async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: O
     client = DashScopeClient()
     scout = ScoutEngine(client)
     
-    # 0. DETERMINE WORKSPACE ROOT (Harden against contamination)
-    from urllib.parse import urlparse
-    from pathlib import Path
+    # 0. DETERMINE WORKSPACE ROOT (Tiered Detection - FF-03+)
+    # Tier 1: Explicit environment override
+    workspace_root = os.environ.get("QWEN_WORKSPACE_ROOT") or workspace_root
+    
+    # Tier 2: MCP Session Context Metadata
     if not workspace_root:
         if ctx and hasattr(ctx, 'request_context') and ctx.request_context:
             try:
                 session = ctx.request_context.session
-                # Try multiple attribute names for compatibility
+                # Priority list of attributes to check for the workspace root
                 for attr in ('root_uri', 'workspaceUri', 'workspace_root'):
                     workspace_uri = getattr(session, attr, None)
                     if workspace_uri:
                         parsed = urlparse(workspace_uri)
                         if parsed.scheme == 'file' and parsed.path:
-                            # Normalize path (handle Windows /C:/ and Unix /path)
                             path_str = parsed.path
+                            # Normalize Windows paths
                             if os.name == 'nt' and path_str.startswith('/') and len(path_str) > 2 and path_str[2] == ':':
                                 path_str = path_str[1:]
                             candidate = Path(path_str)
                             if candidate.exists():
                                 workspace_root = str(candidate.resolve())
                                 break
-            except Exception:
-                pass
-    
+            except Exception as e:
+                logger.debug(f"Metadata discovery failed: {e}")
+
+    # Tier 3: Fallback to CWD with Sanity Check
     if not workspace_root:
-        # Fallback to CWD only if not in server mode
+        cwd = Path.os.getcwd()
+        # In server mode, we only trust CWD if it looks like a project root
         if os.environ.get("QWEN_ENV") == "server":
-             raise ValueError("CRITICAL: workspace_root could not be determined. Refusing to default to server CWD.")
-        workspace_root = os.getcwd()
-        logger.warning(f"No workspace_root provided. Falling back to CWD: {workspace_root}")
+            is_valid_root = (Path(cwd) / ".git").exists() or (Path(cwd) / ".context").exists() or (Path(cwd) / "pyproject.toml").exists()
+            if not is_valid_root:
+                logger.error(f"CRITICAL: CWD {cwd} does not look like a project root. Architect may fail.")
+                # We still allow it but with a heavy warning instead of hard crash
+        workspace_root = str(cwd)
+        logger.info(f"Workspace root resolved to CWD: {workspace_root}")
 
     # Extract project_id for telemetry
     project_id = "default"
     
-    # 0. Initial Sizing with heartbeat protection
+    # 0. Initial Sourcing / Deep Discovery (FF-03)
+    if not context or len(context) < 100:
+        if ctx:
+            await ctx.report_progress(progress=5, total=None, message="Scouting autonomous context (FF-03)...")
+        discovery_data = await scout.deep_discovery(workspace_root)
+        context = (context or "") + "\n\n" + discovery_data
+
+    # 1. Initial Sizing with heartbeat protection
     try:
         scout_res = await scout.analyze_task(
             goal, context or "", task_hint="strategy/architecture",
@@ -219,7 +233,14 @@ async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: O
 
                 # Add tasks to backlog
                 if tasks_to_add:
-                    await sync_engine.add_tasks(tasks=tasks_to_add, backlog_path=backlog_path, workspace_root=workspace_root, session_id=project_id, decision_type="auto_task")
+                    await sync_engine.add_tasks(
+                        tasks=tasks_to_add, 
+                        backlog_path=backlog_path, 
+                        workspace_root=workspace_root, 
+                        session_id=project_id, 
+                        decision_type="auto_task",
+                        depends_on_adr=[master_decision_id]
+                    )
             except Exception as e:
                 logger.warning(f"auto_add_tasks failed: {e}")
         
@@ -314,9 +335,10 @@ async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: O
             # Auto-add tasks to backlog if enabled
             if auto_add_tasks:
                 try:
-                    # Determined earlier in hardened block
-                    # workspace_root = str(Path.cwd())
-                    # ...
+                    # Fix UnboundLocalError by initializing engine/paths properly
+                    decision_log_path = DEFAULT_SOS_PATHS.get_decision_log_path(workspace_root)
+                    backlog_path = DEFAULT_SOS_PATHS.get_backlog_path(workspace_root)
+                    sync_engine = DecisionLogSyncEngine(decision_log_path)
 
                     # Master Decision Logging
                     master_decision_id = await sync_engine.log_decision(
@@ -342,13 +364,20 @@ async def generate_lp_blueprint(goal: str, context: Optional[str] = None, ctx: O
                                 "task_name": task.get("task", f"Unnamed task {task.get('id', 'unknown')}"),
                                 "advice": enriched_advice,
                                 "complexity": str(task.get("priority", 5)),
-                                "tags": ["auto-generated", "lp-blueprint", f"master:{master_decision_id[:8]}"],
+                                "tags": ["auto-generated", "lp-blueprint", "greenfield", f"master:{master_decision_id[:8]}"],
                                 "risk_score": 0.0
                             })
 
-                    # Add tasks to backlog
+                    # Add tasks to backlog with explicit dependency
                     if tasks_to_add:
-                        await sync_engine.add_tasks(tasks=tasks_to_add, backlog_path=backlog_path, workspace_root=workspace_root, session_id=project_id, decision_type="auto_task")
+                        await sync_engine.add_tasks(
+                            tasks=tasks_to_add, 
+                            backlog_path=backlog_path, 
+                            workspace_root=workspace_root, 
+                            session_id=project_id, 
+                            decision_type="auto_task",
+                            depends_on_adr=[master_decision_id]
+                        )
                 except Exception as e:
                     logger.warning(f"auto_add_tasks failed: {e}. Blueprint returned without tasks.")
             return blueprint_raw + swarm_section
@@ -1254,7 +1283,8 @@ async def qwen_update_task(
     
     # Find and update the task in BACKLOG.md
     import re
-    task_pattern = rf"(- \[) ([ x]) (\] .+? - {re.escape(decision_id)})"
+    # BUGFIX: Removed literal spaces between capture groups that prevented standard checkbox matching
+    task_pattern = rf"(- \[)([ x])(\]\s+.+?\s*-\s*{re.escape(decision_id)})"
     
     def replace_status(match):
         checkbox = "[x]" if new_status == "completed" else "[ ]"
